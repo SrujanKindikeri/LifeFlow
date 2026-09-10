@@ -1,0 +1,44 @@
+import mongoose, { Document, Model, Schema } from 'mongoose'
+import { DEFAULT_SECTIONS, type DashboardSectionId } from '@/lib/dashboardSections'
+
+// Re-export for server-side callers that import from this module
+export { DEFAULT_SECTIONS, type DashboardSectionId }
+
+export interface IDashboardSection {
+  id: DashboardSectionId
+  visible: boolean
+  order: number
+}
+
+export interface IDashboardPreference extends Document {
+  _id: mongoose.Types.ObjectId
+  userId: mongoose.Types.ObjectId
+  sections: IDashboardSection[]
+  createdAt: Date
+  updatedAt: Date
+}
+
+const DashboardSectionSchema = new Schema<IDashboardSection>(
+  {
+    id:      { type: String, required: true },
+    visible: { type: Boolean, default: true },
+    order:   { type: Number, required: true },
+  },
+  { _id: false }
+)
+
+const DashboardPreferenceSchema = new Schema<IDashboardPreference>(
+  {
+    userId:   { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    sections: { type: [DashboardSectionSchema], default: DEFAULT_SECTIONS },
+  },
+  { timestamps: true }
+)
+
+DashboardPreferenceSchema.index({ userId: 1 }, { unique: true })
+
+const DashboardPreference: Model<IDashboardPreference> =
+  mongoose.models.DashboardPreference ||
+  mongoose.model<IDashboardPreference>('DashboardPreference', DashboardPreferenceSchema)
+
+export default DashboardPreference
