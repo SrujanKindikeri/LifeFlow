@@ -1,0 +1,88 @@
+# ============================================================
+# LifeFlow — docker-compose.yml
+# Local development with Docker
+# ============================================================
+#
+# Usage:
+#   docker compose up
+#
+# With a local MongoDB instance:
+#   docker compose --profile local-mongo up
+#
+# With MongoDB Atlas (recommended):
+#   Set MONGODB_URI in .env.local pointing to your Atlas cluster.
+#   docker compose up   (the local mongo service won't start)
+#
+# The application will be available at http://localhost:3000
+# ============================================================
+
+services:
+
+  # ── LifeFlow application ─────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    ports:
+      - "3000:3000"
+    environment:
+      # Required — either set these here or in .env.local
+      # (docker compose automatically loads .env.local)
+      MONGODB_URI:       ${MONGODB_URI}
+      SESSION_SECRET:    ${SESSION_SECRET}
+      SCHEDULER_SECRET:  ${SCHEDULER_SECRET:-}
+      CRON_SECRET:       ${CRON_SECRET:-}
+
+      # Storage provider (default: mongodb — no extra setup)
+      STORAGE_PROVIDER:  ${STORAGE_PROVIDER:-mongodb}
+
+      # OCR provider (default: auto — uses tesseract if no API key set)
+      OCR_PROVIDER:         ${OCR_PROVIDER:-auto}
+      GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY:-}
+
+      # Public vars
+      NEXT_PUBLIC_APP_URL:  ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_CURRENCY: ${NEXT_PUBLIC_CURRENCY:-INR}
+
+      # App defaults
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Kolkata}
+      LOG_LEVEL:        ${LOG_LEVEL:-info}
+
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+        required: false  # Only required when using the local-mongo profile
+
+  # ── Local MongoDB (optional) ─────────────────────────────────
+  # Only starts when you run: docker compose --profile local-mongo up
+  # In production, use MongoDB Atlas instead.
+  mongo:
+    image: mongo:7.0
+    profiles:
+      - local-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: lifeflow
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+    driver: local

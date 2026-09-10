@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        # Provide stub values for required env vars so next build succeeds in CI.
+        # These are NOT real secrets — they are only used to satisfy validation
+        # during the build step. Real secrets are never stored in the repository.
+        env:
+          MONGODB_URI:           "mongodb://localhost:27017/lifeflow-ci"
+          SESSION_SECRET:        "ci-stub-session-secret-at-least-32-characters-long"
+          NEXT_PUBLIC_APP_URL:   "http://localhost:3000"
+          NEXT_PUBLIC_CURRENCY:  "INR"
+          # Disable Next.js telemetry in CI
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+      - name: Check standalone output exists
+        run: |
+          if [ ! -f ".next/standalone/server.js" ]; then
+            echo "ERROR: .next/standalone/server.js not found — standalone build failed"
+            exit 1
+          fi
+          echo "Standalone build OK — server.js present"
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    # Only run Docker build on main branch pushes to avoid slow PR checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false   # build-only in CI; push to registry in a separate deploy workflow
+          tags: lifeflow:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_TELEMETRY_DISABLED=1
