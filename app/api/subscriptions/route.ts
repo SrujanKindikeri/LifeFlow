@@ -5,6 +5,7 @@ import Subscription from '@/models/Subscription'
 import Activity from '@/models/Activity'
 import { rupeesToPaise, paiseToRupees } from '@/lib/moneyCalculator'
 import { runSubscriptionScheduler } from '@/lib/subscriptionScheduler'
+import logger from '@/lib/logger'
 import { z } from 'zod'
 
 const subSchema = z.object({
@@ -77,9 +78,11 @@ export async function GET(req: NextRequest) {
 
     // Piggyback: run the scheduler in the background so subscriptions are
     // processed whenever a user opens the Subscriptions page.
-    // We use a void fire-and-forget — errors are logged but never surfaced.
-    void runSubscriptionScheduler().catch((err) =>
-      console.error('[subscriptions GET] background scheduler error:', err)
+    // Fire-and-forget — errors are logged but never surfaced to the caller.
+    void runSubscriptionScheduler().catch((err: unknown) =>
+      logger.error('[subscriptions GET] background scheduler error', {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
     )
 
     return NextResponse.json({
@@ -94,7 +97,7 @@ export async function GET(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[subscriptions GET]', error)
+    logger.error('[subscriptions GET]', { errorMessage: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: 'Failed to fetch subscriptions' }, { status: 500 })
   }
 }
@@ -128,7 +131,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[subscriptions POST]', error)
+    logger.error('[subscriptions POST]', { errorMessage: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: 'Failed to create subscription' }, { status: 500 })
   }
 }

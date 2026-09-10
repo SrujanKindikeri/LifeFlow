@@ -190,7 +190,6 @@ const ExpenseSchema = new Schema<IExpense>(
     paymentMethod: {
       type: String,
       enum: ['upi', 'cash', 'card', 'net_banking', 'wallet', 'other'],
-      default: null,
     },
 
     // Source tracking — personal expense vs. share from group bill vs. auto-generated subscription
@@ -202,18 +201,17 @@ const ExpenseSchema = new Schema<IExpense>(
     sourceGroupBillId: {
       type: Schema.Types.ObjectId,
       ref: 'GroupBill',
-      default: null,
     },
 
     // Subscription auto-expense — only present when source='subscription'
+    // NOTE: No default:null here — personal expenses must omit these fields
+    // entirely so the sparse unique index below does not include them.
     sourceSubscriptionId: {
       type: Schema.Types.ObjectId,
       ref: 'Subscription',
-      default: null,
     },
     subscriptionBillingDate: {
       type: String,   // YYYY-MM-DD
-      default: null,
     },
 
     // Smart Transaction Capture data — only present when added via screenshot
@@ -228,10 +226,21 @@ ExpenseSchema.index({ userId: 1, source: 1 })
 // Index to quickly find expenses with transaction proofs
 ExpenseSchema.index({ userId: 1, 'transactionCapture.proofs': 1 }, { sparse: true })
 // Unique idempotency key: one auto-expense per subscription per billing cycle.
-// sparse=true so the index only covers documents that have both fields set.
+// partialFilterExpression ensures the index ONLY covers documents where both
+// fields are present and non-null (i.e. source='subscription' expenses).
+// Personal and group-bill expenses never set these fields so they are
+// excluded from the index entirely — fixing the E11000 duplicate key error
+// that occurred when multiple personal expenses were created.
 ExpenseSchema.index(
   { sourceSubscriptionId: 1, subscriptionBillingDate: 1 },
-  { unique: true, sparse: true, name: 'subscription_billing_idempotency' }
+  {
+    unique: true,
+    partialFilterExpression: {
+      sourceSubscriptionId: { $exists: true, $type: 'objectId' },
+      subscriptionBillingDate: { $exists: true, $type: 'string' },
+    },
+    name: 'subscription_billing_idempotency',
+  }
 )
 
 const Expense: Model<IExpense> =

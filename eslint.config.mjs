@@ -14,16 +14,28 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   {
-    // Data-fetching pattern: useEffect(() => { void fetchFn() }, [fetchFn])
-    // is a well-established React pattern. The react-hooks/set-state-in-effect
-    // rule from the React Compiler config flags this as a false positive when
-    // the setState call is inside an async function called from the effect.
     rules: {
+      // Data-fetching pattern: useEffect(() => { void fetchFn() }, [fetchFn])
+      // is a well-established React pattern. The react-hooks/set-state-in-effect
+      // rule from the React Compiler config flags this as a false positive when
+      // the setState call is inside an async function called from the effect.
       "react-hooks/set-state-in-effect": "off",
+
+      // Allow parameters prefixed with _ to be unused.
+      // TypeScript interfaces may require named parameters even when unused
+      // (e.g. StorageAdapter.getSignedUrl(_fileId), OcrProvider.extract(_mimeType)).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_",
+          "caughtErrorsIgnorePattern": "^_"
+        }
+      ],
     },
     linterOptions: {
-      // Existing source files have eslint-disable comments for the rule we
-      // just turned off globally. Don't warn about them being unused.
+      // Existing source files have eslint-disable comments for rules we
+      // turned off globally. Don't warn about them being unused.
       reportUnusedDisableDirectives: false,
     },
   },

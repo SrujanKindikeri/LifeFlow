@@ -156,7 +156,6 @@ export function PersonalExpensesClient() {
   const pendingCaptureRef = useRef<TransactionCapture | null>(null)
   useEffect(() => { pendingCaptureRef.current = pendingCapture }, [pendingCapture])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!openNew) return
     if (draftIdParam) {
@@ -183,6 +182,8 @@ export function PersonalExpensesClient() {
     } else {
       setEditingExpense(null); setForm(defaultForm); setIsModalOpen(true)
     }
+  // draftIdParam and today are stable on mount; openNew is the actual trigger.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openNew])
 
   function handleModalClose() {
@@ -394,7 +395,12 @@ export function PersonalExpensesClient() {
         const res = await fetch(`/api/expenses/${editingExpense._id}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         })
-        if (!res.ok) throw new Error()
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { error?: string }
+          if (res.status === 401) throw new Error('session_expired')
+          if (res.status === 403) throw new Error('forbidden')
+          throw new Error(data.error ?? 'Failed to update expense')
+        }
         const data = await res.json()
         setExpenses((prev) => prev.map((e) => e._id === editingExpense._id ? data.expense : e))
         success('Expense updated')
@@ -402,7 +408,13 @@ export function PersonalExpensesClient() {
         const res = await fetch('/api/expenses', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         })
-        if (!res.ok) throw new Error()
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { error?: string }
+          if (res.status === 401) throw new Error('session_expired')
+          if (res.status === 400) throw new Error(data.error ?? 'Please check your inputs and try again.')
+          if (res.status === 409) throw new Error(data.error ?? 'A duplicate expense already exists.')
+          throw new Error(data.error ?? 'Unable to save the expense right now. Please try again.')
+        }
         const data = await res.json()
         setExpenses((prev) => [data.expense, ...prev])
         await draft.deleteDraft()
@@ -410,7 +422,18 @@ export function PersonalExpensesClient() {
         success(hasProof > 0 ? 'Expense added with transaction proof' : 'Expense added')
       }
       closeModal()
-    } catch { toastError('Failed to save expense') }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      if (msg === 'session_expired') {
+        toastError('Your session has expired. Please sign in again.')
+      } else if (msg === 'forbidden') {
+        toastError('You do not have permission to perform this action.')
+      } else if (msg) {
+        toastError(msg)
+      } else {
+        toastError('Failed to save expense. Please try again.')
+      }
+    }
     finally { setSaving(false) }
   }
 
@@ -419,10 +442,17 @@ export function PersonalExpensesClient() {
     setDeleting(true)
     try {
       const res = await fetch(`/api/expenses/${deleteTarget._id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Your session has expired. Please sign in again.')
+        if (res.status === 403) throw new Error('You do not have permission to delete this expense.')
+        if (res.status === 404) throw new Error('Expense not found.')
+        throw new Error('Failed to delete expense. Please try again.')
+      }
       setExpenses((prev) => prev.filter((e) => e._id !== deleteTarget._id))
       success('Expense deleted'); setDeleteTarget(null)
-    } catch { toastError('Failed to delete expense') }
+    } catch (err) {
+      toastError(err instanceof Error && err.message ? err.message : 'Failed to delete expense')
+    }
     finally { setDeleting(false) }
   }
 

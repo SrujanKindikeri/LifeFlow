@@ -1,0 +1,114 @@
+# ============================================================
+# LifeFlow — Example NGINX reverse proxy configuration
+# ============================================================
+#
+# Topology:
+#   Internet → HTTPS (443) → NGINX → LifeFlow container (port 3000) → MongoDB Atlas
+#
+# Usage:
+#   1. Copy to /etc/nginx/sites-available/lifeflow
+#   2. Replace YOUR_DOMAIN with your actual domain (e.g. app.lifeflow.com)
+#   3. Obtain a TLS certificate:
+#        sudo certbot --nginx -d YOUR_DOMAIN
+#   4. Enable the site:
+#        sudo ln -s /etc/nginx/sites-available/lifeflow /etc/nginx/sites-enabled/
+#        sudo nginx -t && sudo systemctl reload nginx
+#
+# Assumptions:
+#   - NGINX runs on the host (VM), LifeFlow runs in Docker on port 3000
+#   - TLS is managed by Certbot / Let's Encrypt
+#   - certbot populates the ssl_certificate lines below automatically
+# ============================================================
+
+# ── Redirect HTTP → HTTPS ─────────────────────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name YOUR_DOMAIN;
+
+    # Let's Encrypt ACME challenge (certbot uses this path)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS server ──────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name YOUR_DOMAIN;
+
+    # ── TLS certificates (populated by certbot) ───────────────
+    # ssl_certificate     /etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem;
+    # include             /etc/letsencrypt/options-ssl-nginx.conf;
+    # ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
+
+    # ── Security headers ──────────────────────────────────────
+    # Next.js already sets these via next.config.ts; keep NGINX
+    # copies as a defence-in-depth layer.
+    add_header X-Content-Type-Options    "nosniff"                   always;
+    add_header X-Frame-Options           "SAMEORIGIN"                always;
+    add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # ── Upload / body size ────────────────────────────────────
+    # Transaction screenshots: max 8 MB (matches MAX_BYTES in scan-upload route)
+    client_max_body_size 12m;
+
+    # ── Timeouts ──────────────────────────────────────────────
+    # OCR can take up to 25 seconds; set upstream timeouts accordingly.
+    proxy_read_timeout    60s;
+    proxy_connect_timeout 10s;
+    proxy_send_timeout    60s;
+
+    # ── Proxy headers (required for Next.js + iron-session) ───
+    # Trust the X-Forwarded-* headers forwarded by NGINX.
+    # Next.js reads these to set secure cookie flags correctly.
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+
+    # Prevent the browser from caching the original Host header
+    proxy_set_header Connection "";
+    proxy_http_version 1.1;
+
+    # ── Static assets — long cache ────────────────────────────
+    # Next.js fingerprints these files; safe to cache aggressively.
+    location /_next/static/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_cache_valid 200 365d;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # ── Public folder (favicon, robots.txt, etc.) ────────────
+    location /public/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_cache_valid 200 1d;
+        add_header Cache-Control "public, max-age=86400";
+    }
+
+    # ── Health check — no logging ─────────────────────────────
+    location = /api/health {
+        proxy_pass http://127.0.0.1:3000;
+        access_log off;
+    }
+
+    location = /api/ready {
+        proxy_pass http://127.0.0.1:3000;
+        access_log off;
+    }
+
+    # ── All other requests → Next.js app ─────────────────────
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+    }
+}

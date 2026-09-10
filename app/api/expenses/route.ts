@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import { expenseSchema } from '@/lib/validations'
 import Expense from '@/models/Expense'
+import logger from '@/lib/logger'
 
 // ─── Serialiser ───────────────────────────────────────────────────────────────
 
@@ -133,7 +134,11 @@ export async function GET(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[expenses GET]', error)
+    logger.error('[expenses GET] Failed to fetch expenses', {
+      route: 'GET /api/expenses',
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
     return NextResponse.json({ error: 'Failed to fetch expenses' }, { status: 500 })
   }
 }
@@ -153,7 +158,8 @@ export async function POST(req: NextRequest) {
     await connectDB()
 
     // Every manually-created expense is always 'personal'.
-    // paymentMethod and transactionCapture pass through from parsed.data.
+    // Subscription fields are intentionally omitted so the sparse/partial
+    // unique index on subscription_billing_idempotency does not include them.
     const expense = await Expense.create({
       ...parsed.data,
       userId,
@@ -165,7 +171,30 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[expenses POST]', error)
+
+    // Safe structured logging — never exposes secrets or raw DB details to client
+    const errorType = error instanceof Error ? error.constructor.name : typeof error
+    const errorMsg  = error instanceof Error ? error.message : String(error)
+
+    logger.error('[expenses POST] Failed to create expense', {
+      route: 'POST /api/expenses',
+      errorType,
+      // Truncate message to avoid accidentally logging sensitive content
+      errorMessage: errorMsg.slice(0, 200),
+    })
+
+    // Duplicate key — return a clear 409 so the client can show a useful message.
+    // Mongoose wraps MongoDB E11000 as an Error with a numeric `code` property.
+    if (
+      error instanceof Error &&
+      (error as Error & { code?: unknown }).code === 11000
+    ) {
+      return NextResponse.json(
+        { error: 'A subscription expense for this billing date already exists.' },
+        { status: 409 }
+      )
+    }
+
     return NextResponse.json({ error: 'Failed to create expense' }, { status: 500 })
   }
 }
