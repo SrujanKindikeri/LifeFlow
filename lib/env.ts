@@ -1,21 +1,34 @@
 /**
  * lib/env.ts — Centralized environment variable validation.
  *
- * Validates required server-side environment variables at module load time.
- * Import this module early in any server entry-point so misconfigured
- * deployments fail loudly with a clear message rather than a cryptic
- * runtime crash deep inside a request handler.
+ * Design: build-safe, runtime-strict.
+ *
+ * During `next build` the module may be imported (e.g. by static analysis of
+ * route files) without the production secrets being present.  To avoid build
+ * failures in Docker / CI where MONGODB_URI and SESSION_SECRET are intentionally
+ * absent, this module NO LONGER validates at import time.
+ *
+ * Instead:
+ *   - `serverEnv`      — lazy object whose properties read `process.env` on
+ *                        every access; safe to import at build time.
+ *   - `getServerEnv()` — validates ALL required variables and throws clearly
+ *                        if any are missing; call this inside request handlers,
+ *                        connectDB(), getSession(), etc. — never at module level.
  *
  * NEXT_PUBLIC_* variables are safe to expose to the browser.
  * All other variables here are SERVER-ONLY and must never be sent to the client.
  *
- * Usage:
- *   import '@/lib/env'          // side-effect import — validates on load
- *   import { serverEnv } from '@/lib/env'  // typed access to validated vars
+ * Usage (runtime — API routes, server components, utilities):
+ *   import { getServerEnv } from '@/lib/env'
+ *   const env = getServerEnv()   // validates & returns typed snapshot
+ *   env.MONGODB_URI              // guaranteed non-empty at runtime
+ *
+ * Usage (build-safe lazy access — avoid for required vars):
+ *   import { serverEnv } from '@/lib/env'
+ *   serverEnv.DEFAULT_TIMEZONE   // reads process.env on access, no validation
  */
 
-// ─── Server-only variables ────────────────────────────────────────────────────
-// These are NEVER exposed to the browser bundle.
+// ─── Variable lists (documentation / startup check only) ─────────────────────
 
 const REQUIRED_SERVER_VARS = [
   'MONGODB_URI',
@@ -52,11 +65,23 @@ const PUBLIC_VARS = [
   'NEXT_PUBLIC_CURRENCY',
 ] as const
 
-// ─── Validation ───────────────────────────────────────────────────────────────
+// ─── Runtime validation ───────────────────────────────────────────────────────
 
-function validateEnv(): void {
-  // Only validate on the server side
-  if (typeof window !== 'undefined') return
+/**
+ * Validate all required server-side environment variables and return a
+ * fully-typed, immutable snapshot.
+ *
+ * Call this INSIDE request handlers, connectDB(), getSession(), etc.
+ * NEVER call it at module level — doing so would break `next build` in
+ * environments where secrets are not available (e.g. Docker build stage).
+ *
+ * @throws {Error} with a clear list of missing/invalid variables.
+ */
+export function getServerEnv() {
+  // Guard: only valid on the server
+  if (typeof window !== 'undefined') {
+    throw new Error('[LifeFlow] getServerEnv() must only be called on the server.')
+  }
 
   const missing: string[] = []
 
@@ -67,15 +92,6 @@ function validateEnv(): void {
     }
   }
 
-  // SESSION_SECRET length check — iron-session requires ≥ 32 characters
-  const sessionSecret = process.env.SESSION_SECRET
-  if (sessionSecret && sessionSecret.trim().length < 32) {
-    throw new Error(
-      `[LifeFlow] SESSION_SECRET must be at least 32 characters long.\n` +
-      `Generate a secure value with: openssl rand -base64 32`
-    )
-  }
-
   if (missing.length > 0) {
     throw new Error(
       `[LifeFlow] Missing required environment variables:\n` +
@@ -83,55 +99,107 @@ function validateEnv(): void {
       `\n\nCopy .env.example to .env.local and fill in the values.`
     )
   }
+
+  // SESSION_SECRET length check — iron-session requires ≥ 32 characters
+  const sessionSecret = process.env.SESSION_SECRET!
+  if (sessionSecret.trim().length < 32) {
+    throw new Error(
+      `[LifeFlow] SESSION_SECRET must be at least 32 characters long.\n` +
+      `Generate a secure value with: openssl rand -base64 32`
+    )
+  }
+
+  return {
+    // Database
+    MONGODB_URI:      process.env.MONGODB_URI!,
+    MONGODB_DB_NAME:  process.env.MONGODB_DB_NAME ?? 'lifeflow',
+
+    // Auth
+    SESSION_SECRET: process.env.SESSION_SECRET!,
+
+    // Scheduler / Cron
+    SCHEDULER_SECRET: process.env.SCHEDULER_SECRET ?? process.env.CRON_SECRET ?? '',
+    CRON_SECRET:      process.env.CRON_SECRET ?? process.env.SCHEDULER_SECRET ?? '',
+
+    // Storage
+    STORAGE_PROVIDER:              (process.env.STORAGE_PROVIDER ?? 'mongodb') as StorageProvider,
+    STORAGE_BUCKET:                process.env.STORAGE_BUCKET ?? '',
+    STORAGE_REGION:                process.env.STORAGE_REGION ?? 'ap-south-1',
+    STORAGE_ACCESS_KEY_ID:         process.env.STORAGE_ACCESS_KEY_ID ?? '',
+    STORAGE_SECRET_ACCESS_KEY:     process.env.STORAGE_SECRET_ACCESS_KEY ?? '',
+    STORAGE_ENDPOINT:              process.env.STORAGE_ENDPOINT ?? '',
+    AZURE_STORAGE_ACCOUNT_NAME:    process.env.AZURE_STORAGE_ACCOUNT_NAME ?? '',
+    AZURE_STORAGE_ACCOUNT_KEY:     process.env.AZURE_STORAGE_ACCOUNT_KEY ?? '',
+    AZURE_STORAGE_CONTAINER:       process.env.AZURE_STORAGE_CONTAINER ?? '',
+
+    // OCR
+    OCR_PROVIDER:          (process.env.OCR_PROVIDER ?? 'auto') as OcrProvider,
+    GOOGLE_VISION_API_KEY: process.env.GOOGLE_VISION_API_KEY ?? '',
+    OCR_API_KEY:           process.env.OCR_API_KEY ?? '',
+
+    // Email / Notifications
+    EMAIL_PROVIDER: (process.env.EMAIL_PROVIDER ?? 'none') as EmailProvider,
+    EMAIL_API_KEY:  process.env.EMAIL_API_KEY ?? '',
+    EMAIL_FROM:     process.env.EMAIL_FROM ?? 'noreply@lifeflow.app',
+
+    // App
+    DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata',
+    NODE_ENV:         process.env.NODE_ENV ?? 'development',
+  } as const
 }
 
-// Run validation immediately when this module is loaded on the server
-validateEnv()
-
-// ─── Typed accessors ──────────────────────────────────────────────────────────
+// ─── Lazy build-safe accessor ─────────────────────────────────────────────────
 
 /**
- * Validated server-only environment variables.
- * Accessing these on the client will return undefined — use only in server
- * components, API routes, middleware, and server utilities.
+ * Build-safe lazy accessor for server environment variables.
+ *
+ * Each property reads `process.env` at access time — importing this object
+ * does NOT validate or throw, so it is safe to import during `next build`.
+ *
+ * For required variables (MONGODB_URI, SESSION_SECRET) prefer `getServerEnv()`
+ * inside your handler/function body so you get a clear error if they are absent.
+ *
+ * Optional and defaulted variables are fine to read here at any time.
  */
 export const serverEnv = {
   // Database
-  MONGODB_URI:      process.env.MONGODB_URI!,
-  MONGODB_DB_NAME:  process.env.MONGODB_DB_NAME ?? 'lifeflow',
+  get MONGODB_URI()      { return process.env.MONGODB_URI ?? '' },
+  get MONGODB_DB_NAME()  { return process.env.MONGODB_DB_NAME ?? 'lifeflow' },
 
   // Auth
-  SESSION_SECRET: process.env.SESSION_SECRET!,
+  get SESSION_SECRET()   { return process.env.SESSION_SECRET ?? '' },
 
   // Scheduler / Cron
-  SCHEDULER_SECRET: process.env.SCHEDULER_SECRET ?? process.env.CRON_SECRET ?? '',
-  CRON_SECRET:      process.env.CRON_SECRET ?? process.env.SCHEDULER_SECRET ?? '',
+  get SCHEDULER_SECRET() { return process.env.SCHEDULER_SECRET ?? process.env.CRON_SECRET ?? '' },
+  get CRON_SECRET()      { return process.env.CRON_SECRET ?? process.env.SCHEDULER_SECRET ?? '' },
 
   // Storage
-  STORAGE_PROVIDER:              (process.env.STORAGE_PROVIDER ?? 'mongodb') as 'mongodb' | 's3' | 'azure' | 'local',
-  STORAGE_BUCKET:                process.env.STORAGE_BUCKET ?? '',
-  STORAGE_REGION:                process.env.STORAGE_REGION ?? 'ap-south-1',
-  STORAGE_ACCESS_KEY_ID:         process.env.STORAGE_ACCESS_KEY_ID ?? '',
-  STORAGE_SECRET_ACCESS_KEY:     process.env.STORAGE_SECRET_ACCESS_KEY ?? '',
-  STORAGE_ENDPOINT:              process.env.STORAGE_ENDPOINT ?? '',
-  AZURE_STORAGE_ACCOUNT_NAME:    process.env.AZURE_STORAGE_ACCOUNT_NAME ?? '',
-  AZURE_STORAGE_ACCOUNT_KEY:     process.env.AZURE_STORAGE_ACCOUNT_KEY ?? '',
-  AZURE_STORAGE_CONTAINER:       process.env.AZURE_STORAGE_CONTAINER ?? '',
+  get STORAGE_PROVIDER()           { return (process.env.STORAGE_PROVIDER ?? 'mongodb') as StorageProvider },
+  get STORAGE_BUCKET()             { return process.env.STORAGE_BUCKET ?? '' },
+  get STORAGE_REGION()             { return process.env.STORAGE_REGION ?? 'ap-south-1' },
+  get STORAGE_ACCESS_KEY_ID()      { return process.env.STORAGE_ACCESS_KEY_ID ?? '' },
+  get STORAGE_SECRET_ACCESS_KEY()  { return process.env.STORAGE_SECRET_ACCESS_KEY ?? '' },
+  get STORAGE_ENDPOINT()           { return process.env.STORAGE_ENDPOINT ?? '' },
+  get AZURE_STORAGE_ACCOUNT_NAME() { return process.env.AZURE_STORAGE_ACCOUNT_NAME ?? '' },
+  get AZURE_STORAGE_ACCOUNT_KEY()  { return process.env.AZURE_STORAGE_ACCOUNT_KEY ?? '' },
+  get AZURE_STORAGE_CONTAINER()    { return process.env.AZURE_STORAGE_CONTAINER ?? '' },
 
   // OCR
-  OCR_PROVIDER:        (process.env.OCR_PROVIDER ?? 'auto') as 'google_vision' | 'tesseract' | 'auto',
-  GOOGLE_VISION_API_KEY: process.env.GOOGLE_VISION_API_KEY ?? '',
-  OCR_API_KEY:         process.env.OCR_API_KEY ?? '',
+  get OCR_PROVIDER()          { return (process.env.OCR_PROVIDER ?? 'auto') as OcrProvider },
+  get GOOGLE_VISION_API_KEY() { return process.env.GOOGLE_VISION_API_KEY ?? '' },
+  get OCR_API_KEY()           { return process.env.OCR_API_KEY ?? '' },
 
   // Email / Notifications
-  EMAIL_PROVIDER: (process.env.EMAIL_PROVIDER ?? 'none') as 'resend' | 'sendgrid' | 'smtp' | 'none',
-  EMAIL_API_KEY:  process.env.EMAIL_API_KEY ?? '',
-  EMAIL_FROM:     process.env.EMAIL_FROM ?? 'noreply@lifeflow.app',
+  get EMAIL_PROVIDER() { return (process.env.EMAIL_PROVIDER ?? 'none') as EmailProvider },
+  get EMAIL_API_KEY()  { return process.env.EMAIL_API_KEY ?? '' },
+  get EMAIL_FROM()     { return process.env.EMAIL_FROM ?? 'noreply@lifeflow.app' },
 
   // App
-  DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata',
-  NODE_ENV:         process.env.NODE_ENV ?? 'development',
-} as const
+  get DEFAULT_TIMEZONE() { return process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata' },
+  get NODE_ENV()         { return process.env.NODE_ENV ?? 'development' },
+}
+
+// ─── Public variables (safe for browser) ─────────────────────────────────────
 
 /**
  * Public environment variables (safe for browser use).
@@ -142,11 +210,12 @@ export const publicEnv = {
   CURRENCY: process.env.NEXT_PUBLIC_CURRENCY ?? 'INR',
 } as const
 
-// Re-export the types for consumers
-export type StorageProvider = typeof serverEnv.STORAGE_PROVIDER
-export type OcrProvider = typeof serverEnv.OCR_PROVIDER
-export type EmailProvider = typeof serverEnv.EMAIL_PROVIDER
+// ─── Type exports ─────────────────────────────────────────────────────────────
 
-// Suppress unused-variable lint warnings for optional var arrays
+export type StorageProvider = 'mongodb' | 's3' | 'azure' | 'local'
+export type OcrProvider     = 'google_vision' | 'tesseract' | 'auto'
+export type EmailProvider   = 'resend' | 'sendgrid' | 'smtp' | 'none'
+
+// Suppress unused-variable lint warnings for documentation-only arrays
 void OPTIONAL_SERVER_VARS
 void PUBLIC_VARS

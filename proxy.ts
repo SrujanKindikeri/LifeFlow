@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getIronSession } from 'iron-session'
-import { SessionData, sessionOptions } from '@/lib/session'
+import { SessionData, getSessionOptions } from '@/lib/session'
 
 const AUTH_PATHS = ['/login', '/signup']
 
@@ -20,7 +20,7 @@ export async function proxy(req: NextRequest) {
 
   // Read the encrypted session cookie from the incoming request
   const response = NextResponse.next()
-  const session  = await getIronSession<SessionData>(req, response, sessionOptions)
+  const session  = await getIronSession<SessionData>(req, response, getSessionOptions())
   const isLoggedIn = session.isLoggedIn === true && !!session.userId
 
   // Redirect logged-in users away from auth pages

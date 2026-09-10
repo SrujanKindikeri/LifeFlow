@@ -17,8 +17,9 @@
 
 import mongoose from 'mongoose'
 
-// Import env validation — validates MONGODB_URI at module load
-import { serverEnv } from '@/lib/env'
+// getServerEnv() validates MONGODB_URI at runtime (inside connectDB), not at module load.
+// This keeps `next build` working in Docker where secrets are absent during the build stage.
+import { getServerEnv } from '@/lib/env'
 
 // ─── Connection state cache ───────────────────────────────────────────────────
 
@@ -89,7 +90,9 @@ export async function connectDB(): Promise<typeof mongoose> {
 
   // Start a new connection attempt if none is in progress
   if (!cached.promise) {
-    const uri = serverEnv.MONGODB_URI
+    // Validate env at runtime (not at module load) so `next build` succeeds
+    // in Docker environments where secrets are not available during the build stage.
+    const uri = getServerEnv().MONGODB_URI
 
     cached.promise = mongoose
       .connect(uri, CONNECTION_OPTIONS)

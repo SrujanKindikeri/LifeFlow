@@ -1,5 +1,6 @@
 import { getIronSession, IronSession, SessionOptions } from 'iron-session'
 import { cookies } from 'next/headers'
+import { getServerEnv } from '@/lib/env'
 
 export interface SessionData {
   userId: string
@@ -8,20 +9,32 @@ export interface SessionData {
   isLoggedIn: boolean
 }
 
-export const sessionOptions: SessionOptions = {
-  password: process.env.SESSION_SECRET!,
-  cookieName: 'lifeflow_session',
-  cookieOptions: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-  },
+/**
+ * Returns an IronSession options object with SESSION_SECRET validated at
+ * call time (runtime), not at module load time.
+ *
+ * Exported so middleware (proxy.ts) and other server utilities can use it
+ * without triggering eager module-level validation.
+ *
+ * This keeps `next build` working in Docker / CI where SESSION_SECRET is
+ * intentionally absent during the build stage.
+ */
+export function getSessionOptions(): SessionOptions {
+  return {
+    password: getServerEnv().SESSION_SECRET,
+    cookieName: 'lifeflow_session',
+    cookieOptions: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    },
+  }
 }
 
 export async function getSession(): Promise<IronSession<SessionData>> {
   const cookieStore = await cookies()
-  const session = await getIronSession<SessionData>(cookieStore, sessionOptions)
+  const session = await getIronSession<SessionData>(cookieStore, getSessionOptions())
   return session
 }
 

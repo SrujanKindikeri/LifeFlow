@@ -5,13 +5,14 @@
  * server entry point so it runs once per process instance.
  *
  * Tasks:
- *   1. Validate environment variables (via lib/env.ts)
+ *   1. Validate environment variables (via getServerEnv())
  *   2. Ensure MongoDB indexes exist
  *
  * This runs lazily (once per process, not per request) using a module-level
  * promise so concurrent cold-starts don't double-execute.
  */
 
+import { getServerEnv } from '@/lib/env'
 import { ensureIndexes } from '@/lib/db/indexes'
 import logger from '@/lib/logger'
 
@@ -23,8 +24,8 @@ export async function runStartup(): Promise<void> {
 
   startupPromise = (async () => {
     try {
-      // lib/env.ts validation runs on import (side-effect)
-      await import('@/lib/env')
+      // Validate required env vars at runtime (throws clearly if any are missing)
+      getServerEnv()
 
       // Ensure all MongoDB indexes are present
       await ensureIndexes()
