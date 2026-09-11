@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { motion } from 'framer-motion'
@@ -12,15 +12,21 @@ import { GlassInput } from '@/components/ui/GlassInput'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { useToast } from '@/components/ui/Toast'
 
-export default function SignupPage() {
-  const router = useRouter()
+// Inner component that reads search params (must be inside a Suspense boundary)
+function SignupForm() {
+  const router       = useRouter()
+  const searchParams = useSearchParams()
   const { success, error } = useToast()
   const [showPassword, setShowPassword]               = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [loading, setLoading] = useState(false)
 
+  // Pre-fill email when coming from the ACCOUNT_NOT_FOUND login redirect
+  const prefillEmail = searchParams.get('email') ?? ''
+
   const { register, handleSubmit, formState: { errors } } = useForm<SignupInput>({
     resolver: zodResolver(signupSchema),
+    defaultValues: { email: prefillEmail },
   })
 
   async function onSubmit(data: SignupInput) {
@@ -196,5 +202,13 @@ export default function SignupPage() {
         By signing up you agree to our terms and privacy policy.
       </p>
     </motion.div>
+  )
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
   )
 }

@@ -23,6 +23,7 @@ export default function LoginPage() {
   })
 
   async function onSubmit(data: LoginInput) {
+    if (loading) return
     setLoading(true)
     try {
       const res  = await fetch('/api/auth/login', {
@@ -31,7 +32,19 @@ export default function LoginPage() {
         body:    JSON.stringify(data),
       })
       const json = await res.json()
-      if (!res.ok) { error(json.error ?? 'Login failed'); return }
+
+      if (!res.ok) {
+        if (json.code === 'ACCOUNT_NOT_FOUND') {
+          error("No account found. Let's create one for you.")
+          setTimeout(() => {
+            router.push(`/signup?email=${encodeURIComponent(data.email)}`)
+          }, 1200)
+          return
+        }
+        error(json.error ?? 'Invalid email or password.')
+        return
+      }
+
       success('Welcome back!')
       router.push('/app/dashboard')
       router.refresh()

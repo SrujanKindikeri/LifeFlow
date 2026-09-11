@@ -23,10 +23,9 @@ export async function POST(req: NextRequest) {
 
     const user = await User.findOne({ email: email.toLowerCase() })
     if (!user) {
-      // Use same error message to avoid email enumeration
       return NextResponse.json(
-        { error: 'Invalid email or password' },
-        { status: 401 }
+        { error: 'No account found with that email.', code: 'ACCOUNT_NOT_FOUND' },
+        { status: 404 }
       )
     }
 
