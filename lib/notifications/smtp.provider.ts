@@ -6,9 +6,9 @@
  * Required environment variables:
  *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD (or SMTP_PASS), EMAIL_FROM
  *
- * Works with any SMTP relay: Gmail, AWS SES, Azure Communication Services,
- * Brevo, Mailgun, Postfix, or any standard SMTP server.
- * Not tied to any specific provider — configure via env vars.
+ * Works with any SMTP relay: Gmail (STARTTLS port 587), Brevo, Mailgun,
+ * Postfix, or any standard SMTP server.
+ * Not tied to any specific cloud provider — configure via env vars only.
  *
  * Security:
  *   - SMTP credentials are read from environment variables only.
@@ -16,8 +16,9 @@
  *     recipient, messageId, errorCode) appear in log output.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
+import nodemailer from 'nodemailer'
+import type { Transporter } from 'nodemailer'
+import type SMTPTransport from 'nodemailer/lib/smtp-transport'
 import type { NotificationProvider, EmailMessage, EmailResult } from './index'
 import logger from '@/lib/logger'
 
@@ -28,25 +29,26 @@ import logger from '@/lib/logger'
 function getSmtpConfig(): {
   host: string
   port: number
-  user: string
+  secure: boolean
   smtpAuth: { user: string; pass: string }
   from: string
 } {
-  const host = process.env.SMTP_HOST ?? ''
-  const port = parseInt(process.env.SMTP_PORT ?? '587', 10)
-  const user = process.env.SMTP_USER ?? ''
+  const host       = process.env.SMTP_HOST ?? ''
+  const port       = parseInt(process.env.SMTP_PORT ?? '587', 10)
+  const user       = process.env.SMTP_USER ?? ''
   const credential = process.env.SMTP_PASSWORD ?? process.env.SMTP_PASS ?? ''
-  const from = process.env.EMAIL_FROM ?? 'noreply@lifeflow.app'
+  const from       = process.env.EMAIL_FROM ?? 'noreply@lifeflow.app'
 
-  if (!host) throw new Error('[SMTP] SMTP_HOST environment variable is required')
-  if (!user) throw new Error('[SMTP] SMTP_USER environment variable is required')
+  if (!host)       throw new Error('[SMTP] SMTP_HOST environment variable is required')
+  if (!user)       throw new Error('[SMTP] SMTP_USER environment variable is required')
   if (!credential) throw new Error('[SMTP] SMTP_PASSWORD environment variable is required')
 
   return {
     host,
     port,
-    user,
-    smtpAuth: { user, pass: credential },  // passed directly to nodemailer, never logged
+    // Port 465 → implicit TLS (secure: true); 587 → STARTTLS (secure: false)
+    secure:    port === 465,
+    smtpAuth:  { user, pass: credential }, // passed directly to nodemailer, never logged
     from,
   }
 }
@@ -56,6 +58,16 @@ export class SmtpProvider implements NotificationProvider {
     // Validate configuration at construction time so misconfigured deployments
     // fail loudly on startup rather than silently on first send.
     getSmtpConfig()
+
+    // Compute safe diagnostic flag — only a boolean, never the credential value
+    const smtpReady = !!(process.env.SMTP_USER && process.env.SMTP_PASSWORD)
+
+    logger.info('[SMTP] Provider configured', {
+      smtpHost: process.env.SMTP_HOST,
+      smtpPort: process.env.SMTP_PORT ?? '587',
+      // Confirm SMTP is configured without revealing the password
+      smtpConfigured: smtpReady,
+    })
   }
 
   async send(message: EmailMessage): Promise<EmailResult> {
@@ -63,16 +75,20 @@ export class SmtpProvider implements NotificationProvider {
     const cfg = getSmtpConfig()
 
     try {
-      const nodemailer = await import('nodemailer' as any)
+      const transportOptions: SMTPTransport.Options = {
+        host:           cfg.host,
+        port:           cfg.port,
+        secure:         cfg.secure,
+        // requireTLS ensures STARTTLS is negotiated on port 587 and rejects
+        // plain-text fallback — important for Gmail App Passwords.
+        requireTLS:     cfg.port === 587,
+        auth:           cfg.smtpAuth,
+      }
 
-      const transporter = nodemailer.default.createTransport({
-        host:   cfg.host,
-        port:   cfg.port,
-        secure: cfg.port === 465,   // implicit TLS on 465, STARTTLS on 587
-        auth:   cfg.smtpAuth,        // credentials — never referenced in logger calls below
-      })
+      const transporter: Transporter<SMTPTransport.SentMessageInfo> =
+        nodemailer.createTransport(transportOptions)
 
-      const info = await transporter.sendMail({
+      const info: SMTPTransport.SentMessageInfo = await transporter.sendMail({
         from:    message.from ?? cfg.from,
         to:      message.to,
         subject: message.subject,
@@ -92,7 +108,8 @@ export class SmtpProvider implements NotificationProvider {
     } catch (err) {
       // Extract safe diagnostics — SMTP credentials are NEVER included here.
       const errorMessage = err instanceof Error ? err.message : String(err)
-      const errorCode    = (err as any)?.code ?? (err as any)?.responseCode ?? undefined
+      const errorCode    = (err as { code?: string; responseCode?: number })?.code
+                        ?? (err as { code?: string; responseCode?: number })?.responseCode
 
       logger.error('[SMTP] Delivery failed', {
         provider: 'smtp',

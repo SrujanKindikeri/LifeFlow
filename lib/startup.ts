@@ -45,6 +45,33 @@ export async function runStartup(): Promise<void> {
         )
       }
 
+      // Log SMTP configuration status — confirms email is set up without
+      // ever printing the password.
+      const smtpConfigured =
+        env.EMAIL_PROVIDER === 'smtp' &&
+        !!env.SMTP_HOST &&
+        !!env.SMTP_USER &&
+        !!env.SMTP_PASSWORD
+
+      if (env.EMAIL_PROVIDER === 'smtp') {
+        if (smtpConfigured) {
+          logger.info('[startup] SMTP configured: yes', {
+            smtpHost: env.SMTP_HOST,
+            smtpPort: env.SMTP_PORT,
+            // smtpUser logged for diagnostics — not a secret
+            smtpUser: env.SMTP_USER,
+          })
+        } else {
+          logger.warn(
+            '[startup] SMTP configured: no — EMAIL_PROVIDER=smtp but ' +
+            'SMTP_HOST, SMTP_USER, or SMTP_PASSWORD is missing. ' +
+            'Email delivery will fail until all three are set.'
+          )
+        }
+      } else {
+        logger.info(`[startup] Email provider: ${env.EMAIL_PROVIDER || 'none'}`)
+      }
+
       // Ensure all MongoDB indexes are present
       await ensureIndexes()
 

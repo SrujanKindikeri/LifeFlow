@@ -2,16 +2,17 @@
  * next.config.ts — Next.js configuration for LifeFlow
  *
  * Designed for deployment on:
- *   - Vercel          (default Next.js output)
- *   - AWS App Runner / ECS / Fargate  (standalone output + Docker)
- *   - Azure App Service / Container Apps  (standalone output + Docker)
+ *   - AWS EC2 (standalone output + Docker)
+ *   - Azure VM (standalone output + Docker — same image as AWS EC2)
+ *   - Any Docker host / VPS
  *   - Local development (npm run dev)
  *
  * output: 'standalone' produces a self-contained build in .next/standalone
  * that includes only the required Node.js files — no node_modules copy needed.
  * The Docker image copies this directory and runs node server.js directly.
  *
- * When deploying to Vercel, 'standalone' is ignored — Vercel handles bundling.
+ * The SAME Docker image runs identically on AWS EC2, Azure VM, or any
+ * Docker-capable host. There are no cloud-specific runtime dependencies.
  */
 
 import type { NextConfig } from 'next'
@@ -85,9 +86,8 @@ const nextConfig: NextConfig = {
   // ─── Output mode ───────────────────────────────────────────────────────────
   //
   // 'standalone' creates .next/standalone — a minimal self-contained Node.js
-  // server that can run without node_modules. Used by the Docker image.
-  //
-  // Vercel ignores this setting and uses its own bundling pipeline.
+  // server that can run without node_modules. Used by the Docker image on
+  // both AWS EC2 and Azure VM deployments.
   output: 'standalone',
 
   // ─── Security headers ───────────────────────────────────────────────────────
