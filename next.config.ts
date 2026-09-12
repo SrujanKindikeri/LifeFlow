@@ -41,8 +41,11 @@ const securityHeaders = [
   },
   // Force HTTPS in production (HSTS)
   // max-age=31536000 = 1 year; includeSubDomains covers all subdomains
-  // NOTE: Only add preload after confirming your domain handles HTTPS correctly.
-  ...(process.env.NODE_ENV === 'production'
+  // NOTE: Only sent when NEXT_PUBLIC_APP_URL starts with https:// so that
+  // HTTP-only EC2/Azure test deployments (http://IP:3000) are NOT affected.
+  // Sending HSTS over HTTP is meaningless and can confuse some clients.
+  ...(process.env.NODE_ENV === 'production' &&
+      process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://')
     ? [
         {
           key:   'Strict-Transport-Security',

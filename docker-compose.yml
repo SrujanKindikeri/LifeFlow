@@ -1,24 +1,24 @@
 # ============================================================
 # LifeFlow — docker-compose.yml
-# Local development with Docker
-# ============================================================
 #
-# Usage:
+# Local development / single-VM deployment with Docker Compose.
+# Works identically on AWS EC2, Azure VM, or any Docker host.
+#
+# Usage (MongoDB Atlas — recommended):
 #   docker compose up
 #
-# With a local MongoDB instance:
+# Usage (local MongoDB — development only):
 #   docker compose --profile local-mongo up
 #
-# With MongoDB Atlas (recommended):
-#   Set MONGODB_URI in .env.local pointing to your Atlas cluster.
-#   docker compose up   (the local mongo service won't start)
+# Create .env.local from .env.example and fill in values before running.
+# docker compose automatically reads .env.local.
 #
 # The application will be available at http://localhost:3000
 # ============================================================
 
 services:
 
-  # ── LifeFlow application ─────────────────────────────────────
+  # ── LifeFlow application ─────────────────────────────────────────────────────
   app:
     build:
       context: .
@@ -27,42 +27,70 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Required — either set these here or in .env.local
-      # (docker compose automatically loads .env.local)
+      # ── Required ─────────────────────────────────────────────────────────────
       MONGODB_URI:       ${MONGODB_URI}
       SESSION_SECRET:    ${SESSION_SECRET}
+
+      # ── Scheduler / Cron ─────────────────────────────────────────────────────
+      # Protects POST /api/jobs/process-subscriptions
+      # Generate: openssl rand -base64 32
       SCHEDULER_SECRET:  ${SCHEDULER_SECRET:-}
       CRON_SECRET:       ${CRON_SECRET:-}
 
-      # Storage provider (default: mongodb — no extra setup)
+      # ── Email / SMTP ──────────────────────────────────────────────────────────
+      # Set EMAIL_PROVIDER=smtp and configure the SMTP section for production.
+      # Works with Gmail, Brevo, Mailgun, or any SMTP relay.
+      EMAIL_PROVIDER:    ${EMAIL_PROVIDER:-smtp}
+      EMAIL_FROM:        ${EMAIL_FROM:-}
+      EMAIL_FROM_NAME:   ${EMAIL_FROM_NAME:-LifeFlow}
+      SMTP_HOST:         ${SMTP_HOST:-}
+      SMTP_PORT:         ${SMTP_PORT:-587}
+      SMTP_USER:         ${SMTP_USER:-}
+      SMTP_PASSWORD:     ${SMTP_PASSWORD:-}
+
+      # ── Two-Factor Authentication ─────────────────────────────────────────────
+      # AES-256-GCM key for TOTP secrets — required when any user enables 2FA.
+      # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
+
+      # ── Email verification timing ─────────────────────────────────────────────
+      VERIFICATION_TOKEN_EXPIRY_MINUTES:    ${VERIFICATION_TOKEN_EXPIRY_MINUTES:-8}
+      VERIFICATION_RESEND_COOLDOWN_SECONDS: ${VERIFICATION_RESEND_COOLDOWN_SECONDS:-60}
+      VERIFICATION_MAX_RESENDS_PER_HOUR:    ${VERIFICATION_MAX_RESENDS_PER_HOUR:-5}
+
+      # ── Storage provider (default: mongodb — no extra config) ─────────────────
       STORAGE_PROVIDER:  ${STORAGE_PROVIDER:-mongodb}
 
-      # OCR provider (default: auto — uses tesseract if no API key set)
-      OCR_PROVIDER:         ${OCR_PROVIDER:-auto}
-      GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY:-}
+      # ── OCR provider (default: auto — uses Tesseract if no API key set) ───────
+      OCR_PROVIDER:            ${OCR_PROVIDER:-auto}
+      GOOGLE_VISION_API_KEY:   ${GOOGLE_VISION_API_KEY:-}
 
-      # Public vars
+      # ── Public variables ──────────────────────────────────────────────────────
+      # Set NEXT_PUBLIC_APP_URL to http://<your-ip>:3000 for direct access,
+      # or https://yourdomain.com when behind a reverse proxy.
       NEXT_PUBLIC_APP_URL:  ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       NEXT_PUBLIC_CURRENCY: ${NEXT_PUBLIC_CURRENCY:-INR}
 
-      # App defaults
+      # ── Application defaults ──────────────────────────────────────────────────
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Kolkata}
       LOG_LEVEL:        ${LOG_LEVEL:-info}
+      NODE_ENV:         production
 
-      NODE_ENV: production
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout:  10s
       retries:  3
       start_period: 30s
+
     restart: unless-stopped
+
     depends_on:
       mongo:
         condition: service_healthy
-        required: false  # Only required when using the local-mongo profile
+        required: false   # Only required when using the local-mongo profile
 
-  # ── Local MongoDB (optional) ─────────────────────────────────
+  # ── Optional local MongoDB ────────────────────────────────────────────────────
   # Only starts when you run: docker compose --profile local-mongo up
   # In production, use MongoDB Atlas instead.
   mongo:

@@ -25,7 +25,25 @@ export async function runStartup(): Promise<void> {
   startupPromise = (async () => {
     try {
       // Validate required env vars at runtime (throws clearly if any are missing)
-      getServerEnv()
+      const env = getServerEnv()
+
+      // Warn early if TOTP_ENCRYPTION_KEY is absent — 2FA operations will fail
+      // at runtime for any user who tries to enable/use Google Authenticator.
+      if (!env.TOTP_ENCRYPTION_KEY || env.TOTP_ENCRYPTION_KEY.trim() === '') {
+        logger.warn(
+          '[startup] TOTP_ENCRYPTION_KEY is not set. ' +
+          '2FA setup and authentication will fail. ' +
+          'Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+        )
+      }
+
+      // Warn early if SCHEDULER_SECRET is absent — the jobs endpoint will return 503
+      if (!env.SCHEDULER_SECRET && !env.CRON_SECRET) {
+        logger.warn(
+          '[startup] SCHEDULER_SECRET / CRON_SECRET is not set. ' +
+          'The subscription scheduler endpoint will return 503 until a secret is configured.'
+        )
+      }
 
       // Ensure all MongoDB indexes are present
       await ensureIndexes()

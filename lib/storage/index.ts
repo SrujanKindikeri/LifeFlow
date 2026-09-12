@@ -100,6 +100,11 @@ export async function getStorageService(): Promise<StorageAdapter> {
       break
     }
     case 'local': {
+      // LOCAL FILESYSTEM — DEVELOPMENT ONLY.
+      // Container-local files are EPHEMERAL: they are lost on every container
+      // restart, redeploy, or `docker stop`. Do NOT use in any environment
+      // where data persistence is required.
+      // The LocalStorageAdapter constructor throws if NODE_ENV=production.
       const { LocalStorageAdapter } = await import('./local.adapter')
       _instance = new LocalStorageAdapter()
       break

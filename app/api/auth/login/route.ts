@@ -110,8 +110,6 @@ export async function POST(req: NextRequest) {
     session.twoFactorPendingAt = undefined
     await session.save()
 
-    console.log('[AUTH] login successful — session saved', { userId: user._id.toString() })
-
     logger.info('[login] Successful login', { userId: user._id.toString() })
 
     return NextResponse.json({

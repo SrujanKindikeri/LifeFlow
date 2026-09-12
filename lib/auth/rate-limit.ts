@@ -4,9 +4,17 @@
  * Uses a sliding-window counter per key (IP address, email, or composite key).
  * State lives in the process heap — it is NOT shared across multiple Next.js
  * worker processes or Docker replicas, which is acceptable for a single-replica
- * EC2 deployment.
+ * EC2 / Azure VM deployment.
  *
- * If you later scale horizontally, replace the Map with a Redis-backed store.
+ * IMPORTANT — SINGLE-PROCESS LIMITATION:
+ *   • Counters reset on every process restart (container redeploy, OOM kill, etc.)
+ *   • If you run multiple Docker replicas behind a load balancer, each replica
+ *     maintains its own independent counter, so an attacker can exceed the rate
+ *     limit by distributing attempts across replicas.
+ *   • For multi-replica deployments, replace the Map below with a Redis-backed
+ *     store (e.g. ioredis + a shared Redis instance or Upstash).
+ *   • For the current single-container AWS EC2 / Azure VM deployment this is
+ *     fully sufficient — the limits apply correctly within that container.
  *
  * SERVER-ONLY — never import from client components.
  */

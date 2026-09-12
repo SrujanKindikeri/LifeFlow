@@ -38,8 +38,15 @@ const INDEX_SPECS: IndexSpec[] = [
   {
     collection: 'users',
     indexes: [
-      { key: { email: 1 },    options: { unique: true } },
-      { key: { publicId: 1 }, options: { unique: true, sparse: true } },
+      // email already has unique: true from the schema field definition;
+      // re-declaring it here keeps the ensureIndexes inventory complete.
+      { key: { email: 1 }, options: { unique: true } },
+      // publicId: unique index.  The schema field definition also sets
+      // unique:true, so Mongoose creates this automatically.  The entry
+      // here is kept for inventory completeness but MUST NOT use sparse:true
+      // (a non-sparse unique index on publicId is correct — every user must
+      // have a publicId and no two users may share one).
+      { key: { publicId: 1 }, options: { unique: true } },
     ],
   },
 
@@ -50,7 +57,9 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, createdAt: -1 } },
       { key: { userId: 1, dueDate: 1 } },
       { key: { userId: 1, completed: 1, dueDate: 1 } },
-      { key: { userId: 1, projectId: 1 }, options: { sparse: true } },
+      // projectId is optional — index covers both set and null values.
+      // Existing Atlas index was created without sparse:true; keep consistent.
+      { key: { userId: 1, projectId: 1 } },
       { key: { lifeFlowId: 1, createdAt: -1 } },
     ],
   },
@@ -82,7 +91,8 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, createdAt: -1 } },
       { key: { userId: 1, pinned: -1, createdAt: -1 } },
       { key: { userId: 1, archived: 1, createdAt: -1 } },
-      { key: { userId: 1, projectId: 1 }, options: { sparse: true } },
+      // projectId is optional — existing Atlas index was created without sparse:true.
+      { key: { userId: 1, projectId: 1 } },
       { key: { lifeFlowId: 1, createdAt: -1 } },
     ],
   },
@@ -97,10 +107,21 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, createdAt: -1 } },
       { key: { lifeFlowId: 1, date: -1 } },
       // Idempotency index: prevents duplicate subscription-generated expenses.
-      // A duplicate insert (E11000) is caught and silently swallowed by the scheduler.
+      // Uses partialFilterExpression so it ONLY covers documents where both
+      // sourceSubscriptionId and subscriptionBillingDate are present.
+      // Personal expenses (which have neither field) are excluded entirely,
+      // avoiding the E11000 collision on null values that a plain sparse index
+      // would produce once multiple personal expenses existed.
       {
         key:     { sourceSubscriptionId: 1, subscriptionBillingDate: 1 },
-        options: { unique: true, sparse: true },
+        options: {
+          unique: true,
+          name:   'subscription_billing_idempotency',
+          partialFilterExpression: {
+            sourceSubscriptionId:    { $exists: true, $type: 'objectId' },
+            subscriptionBillingDate: { $exists: true, $type: 'string'   },
+          },
+        },
       },
     ],
   },

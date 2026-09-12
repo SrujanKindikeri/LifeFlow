@@ -4,18 +4,20 @@
  * Uses a module-level global cache so the same connection is reused across:
  *   - Hot-reloads in Next.js dev mode
  *   - Multiple requests in the same serverless function instance
- *   - Long-running Node.js processes (AWS App Runner, Azure App Service)
+ *   - Long-running Node.js processes (AWS EC2, Azure VM)
  *
  * Handles:
  *   - Connection failures with clear error messages
  *   - Automatic retry on the next request after a failed connection attempt
  *   - Serverless / cold-start efficiency (no persistent socket assumption)
+ *   - Graceful shutdown on SIGTERM / SIGINT (docker stop, systemd stop)
  *   - Validated environment variables via @/lib/env
  *
  * All other server-side modules should call connectDB() before any DB query.
  */
 
 import mongoose from 'mongoose'
+import logger from '@/lib/logger'
 
 // getServerEnv() validates MONGODB_URI at runtime (inside connectDB), not at module load.
 // This keeps `next build` working in Docker where secrets are absent during the build stage.
@@ -33,11 +35,11 @@ interface MongooseCache {
  * where modules are re-evaluated on every hot reload, we reuse the same
  * connection rather than opening a new one each time.
  *
- * In production this is also useful for serverless platforms that reuse
- * function instances (Vercel, AWS Lambda, Azure Functions).
+ * In production this is also useful for long-running VM processes.
  */
 const globalWithMongoose = global as typeof globalThis & {
   _mongooseCache?: MongooseCache
+  _mongooseShutdownRegistered?: boolean
 }
 
 if (!globalWithMongoose._mongooseCache) {
@@ -45,6 +47,52 @@ if (!globalWithMongoose._mongooseCache) {
 }
 
 const cached = globalWithMongoose._mongooseCache
+
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
+
+/**
+ * Register SIGTERM / SIGINT handlers exactly once per process so that
+ * `docker stop` (SIGTERM) and Ctrl-C (SIGINT) close the MongoDB connection
+ * cleanly before the process exits.
+ *
+ * Unref'd signals prevent this from keeping the event loop alive.
+ */
+function registerShutdownHandlers(): void {
+  if (globalWithMongoose._mongooseShutdownRegistered) return
+  globalWithMongoose._mongooseShutdownRegistered = true
+
+  async function shutdown(signal: string): Promise<void> {
+    logger.info(`[MongoDB] Received ${signal} — closing connection gracefully`)
+    try {
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.connection.close()
+        logger.info('[MongoDB] Connection closed cleanly')
+      }
+    } catch (err) {
+      logger.error('[MongoDB] Error during graceful shutdown', {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      process.exit(0)
+    }
+  }
+
+  process.once('SIGTERM', () => void shutdown('SIGTERM'))
+  process.once('SIGINT',  () => void shutdown('SIGINT'))
+}
+
+// Register immediately when this module is first imported (server context only).
+// Skip during `next build` — the build runs multiple worker processes that
+// receive SIGINT/SIGTERM when the build completes; registering handlers there
+// produces spurious "closing connection" log lines with no real DB to close.
+if (
+  typeof process !== 'undefined' &&
+  typeof process.once === 'function' &&
+  process.env.NODE_ENV !== 'test' &&
+  !process.env.NEXT_PHASE?.includes('phase-production-build')
+) {
+  registerShutdownHandlers()
+}
 
 // ─── Connection options ───────────────────────────────────────────────────────
 
@@ -54,7 +102,7 @@ const CONNECTION_OPTIONS: mongoose.ConnectOptions = {
   bufferCommands: false,
 
   // Fail after 10 seconds rather than the default 30-second wait.
-  // Keeps request latency predictable in serverless cold-starts.
+  // Keeps request latency predictable in cold-starts.
   serverSelectionTimeoutMS: 10_000,
 
   // Close idle sockets after 45 seconds to avoid stale connection errors
@@ -68,7 +116,7 @@ const CONNECTION_OPTIONS: mongoose.ConnectOptions = {
   maxPoolSize: 10,
   minPoolSize: 1,
 
-  // Heartbeat to detect stale connections (default is 10 000 ms)
+  // Heartbeat to detect stale connections (default 10 000 ms)
   heartbeatFrequencyMS: 10_000,
 }
 
@@ -101,20 +149,20 @@ export async function connectDB(): Promise<typeof mongoose> {
         const conn = mongooseInstance.connection
 
         conn.on('error', (err: Error) => {
-          console.error('[MongoDB] Connection error:', err.message)
+          logger.error('[MongoDB] Connection error', { errorMessage: err.message })
           // Clear cache so the next request triggers a fresh connection attempt
-          cached.conn = null
+          cached.conn    = null
           cached.promise = null
         })
 
         conn.on('disconnected', () => {
-          console.warn('[MongoDB] Disconnected — will reconnect on next request')
-          cached.conn = null
+          logger.warn('[MongoDB] Disconnected — will reconnect on next request')
+          cached.conn    = null
           cached.promise = null
         })
 
         conn.on('reconnected', () => {
-          console.info('[MongoDB] Reconnected successfully')
+          logger.info('[MongoDB] Reconnected successfully')
         })
 
         return mongooseInstance
@@ -136,6 +184,18 @@ export async function connectDB(): Promise<typeof mongoose> {
   }
 
   return cached.conn
+}
+
+/**
+ * Close the MongoDB connection explicitly.
+ * Called by graceful-shutdown code and integration tests.
+ */
+export async function closeDB(): Promise<void> {
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.connection.close()
+    cached.conn    = null
+    cached.promise = null
+  }
 }
 
 /**
@@ -173,7 +233,7 @@ export async function pingDB(timeoutMs = 5_000): Promise<boolean> {
     if (!db) return false
 
     // Race the admin ping against a timeout
-    const pingPromise = db.admin().ping()
+    const pingPromise    = db.admin().ping()
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('ping timeout')), timeoutMs)
     )

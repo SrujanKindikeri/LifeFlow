@@ -1,101 +1,115 @@
 # ============================================================
 # LifeFlow — Production Dockerfile
 # Multi-stage build using Next.js standalone output
-# ============================================================
+#
+# Targets: AWS EC2, Azure VM, or any Docker host.
+# One image works on all platforms — no cloud-specific code.
 #
 # Build:
-#   docker build -t lifeflow .
+#   docker build -t lifeflow:latest .
 #
 # Run:
 #   docker run -p 3000:3000 \
 #     -e MONGODB_URI="mongodb+srv://..." \
 #     -e SESSION_SECRET="..." \
 #     -e SCHEDULER_SECRET="..." \
-#     lifeflow
+#     -e NEXT_PUBLIC_APP_URL="http://<your-host>:3000" \
+#     lifeflow:latest
 #
-# The image does NOT contain any secrets — all configuration
-# is supplied at runtime via environment variables.
+# SECURITY: The image does NOT contain any secrets.
+# All configuration is supplied at runtime via environment
+# variables — never at build time.
 # ============================================================
 
 # ── Stage 1: deps ─────────────────────────────────────────────────────────────
-# Install production + dev dependencies needed for the build.
-# We separate this stage so the layer is cached when only source changes.
-FROM node:20-alpine AS deps
+# Install ALL dependencies (dev + prod) needed for the build step.
+# Separated so this layer is cached when only source files change.
+FROM node:22-alpine AS deps
 
-# Install libc compatibility for native modules (bcrypt, etc.)
+# libc6-compat — required by some native modules (bcryptjs, sharp, etc.)
 RUN apk add --no-cache libc6-compat
 
 WORKDIR /app
 
-# Copy only package manifests first — maximises layer cache hits
+# Copy only manifests first — maximises layer-cache hits
 COPY package.json package-lock.json* ./
 
-# Install ALL dependencies (dev deps needed for build step)
+# Install all deps (including devDependencies needed for `next build`)
 RUN npm ci --frozen-lockfile
 
 # ── Stage 2: builder ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 RUN apk add --no-cache libc6-compat
 
 WORKDIR /app
 
-# Copy dependencies from deps stage
+# Bring in dependencies from stage 1
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy application source
+# Copy application source (all files not excluded by .dockerignore)
 COPY . .
 
-# Build-time environment variables
-# These are only used during `next build` — they must be set as build args
-# for NEXT_PUBLIC_* vars if you need them baked in at build time.
-# All server-side secrets (MONGODB_URI, SESSION_SECRET, etc.) are supplied
-# at runtime — they are NOT needed during the build.
+# ── Build-time environment ────────────────────────────────────────────────────
+# NEXT_TELEMETRY_DISABLED — suppress Next.js telemetry during build
+# NODE_ENV=production    — enables production optimisations in Next.js
+# NEXT_PUBLIC_* vars may be baked into the bundle at build time.
+# Server-side secrets (MONGODB_URI, SESSION_SECRET, etc.) are NOT needed
+# here and must NOT be passed as build args — they are runtime-only.
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
-# Build the Next.js application
-# output: 'standalone' (set in next.config.ts) produces .next/standalone
+# Build Next.js with standalone output (configured in next.config.ts)
+# .next/standalone is a self-contained minimal server — no node_modules copy needed.
 RUN npm run build
 
 # ── Stage 3: runner ───────────────────────────────────────────────────────────
-# Minimal production image — only the standalone output and public assets.
-FROM node:20-alpine AS runner
+# Minimal production image — only the standalone output + public assets.
+# No source code, no node_modules, no devDependencies, no build tools.
+FROM node:22-alpine AS runner
 
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat curl
 
 WORKDIR /app
 
+# ── Runtime environment defaults ──────────────────────────────────────────────
+# These can all be overridden via `docker run -e ...` or compose environment.
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-# Default port — override with PORT env var if needed
+# Port the server listens on inside the container
 ENV PORT=3000
+# Bind to all interfaces so Docker port-mapping works correctly
 ENV HOSTNAME=0.0.0.0
 
-# Create a non-root user for security
+# ── Non-root user ─────────────────────────────────────────────────────────────
+# Running as a non-root user limits the blast radius if the app is compromised.
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs
 
-# Copy the standalone build output
-# .next/standalone contains a minimal server.js and all required modules
+# ── Copy standalone build output ──────────────────────────────────────────────
+# .next/standalone — minimal server.js + required node modules
+# .next/static      — hashed CSS/JS chunks (served by Next.js or a CDN)
+# public/           — static assets (favicon, robots.txt, etc.)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static     ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public           ./public
 
-# Copy static assets (CSS, JS chunks, images)
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Copy public directory (favicon, robots.txt, etc.)
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-
-# Switch to non-root user
+# ── Switch to non-root user ────────────────────────────────────────────────────
 USER nextjs
 
-# Expose the application port
+# ── Expose port ────────────────────────────────────────────────────────────────
 EXPOSE 3000
 
-# Docker health check — uses the /api/health endpoint
+# ── Health check ───────────────────────────────────────────────────────────────
+# Uses curl (installed above) against the loopback address.
+# --interval  30s  — check every 30 seconds
+# --timeout   10s  — fail if no response within 10 seconds
+# --start-period 30s — give the app time to cold-start before counting failures
+# --retries   3    — mark unhealthy after 3 consecutive failures
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
+  CMD curl -fsS http://127.0.0.1:3000/api/health || exit 1
 
-# Start the production server
-# server.js is generated by Next.js standalone output
+# ── Start the application ──────────────────────────────────────────────────────
+# server.js is the standalone entry point generated by Next.js.
+# It respects PORT and HOSTNAME environment variables.
 CMD ["node", "server.js"]
