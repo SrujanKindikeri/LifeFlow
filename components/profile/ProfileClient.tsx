@@ -1,8 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
-import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint } from 'lucide-react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
@@ -35,6 +35,33 @@ const TIMEZONES = [
 
 const fadeUp = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
 
+// ─── Push status type ─────────────────────────────────────────────────────────
+
+/**
+ * Represents the full state of browser push on this device:
+ *   'checking'    — initial async detection in progress
+ *   'unsupported' — browser/context doesn't support push (no SW, no PushManager, not HTTPS)
+ *   'denied'      — user has blocked notifications at OS/browser level
+ *   'subscribed'  — active push subscription exists for this device
+ *   'unsubscribed'— supported + permitted but no active subscription
+ *   'unavailable' — server VAPID not configured (push won't work server-side)
+ */
+type PushStatus = 'checking' | 'unsupported' | 'denied' | 'subscribed' | 'unsubscribed' | 'unavailable'
+
+// ─── VAPID helper ─────────────────────────────────────────────────────────────
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const buffer  = new ArrayBuffer(rawData.length)
+  const output  = new Uint8Array(buffer)
+  for (let i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i)
+  return output
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export function ProfileClient() {
   const router = useRouter()
   const { success, error: toastError } = useToast()
@@ -51,10 +78,28 @@ export function ProfileClient() {
   const [deleting,     setDeleting]    = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
-  // ── Push notification state ──────────────────────────────────────────────────
-  const [pushSupported,   setPushSupported]   = useState(false)
-  const [pushSubscribed,  setPushSubscribed]  = useState(false)
-  const [pushLoading,     setPushLoading]     = useState(false)
+  // ── Notifications section open/closed state (persisted) ───────────────────
+  const [notifOpen, setNotifOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      const stored = window.localStorage.getItem('lf_notif_section_open')
+      return stored === null ? true : stored !== 'false'
+    } catch {
+      return true
+    }
+  })
+
+  function toggleNotifSection() {
+    setNotifOpen((prev) => {
+      const next = !prev
+      try { window.localStorage.setItem('lf_notif_section_open', String(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
+
+  // ── Push notification state ───────────────────────────────────────────────
+  const [pushStatus,  setPushStatus]  = useState<PushStatus>('checking')
+  const [pushLoading, setPushLoading] = useState(false)
 
   const fetchUser = useCallback(async () => {
     try {
@@ -70,50 +115,96 @@ export function ProfileClient() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void fetchUser() }, [fetchUser])
 
-  // ── Push subscription helpers ────────────────────────────────────────────────
+  // ── Detect push support and current subscription status ──────────────────
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const supported = 'serviceWorker' in navigator && 'PushManager' in window
-    setPushSupported(supported)
-    if (!supported) return
+    if (typeof window === 'undefined') { setPushStatus('unsupported'); return }
 
-    // Check if already subscribed
-    navigator.serviceWorker.ready
-      .then((reg) => reg.pushManager.getSubscription())
-      .then((sub) => setPushSubscribed(!!sub))
-      .catch(() => undefined)
+    // Basic API checks
+    const hasServiceWorker = 'serviceWorker' in navigator
+    const hasPushManager   = 'PushManager' in window
+    const hasNotification  = 'Notification' in window
+    const isSecureContext  = window.isSecureContext
+
+    if (!hasServiceWorker || !hasPushManager || !hasNotification || !isSecureContext) {
+      setPushStatus('unsupported')
+      return
+    }
+
+    // Check if already denied at OS/browser level
+    if (Notification.permission === 'denied') {
+      setPushStatus('denied')
+      return
+    }
+
+    // Check server-side VAPID config and current subscription in parallel
+    async function checkStatus() {
+      try {
+        // Check VAPID config from server (runtime-safe, never exposes private key)
+        const configRes = await fetch('/api/notifications/config')
+        if (configRes.ok) {
+          const config = await configRes.json() as { configured: boolean; vapidPublicKey: string | null }
+          if (!config.configured) {
+            setPushStatus('unavailable')
+            return
+          }
+        }
+
+        // Check if an active subscription already exists on this device
+        const reg = await navigator.serviceWorker.ready
+        const sub = await reg.pushManager.getSubscription()
+        setPushStatus(sub ? 'subscribed' : 'unsubscribed')
+      } catch {
+        // If we can't determine status, default to unsubscribed so user can try
+        setPushStatus('unsubscribed')
+      }
+    }
+
+    void checkStatus()
   }, [])
 
-  function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-    const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-    const rawData = window.atob(base64)
-    const buffer  = new ArrayBuffer(rawData.length)
-    const output  = new Uint8Array(buffer)
-    for (let i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i)
-    return output
-  }
+  // ── Enable push notifications ─────────────────────────────────────────────
 
   async function enablePushNotifications() {
-    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-    if (!vapidKey) { toastError('Push notifications are not configured'); return }
-
+    if (pushLoading) return
     setPushLoading(true)
     try {
+      // 1. Fetch VAPID public key from server at runtime
+      const configRes = await fetch('/api/notifications/config')
+      if (!configRes.ok) throw new Error('Failed to load push configuration')
+      const config = await configRes.json() as { configured: boolean; vapidPublicKey: string | null }
+
+      if (!config.configured || !config.vapidPublicKey) {
+        setPushStatus('unavailable')
+        toastError('Push notifications are temporarily unavailable')
+        return
+      }
+
+      // 2. Request notification permission
       const permission = await Notification.requestPermission()
-      if (permission !== 'granted') { toastError('Permission denied — enable notifications in your browser settings'); return }
+      if (permission === 'denied') {
+        setPushStatus('denied')
+        toastError('Notifications are blocked. Enable them in your browser settings.')
+        return
+      }
+      if (permission !== 'granted') {
+        // User dismissed the prompt — don't change status
+        return
+      }
 
+      // 3. Get service worker registration
       const reg = await navigator.serviceWorker.ready
-      let sub   = await reg.pushManager.getSubscription()
 
+      // 4. Subscribe (or reuse an existing subscription)
+      let sub = await reg.pushManager.getSubscription()
       if (!sub) {
         sub = await reg.pushManager.subscribe({
           userVisibleOnly:      true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey),
         })
       }
 
+      // 5. Send subscription to server
       const serialised = JSON.parse(JSON.stringify(sub)) as {
         endpoint: string
         expirationTime: number | null
@@ -127,7 +218,9 @@ export function ProfileClient() {
       })
 
       if (!res.ok) throw new Error('Failed to save subscription')
-      setPushSubscribed(true)
+
+      // 6. Update UI only after confirmed success
+      setPushStatus('subscribed')
       success('Push notifications enabled')
     } catch (e) {
       toastError(e instanceof Error ? e.message : 'Failed to enable push notifications')
@@ -136,7 +229,10 @@ export function ProfileClient() {
     }
   }
 
+  // ── Disable push notifications ────────────────────────────────────────────
+
   async function disablePushNotifications() {
+    if (pushLoading) return
     setPushLoading(true)
     try {
       const reg = await navigator.serviceWorker.ready
@@ -144,7 +240,9 @@ export function ProfileClient() {
 
       if (sub) {
         const endpoint = sub.endpoint
+        // Unsubscribe from browser first
         await sub.unsubscribe()
+        // Remove from server (this device's endpoint only)
         await fetch('/api/push-subscription', {
           method:  'DELETE',
           headers: { 'Content-Type': 'application/json' },
@@ -152,7 +250,7 @@ export function ProfileClient() {
         })
       }
 
-      setPushSubscribed(false)
+      setPushStatus('unsubscribed')
       success('Push notifications disabled')
     } catch (e) {
       toastError(e instanceof Error ? e.message : 'Failed to disable push notifications')
@@ -160,6 +258,8 @@ export function ProfileClient() {
       setPushLoading(false)
     }
   }
+
+  // ── Profile / account helpers ─────────────────────────────────────────────
 
   async function saveProfile() {
     if (!profileForm.name.trim()) { toastError('Name is required'); return }
@@ -201,14 +301,28 @@ export function ProfileClient() {
     } catch { toastError('Failed to delete account'); setDeleting(false) }
   }
 
-  async function saveNotifPrefs(prefs: UserType['notificationPreferences']) {
+  async function saveNotifPrefs(prefs: {
+    notificationPreferences?: UserType['notificationPreferences']
+    emailNotifications?: UserType['emailNotifications']
+  }) {
     try {
-      const res = await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateNotifications', notificationPreferences: prefs }) })
+      const res = await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateNotifications', ...prefs }) })
       if (!res.ok) throw new Error()
       const data = await res.json()
       setUser(data.user); success('Preferences saved')
     } catch { toastError('Failed to save preferences') }
   }
+
+  /** Default email notification preferences for users without the field yet. */
+  const defaultEmailNotifs: UserType['emailNotifications'] = {
+    enabled:        false,
+    taskReminders:  true,
+    habitReminders: true,
+    spendingAlerts: true,
+    dailySummary:   true,
+  }
+
+  // ── Render guards ─────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -227,6 +341,23 @@ export function ProfileClient() {
   }
 
   const initials = user.name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+
+  // ── Push UI helpers ───────────────────────────────────────────────────────
+
+  /** Human-readable description line below "Browser push notifications" */
+  function pushStatusDesc(): string {
+    switch (pushStatus) {
+      case 'checking':    return 'Checking push support…'
+      case 'unsupported': return 'Push notifications are not supported by this browser.'
+      case 'denied':      return 'Notifications are blocked. Enable them in your browser settings.'
+      case 'subscribed':  return 'Push notifications are enabled on this device.'
+      case 'unsubscribed':return 'Get push alerts on this device.'
+      case 'unavailable': return 'Push notifications are temporarily unavailable.'
+    }
+  }
+
+  /** Whether the Enable/Disable button should be shown */
+  const showPushButton = pushStatus === 'subscribed' || pushStatus === 'unsubscribed'
 
   return (
     <motion.div
@@ -276,9 +407,18 @@ export function ProfileClient() {
         </div>
       </ProfileSection>
 
-      {/* ── Notifications ── */}
-      <ProfileSection title="Notifications" icon={<Bell size={14} />} variants={fadeUp}>
+      {/* ── Notifications (collapsible) ── */}
+      <CollapsibleNotifications
+        isOpen={notifOpen}
+        onToggle={toggleNotifSection}
+        variants={fadeUp}
+      >
         <div className="flex flex-col gap-3">
+
+          {/* ── In-app / push categories ── */}
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-faint)' }}>
+            Push &amp; In-app
+          </p>
           {([
             { key: 'taskReminders',  label: 'Task reminders',  desc: 'Reminders for upcoming and overdue tasks' },
             { key: 'habitReminders', label: 'Habit reminders', desc: 'Daily reminders to complete your habits'  },
@@ -295,36 +435,85 @@ export function ProfileClient() {
                 onChange={(v) => {
                   const updated = { ...user.notificationPreferences, [key]: v }
                   setUser((u) => u ? { ...u, notificationPreferences: updated } : u)
-                  saveNotifPrefs(updated)
+                  saveNotifPrefs({ notificationPreferences: updated })
                 }}
               />
             </div>
           ))}
 
-          {/* ── Push notifications row ── */}
-          {pushSupported && (
-            <div className="flex items-center justify-between gap-4 py-1 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div>
-                <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>Browser push notifications</p>
-                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {pushSubscribed
-                    ? 'Push notifications are enabled on this device'
-                    : 'Get push alerts on this device'}
-                </p>
-              </div>
+          {/* ── Browser push notifications row — always rendered, status-aware ── */}
+          <div className="flex items-center justify-between gap-4 py-1 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div>
+              <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>Browser push notifications</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                {pushStatusDesc()}
+              </p>
+            </div>
+            {showPushButton && (
               <GlassButton
-                variant={pushSubscribed ? 'secondary' : 'primary'}
+                variant={pushStatus === 'subscribed' ? 'secondary' : 'primary'}
                 size="sm"
                 loading={pushLoading}
-                onClick={pushSubscribed ? disablePushNotifications : enablePushNotifications}
+                onClick={pushStatus === 'subscribed' ? disablePushNotifications : enablePushNotifications}
+                disabled={pushLoading}
               >
                 <Bell size={12} />
-                {pushSubscribed ? 'Disable' : 'Enable'}
+                {pushStatus === 'subscribed' ? 'Disable' : 'Enable'}
               </GlassButton>
+            )}
+          </div>
+
+          {/* ── Email notifications ── */}
+          <div className="border-t pt-3 mt-1 flex flex-col gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div className="flex items-center justify-between gap-4 py-1">
+              <div>
+                <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>Email notifications</p>
+                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  Emails sent to <span className="font-mono">{user.email}</span>
+                </p>
+              </div>
+              <Toggle
+                checked={user.emailNotifications?.enabled ?? false}
+                onChange={(v) => {
+                  const updated = { ...(user.emailNotifications ?? defaultEmailNotifs), enabled: v }
+                  setUser((u) => u ? { ...u, emailNotifications: updated } : u)
+                  saveNotifPrefs({ emailNotifications: updated })
+                }}
+              />
             </div>
-          )}
+
+            {/* Category toggles — only shown when email is enabled */}
+            {(user.emailNotifications?.enabled ?? false) && (
+              <div className="flex flex-col gap-2 pl-3 border-l-2" style={{ borderColor: 'var(--border-subtle)' }}>
+                <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--text-faint)' }}>
+                  Email categories
+                </p>
+                {([
+                  { key: 'taskReminders',  label: 'Task reminders',  desc: "Tomorrow's tasks & end-of-day incomplete reminder" },
+                  { key: 'habitReminders', label: 'Habit reminders', desc: "Tomorrow's habits reminder"                        },
+                  { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Budget threshold alerts'                         },
+                  { key: 'dailySummary',   label: 'Daily summary',   desc: 'Morning summary email'                            },
+                ] as { key: keyof Omit<UserType['emailNotifications'], 'enabled'>; label: string; desc: string }[]).map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-center justify-between gap-4 py-0.5">
+                    <div>
+                      <p className="text-[12.5px]" style={{ color: 'var(--text-primary)' }}>{label}</p>
+                      <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+                    </div>
+                    <Toggle
+                      checked={(user.emailNotifications?.[key] ?? true)}
+                      onChange={(v) => {
+                        const updated = { ...(user.emailNotifications ?? defaultEmailNotifs), [key]: v }
+                        setUser((u) => u ? { ...u, emailNotifications: updated } : u)
+                        saveNotifPrefs({ emailNotifications: updated })
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </ProfileSection>
+      </CollapsibleNotifications>
 
       {/* ── Security ── */}
       <ProfileSection title="Security" icon={<Shield size={14} />} variants={fadeUp}>
@@ -417,6 +606,99 @@ export function ProfileClient() {
           </div>
         </div>
       </Modal>
+    </motion.div>
+  )
+}
+
+/* ── CollapsibleNotifications ────────────────────────────────────────────────── */
+
+/**
+ * A self-contained collapsible wrapper for the Notifications section.
+ *
+ * Accessibility:
+ *   - The toggle is a <button> with role="button" (implicit)
+ *   - aria-expanded tracks the open/closed state
+ *   - aria-controls points to the panel id
+ *   - The panel has role="region" and aria-labelledby pointing to the heading
+ *   - Keyboard: Enter / Space toggle via native button behaviour
+ *   - Smooth height animation via AnimatePresence + motion.div
+ *   - No layout shift — overflow is hidden during animation
+ */
+function CollapsibleNotifications({
+  isOpen,
+  onToggle,
+  children,
+  variants,
+}: {
+  isOpen: boolean
+  onToggle: () => void
+  children: React.ReactNode
+  variants?: import('framer-motion').Variants
+}) {
+  const panelId  = useId()
+  const headerId = useId()
+  // Keep a ref so we can measure panel height for the animation
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  return (
+    <motion.div
+      variants={variants}
+      className="glass rounded-2xl overflow-hidden"
+    >
+      {/* ── Header row — always visible ── */}
+      <button
+        type="button"
+        id={headerId}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        onClick={onToggle}
+        className={cn(
+          'w-full flex items-center gap-2 px-5 py-[18px] text-left',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-inset',
+          'transition-colors hover:bg-black/[0.02] active:bg-black/[0.04]',
+          // When open, add the same bottom border that ProfileSection uses
+          isOpen && 'border-b'
+        )}
+        style={isOpen ? { borderColor: 'rgba(0,0,0,0.07)' } : {}}
+      >
+        <span style={{ color: 'var(--text-muted)' }}>
+          <Bell size={14} />
+        </span>
+        <h3 className="text-[13px] font-semibold flex-1" style={{ color: 'var(--text-secondary)' }}>
+          Notifications
+        </h3>
+        {/* Chevron — rotates 180° when open */}
+        <motion.span
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+          style={{ color: 'var(--text-faint)', display: 'flex', alignItems: 'center' }}
+          aria-hidden="true"
+        >
+          <ChevronDown size={14} />
+        </motion.span>
+      </button>
+
+      {/* ── Collapsible panel ── */}
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            key="notif-panel"
+            id={panelId}
+            role="region"
+            aria-labelledby={headerId}
+            ref={panelRef}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="px-5 pt-4 pb-5">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
