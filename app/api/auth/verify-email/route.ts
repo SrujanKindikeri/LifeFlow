@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getIronSession } from 'iron-session'
 import { connectDB } from '@/lib/db'
+import { publicEnv } from '@/lib/env'
 import User from '@/models/User'
 import { hashToken } from '@/lib/auth/crypto'
 import { SessionData, getSessionOptions } from '@/lib/session'
@@ -19,8 +20,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const rawToken = searchParams.get('token')
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const redirectBase = `${appUrl}/verify-email`
+  // Always sourced from NEXT_PUBLIC_APP_URL env var — works on localhost,
+  // AWS, or Azure without any code change between deployments.
+  const redirectBase = `${publicEnv.APP_URL}/verify-email`
 
   // ── Reject missing token ──────────────────────────────────────────────────
   if (!rawToken) {

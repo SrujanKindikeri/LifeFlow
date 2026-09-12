@@ -680,3 +680,462 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
 }
+
+// ─── Notification emails ──────────────────────────────────────────────────────
+//
+// These templates are used by the notification scheduler for meaningful
+// user-facing reminders (task summaries, habit reminders, spending alerts,
+// daily summary).
+//
+// RULES:
+//  - Every template calls wrapHtml() to get the branded Apple-style shell.
+//  - Templates are SEPARATE from verification/2FA emails — do not mix them.
+//  - Content must be concise, non-sensitive, and actionable.
+//  - Never include financial amounts, task descriptions, tokens, or passwords.
+//  - Always provide a plain-text fallback.
+//
+// SERVER-ONLY — never import from client components.
+
+// ─── Shared notification helper ───────────────────────────────────────────────
+
+/** Render a simple bulleted item list as inline-CSS HTML table rows. */
+function buildItemList(items: string[]): string {
+  if (items.length === 0) return ''
+  const rows = items
+    .slice(0, 8) // never show more than 8 items in an email
+    .map(
+      (item) =>
+        `<tr>
+          <td valign="top" width="16"
+              style="padding:3px 8px 3px 0;
+                     font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                  'Segoe UI',Arial,sans-serif;
+                     font-size:14px;color:#2563eb;">•</td>
+          <td valign="top"
+              style="padding:3px 0;
+                     font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                  'Segoe UI',Arial,sans-serif;
+                     font-size:14px;color:#334155;line-height:1.6;">
+            ${escapeHtml(item)}
+          </td>
+        </tr>`
+    )
+    .join('\n')
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"
+                 width="100%" style="margin:8px 0 24px;">${rows}</table>`
+}
+
+/** Render the standard "Open LifeFlow →" CTA button. */
+function buildNotifCta(href: string, label = 'Open LifeFlow'): string {
+  const safe = escapeHtml(href)
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 16px;">
+      <tr>
+        <td align="left">
+          <a href="${safe}" target="_blank" rel="noopener noreferrer"
+             style="display:inline-block;
+                    background-color:${BRAND_COLOR};
+                    color:#ffffff;
+                    font-family:-apple-system,BlinkMacSystemFont,
+                                 'Segoe UI','Helvetica Neue',Arial,sans-serif;
+                    font-size:15px;font-weight:600;
+                    text-decoration:none;
+                    padding:12px 32px;
+                    border-radius:100px;
+                    letter-spacing:-0.1px;
+                    box-shadow:0 2px 8px rgba(37,99,235,0.25);">
+            ${escapeHtml(label)} &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>`
+}
+
+/** Standard unsubscribe footer note for notification emails. */
+const NOTIF_FOOTER = `<p style="margin:24px 0 0;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:12px;color:#94a3b8;line-height:1.6;">
+  You can manage notification preferences in your
+  <a href="${'{APP_URL}'}/app/profile" target="_blank" rel="noopener noreferrer"
+     style="color:#64748b;text-decoration:underline;">LifeFlow profile settings</a>.
+</p>`
+
+function notifFooter(appUrl: string): string {
+  return NOTIF_FOOTER.replace('{APP_URL}', appUrl)
+}
+
+// ─── Tomorrow tasks ────────────────────────────────────────────────────────────
+
+export interface TomorrowTasksEmailOptions {
+  toName: string
+  taskCount: number
+  taskTitles: string[]   // up to 5 titles (trimmed server-side before calling)
+  tomorrowLabel: string  // e.g. "Tuesday, 13 Sep"
+  appUrl: string
+}
+
+export function buildTomorrowTasksEmail(opts: TomorrowTasksEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, taskCount, taskTitles, tomorrowLabel, appUrl } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const taskWord  = taskCount === 1 ? 'task' : 'tasks'
+  const subject   = `Tomorrow: ${taskCount} ${taskWord} scheduled — ${BRAND_NAME}`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Tomorrow: ${taskCount} ${taskWord} scheduled
+    </h2>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(tomorrowLabel)}
+    </p>
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, here&rsquo;s what&rsquo;s coming up tomorrow:
+    </p>
+    ${buildItemList(taskTitles)}
+    ${taskCount > taskTitles.length
+      ? `<p style="margin:-16px 0 20px;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Arial,sans-serif;font-size:13px;color:#94a3b8;">
+           &hellip;and ${taskCount - taskTitles.length} more. Open LifeFlow to see all.
+         </p>`
+      : ''}
+    ${buildNotifCta(`${appUrl}/app/tasks`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    `Tomorrow: ${taskCount} ${taskWord} scheduled`,
+    `${tomorrowLabel}`,
+    ``,
+    `Hi ${firstName}, here's what's coming up tomorrow:`,
+    ``,
+    ...taskTitles.map((t) => `  • ${t}`),
+    ...(taskCount > taskTitles.length
+      ? [`  … and ${taskCount - taskTitles.length} more.`]
+      : []),
+    ``,
+    `Open LifeFlow: ${appUrl}/app/tasks`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Incomplete today ──────────────────────────────────────────────────────────
+
+export interface IncompleteTasksEmailOptions {
+  toName: string
+  taskCount: number
+  taskTitles: string[]
+  todayLabel: string   // e.g. "Monday, 12 Sep"
+  appUrl: string
+}
+
+export function buildIncompleteTasksEmail(opts: IncompleteTasksEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, taskCount, taskTitles, todayLabel, appUrl } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const taskWord  = taskCount === 1 ? 'task' : 'tasks'
+  const subject   = `${taskCount} incomplete ${taskWord} today — ${BRAND_NAME}`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      ${taskCount} ${taskWord} still incomplete today
+    </h2>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(todayLabel)}
+    </p>
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, you still have ${taskWord} to finish today:
+    </p>
+    ${buildItemList(taskTitles)}
+    ${taskCount > taskTitles.length
+      ? `<p style="margin:-16px 0 20px;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Arial,sans-serif;font-size:13px;color:#94a3b8;">
+           &hellip;and ${taskCount - taskTitles.length} more.
+         </p>`
+      : ''}
+    ${buildNotifCta(`${appUrl}/app/tasks`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    `${taskCount} ${taskWord} still incomplete today`,
+    `${todayLabel}`,
+    ``,
+    `Hi ${firstName}, you still have ${taskWord} to finish today:`,
+    ``,
+    ...taskTitles.map((t) => `  • ${t}`),
+    ...(taskCount > taskTitles.length
+      ? [`  … and ${taskCount - taskTitles.length} more.`]
+      : []),
+    ``,
+    `Open LifeFlow: ${appUrl}/app/tasks`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Tomorrow habits ───────────────────────────────────────────────────────────
+
+export interface TomorrowHabitsEmailOptions {
+  toName: string
+  habitCount: number
+  habitNames: string[]
+  tomorrowLabel: string
+  appUrl: string
+}
+
+export function buildTomorrowHabitsEmail(opts: TomorrowHabitsEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, habitCount, habitNames, tomorrowLabel, appUrl } = opts
+  const firstName  = toName.split(' ')[0] ?? toName
+  const habitWord  = habitCount === 1 ? 'habit' : 'habits'
+  const subject    = `Tomorrow: ${habitCount} ${habitWord} planned — ${BRAND_NAME}`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Tomorrow: ${habitCount} ${habitWord} planned
+    </h2>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(tomorrowLabel)}
+    </p>
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, keep the streak going tomorrow:
+    </p>
+    ${buildItemList(habitNames)}
+    ${buildNotifCta(`${appUrl}/app/habits`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    `Tomorrow: ${habitCount} ${habitWord} planned`,
+    `${tomorrowLabel}`,
+    ``,
+    `Hi ${firstName}, keep the streak going tomorrow:`,
+    ``,
+    ...habitNames.map((n) => `  • ${n}`),
+    ``,
+    `Open LifeFlow: ${appUrl}/app/habits`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Spending alert ────────────────────────────────────────────────────────────
+
+export interface SpendingAlertEmailOptions {
+  toName: string
+  /** Human-readable category label e.g. "Food & Dining" */
+  categoryLabel: string
+  /** Percentage of budget used, 0–100+ */
+  percentUsed: number
+  appUrl: string
+}
+
+export function buildSpendingAlertEmail(opts: SpendingAlertEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, categoryLabel, percentUsed, appUrl } = opts
+  const firstName    = toName.split(' ')[0] ?? toName
+  const isOver       = percentUsed >= 100
+  const subject      = isOver
+    ? `Budget exceeded: ${categoryLabel} — ${BRAND_NAME}`
+    : `Budget alert: ${categoryLabel} is nearly full — ${BRAND_NAME}`
+
+  const alertBg      = isOver ? '#fef2f2' : '#fffbeb'
+  const alertBorder  = isOver ? '#fca5a5' : '#fcd34d'
+  const alertColor   = isOver ? '#991b1b' : '#92400e'
+  const alertIcon    = isOver ? '&#9888;' : '&#9432;'
+  const alertMessage = isOver
+    ? `Your <strong>${escapeHtml(categoryLabel)}</strong> budget has been exceeded (${percentUsed}% used).`
+    : `Your <strong>${escapeHtml(categoryLabel)}</strong> budget is ${percentUsed}% used.`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 20px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      ${isOver ? 'Budget exceeded' : 'Budget nearly full'}
+    </h2>
+    <div style="background:${alertBg};border:1px solid ${alertBorder};
+                border-radius:10px;padding:14px 16px;margin:0 0 20px;">
+      <p style="margin:0;
+                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                             'Segoe UI',Arial,sans-serif;
+                font-size:14px;color:${alertColor};line-height:1.65;">
+        ${alertIcon}&nbsp; ${alertMessage}
+      </p>
+    </div>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, open LifeFlow to review your spending and adjust
+      your budget if needed.
+    </p>
+    ${buildNotifCta(`${appUrl}/app/budgets`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    subject,
+    ``,
+    `Hi ${firstName},`,
+    ``,
+    isOver
+      ? `Your ${categoryLabel} budget has been exceeded (${percentUsed}% used).`
+      : `Your ${categoryLabel} budget is ${percentUsed}% used and nearly full.`,
+    ``,
+    `Open LifeFlow to review your spending: ${appUrl}/app/budgets`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Daily summary ─────────────────────────────────────────────────────────────
+
+export interface DailySummaryEmailOptions {
+  toName: string
+  todayLabel: string
+  tasksCompleted: number
+  tasksRemaining: number
+  habitsCompleted: number
+  habitsTotal: number
+  /** Optional spending alert message, e.g. "Food budget is nearly full." */
+  spendingNote?: string
+  appUrl: string
+}
+
+export function buildDailySummaryEmail(opts: DailySummaryEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const {
+    toName,
+    todayLabel,
+    tasksCompleted,
+    tasksRemaining,
+    habitsCompleted,
+    habitsTotal,
+    spendingNote,
+    appUrl,
+  } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const subject   = `Your LifeFlow daily summary — ${todayLabel}`
+
+  function statRow(label: string, value: string): string {
+    return `
+      <tr>
+        <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;
+                   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                'Segoe UI',Arial,sans-serif;
+                   font-size:14px;color:#64748b;">${escapeHtml(label)}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;text-align:right;
+                   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                'Segoe UI',Arial,sans-serif;
+                   font-size:14px;font-weight:600;color:#0f172a;">${escapeHtml(value)}</td>
+      </tr>`
+  }
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Your daily summary
+    </h2>
+    <p style="margin:0 0 24px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(todayLabel)}
+    </p>
+    <p style="margin:0 0 16px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, here&rsquo;s how your day went:
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 20px;">
+      ${statRow('Tasks completed',  `${tasksCompleted}`)}
+      ${statRow('Tasks remaining',  `${tasksRemaining}`)}
+      ${statRow('Habits completed', `${habitsCompleted} / ${habitsTotal}`)}
+    </table>
+    ${spendingNote
+      ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;
+                     padding:12px 16px;margin:0 0 20px;">
+           <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                              'Segoe UI',Arial,sans-serif;
+                     font-size:13.5px;color:#92400e;line-height:1.6;">
+             &#9432;&nbsp; ${escapeHtml(spendingNote)}
+           </p>
+         </div>`
+      : ''}
+    ${buildNotifCta(`${appUrl}/app/dashboard`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    `Your LifeFlow daily summary — ${todayLabel}`,
+    ``,
+    `Hi ${firstName},`,
+    ``,
+    `Tasks completed:  ${tasksCompleted}`,
+    `Tasks remaining:  ${tasksRemaining}`,
+    `Habits completed: ${habitsCompleted} / ${habitsTotal}`,
+    ...(spendingNote ? [``, spendingNote] : []),
+    ``,
+    `Open LifeFlow: ${appUrl}/app/dashboard`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}

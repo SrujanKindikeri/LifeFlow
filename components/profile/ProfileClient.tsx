@@ -51,6 +51,11 @@ export function ProfileClient() {
   const [deleting,     setDeleting]    = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
+  // ── Push notification state ──────────────────────────────────────────────────
+  const [pushSupported,   setPushSupported]   = useState(false)
+  const [pushSubscribed,  setPushSubscribed]  = useState(false)
+  const [pushLoading,     setPushLoading]     = useState(false)
+
   const fetchUser = useCallback(async () => {
     try {
       const res  = await fetch('/api/auth/me')
@@ -64,6 +69,97 @@ export function ProfileClient() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void fetchUser() }, [fetchUser])
+
+  // ── Push subscription helpers ────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window
+    setPushSupported(supported)
+    if (!supported) return
+
+    // Check if already subscribed
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => setPushSubscribed(!!sub))
+      .catch(() => undefined)
+  }, [])
+
+  function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+    const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+    const rawData = window.atob(base64)
+    const buffer  = new ArrayBuffer(rawData.length)
+    const output  = new Uint8Array(buffer)
+    for (let i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i)
+    return output
+  }
+
+  async function enablePushNotifications() {
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+    if (!vapidKey) { toastError('Push notifications are not configured'); return }
+
+    setPushLoading(true)
+    try {
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') { toastError('Permission denied — enable notifications in your browser settings'); return }
+
+      const reg = await navigator.serviceWorker.ready
+      let sub   = await reg.pushManager.getSubscription()
+
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly:      true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        })
+      }
+
+      const serialised = JSON.parse(JSON.stringify(sub)) as {
+        endpoint: string
+        expirationTime: number | null
+        keys: { p256dh: string; auth: string }
+      }
+
+      const res = await fetch('/api/push-subscription', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(serialised),
+      })
+
+      if (!res.ok) throw new Error('Failed to save subscription')
+      setPushSubscribed(true)
+      success('Push notifications enabled')
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Failed to enable push notifications')
+    } finally {
+      setPushLoading(false)
+    }
+  }
+
+  async function disablePushNotifications() {
+    setPushLoading(true)
+    try {
+      const reg = await navigator.serviceWorker.ready
+      const sub = await reg.pushManager.getSubscription()
+
+      if (sub) {
+        const endpoint = sub.endpoint
+        await sub.unsubscribe()
+        await fetch('/api/push-subscription', {
+          method:  'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ endpoint }),
+        })
+      }
+
+      setPushSubscribed(false)
+      success('Push notifications disabled')
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Failed to disable push notifications')
+    } finally {
+      setPushLoading(false)
+    }
+  }
 
   async function saveProfile() {
     if (!profileForm.name.trim()) { toastError('Name is required'); return }
@@ -204,6 +300,29 @@ export function ProfileClient() {
               />
             </div>
           ))}
+
+          {/* ── Push notifications row ── */}
+          {pushSupported && (
+            <div className="flex items-center justify-between gap-4 py-1 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+              <div>
+                <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>Browser push notifications</p>
+                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  {pushSubscribed
+                    ? 'Push notifications are enabled on this device'
+                    : 'Get push alerts on this device'}
+                </p>
+              </div>
+              <GlassButton
+                variant={pushSubscribed ? 'secondary' : 'primary'}
+                size="sm"
+                loading={pushLoading}
+                onClick={pushSubscribed ? disablePushNotifications : enablePushNotifications}
+              >
+                <Bell size={12} />
+                {pushSubscribed ? 'Disable' : 'Enable'}
+              </GlassButton>
+            </div>
+          )}
         </div>
       </ProfileSection>
 

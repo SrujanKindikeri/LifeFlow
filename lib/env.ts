@@ -63,6 +63,9 @@ const OPTIONAL_SERVER_VARS = [
   // TOTP secret encryption key (required when 2FA is in use)
   'TOTP_ENCRYPTION_KEY',
   'DEFAULT_TIMEZONE',
+  // Web Push / VAPID (required when push notifications are enabled)
+  'VAPID_PRIVATE_KEY',
+  'VAPID_SUBJECT',
 ] as const
 
 // ─── Public variables (NEXT_PUBLIC_*) ─────────────────────────────────────────
@@ -71,6 +74,8 @@ const OPTIONAL_SERVER_VARS = [
 const PUBLIC_VARS = [
   'NEXT_PUBLIC_APP_URL',
   'NEXT_PUBLIC_CURRENCY',
+  // VAPID public key — deliberately public, browsers need it to subscribe
+  'NEXT_PUBLIC_VAPID_PUBLIC_KEY',
 ] as const
 
 // ─── Runtime validation ───────────────────────────────────────────────────────
@@ -165,6 +170,10 @@ export function getServerEnv() {
     // App
     DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata',
     NODE_ENV:         process.env.NODE_ENV ?? 'development',
+
+    // Web Push / VAPID — server-only (VAPID_PRIVATE_KEY must NEVER be exposed to the browser)
+    VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY ?? '',
+    VAPID_SUBJECT:     process.env.VAPID_SUBJECT ?? `mailto:${process.env.EMAIL_FROM ?? 'noreply@lifeflow.app'}`,
   } as const
 }
 
@@ -227,6 +236,10 @@ export const serverEnv = {
   // App
   get DEFAULT_TIMEZONE() { return process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata' },
   get NODE_ENV()         { return process.env.NODE_ENV ?? 'development' },
+
+  // Web Push / VAPID — server-only
+  get VAPID_PRIVATE_KEY() { return process.env.VAPID_PRIVATE_KEY ?? '' },
+  get VAPID_SUBJECT()     { return process.env.VAPID_SUBJECT ?? `mailto:${process.env.EMAIL_FROM ?? 'noreply@lifeflow.app'}` },
 }
 
 // ─── Public variables (safe for browser) ─────────────────────────────────────
@@ -236,8 +249,9 @@ export const serverEnv = {
  * These must all be prefixed with NEXT_PUBLIC_.
  */
 export const publicEnv = {
-  APP_URL:  process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
-  CURRENCY: process.env.NEXT_PUBLIC_CURRENCY ?? 'INR',
+  APP_URL:           process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
+  CURRENCY:          process.env.NEXT_PUBLIC_CURRENCY ?? 'INR',
+  VAPID_PUBLIC_KEY:  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '',
 } as const
 
 // ─── Type exports ─────────────────────────────────────────────────────────────

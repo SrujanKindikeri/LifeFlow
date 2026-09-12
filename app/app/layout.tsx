@@ -2,6 +2,7 @@ import { Sidebar }  from '@/components/layout/Sidebar'
 import { BottomNav } from '@/components/layout/BottomNav'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { CommandPalette } from '@/components/ui/CommandPalette'
+import { PushRegistrar } from '@/components/notifications/PushRegistrar'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -34,6 +35,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Global command palette — rendered as overlay portal, outside the flex row */}
       <CommandPalette />
+
+      {/* Silently registers the service worker for push notifications */}
+      <PushRegistrar />
     </>
   )
 }

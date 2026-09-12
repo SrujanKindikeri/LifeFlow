@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { connectDB } from '@/lib/db'
+import { publicEnv } from '@/lib/env'
 import User from '@/models/User'
 import { generateVerificationToken } from '@/lib/auth/crypto'
 import { buildVerificationEmail } from '@/lib/auth/email-templates'
@@ -87,10 +88,11 @@ export async function POST(req: NextRequest) {
     await user.save()
 
     // ── Send email ────────────────────────────────────────────────────────
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+    // Always sourced from NEXT_PUBLIC_APP_URL — works on localhost, AWS, or
+    // Azure without any code change between deployments.
     // NOTE: the full URL (containing the token) is never logged — only the
     // base app URL is used in diagnostics to avoid token leakage in logs.
-    const verificationUrl = `${appUrl}/verify-email?token=${verificationToken}`
+    const verificationUrl = `${publicEnv.APP_URL}/verify-email?token=${verificationToken}`
 
     let emailDelivered = false
 

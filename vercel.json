@@ -3,6 +3,10 @@
     {
       "path": "/api/jobs/process-subscriptions",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/jobs/process-notifications",
+      "schedule": "0 * * * *"
     }
   ]
 }

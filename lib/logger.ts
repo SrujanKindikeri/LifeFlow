@@ -107,6 +107,9 @@ const BLOCKED_FIELDS = new Set([
   'EMAIL_API_KEY',
   'SCHEDULER_SECRET',
   'CRON_SECRET',
+  // Web Push — private key must never appear in logs
+  'VAPID_PRIVATE_KEY',
+  'vapidPrivateKey',
   'accessKey',
   'access_key',
   'secretKey',

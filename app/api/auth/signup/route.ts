@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { connectDB } from '@/lib/db'
+import { publicEnv } from '@/lib/env'
 import { signupSchema } from '@/lib/validations'
 import User, { generatePublicId } from '@/models/User'
 import { generateVerificationToken } from '@/lib/auth/crypto'
@@ -66,9 +67,10 @@ export async function POST(req: NextRequest) {
       emailVerificationExpiresAt: expiresAt,
     })
 
-    // Build verification URL from NEXT_PUBLIC_APP_URL
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-    const verificationUrl = `${appUrl}/verify-email?token=${verificationToken}`
+    // Build verification URL — always reads NEXT_PUBLIC_APP_URL from env
+    // (via publicEnv.APP_URL) so the link works on localhost, AWS, or Azure
+    // without changing source code between deployments.
+    const verificationUrl = `${publicEnv.APP_URL}/verify-email?token=${verificationToken}`
 
     // Send verification email — fire-and-forget.
     // A failed delivery does NOT roll back the signup; the user can request a

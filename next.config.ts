@@ -75,6 +75,8 @@ const securityHeaders = [
       "frame-ancestors 'self'",
       "base-uri 'self'",
       "form-action 'self'",
+      // Allow our own service worker bundle (Next.js webpack worker chunk)
+      "worker-src 'self' blob:",
     ].join('; '),
   },
 ]
@@ -119,6 +121,7 @@ const nextConfig: NextConfig = {
     'nodemailer',
     'resend',
     '@sendgrid/mail',
+    'web-push',
   ],
 
   // ─── Image optimization ─────────────────────────────────────────────────────

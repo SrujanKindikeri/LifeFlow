@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { SmartInbox } from '@/components/inbox/SmartInbox'
+import { useUnreadCount } from '@/hooks/useUnreadCount'
 
 const pageTitles: Record<string, string> = {
   '/app/dashboard':       'Dashboard',
@@ -29,13 +30,18 @@ const pageTitles: Record<string, string> = {
 }
 
 interface AppHeaderProps {
+  /** Optional initial value — live count is fetched client-side and overrides this. */
   unreadCount?: number
 }
 
-export function AppHeader({ unreadCount = 0 }: AppHeaderProps) {
-  const pathname = usePathname()
-  const title    = pageTitles[pathname] ?? 'LifeFlow'
+export function AppHeader({ unreadCount: initialCount = 0 }: AppHeaderProps) {
+  const pathname    = usePathname()
+  const title       = pageTitles[pathname] ?? 'LifeFlow'
   const [inboxOpen, setInboxOpen] = useState(false)
+  // Live unread count — polls /api/notifications every 60 s.
+  // Falls back to the server-passed initialCount until the first fetch resolves.
+  const liveCount   = useUnreadCount()
+  const unreadCount = liveCount > 0 ? liveCount : initialCount
 
   return (
     <>
