@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const { type, title, data, draftId } = body as {
@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
     // Create new draft
     const draft = await Draft.create({
       userId,
+      lifeFlowId,
       type,
       title: title ?? 'Untitled Draft',
       data: data ?? {},

@@ -3,6 +3,8 @@ import mongoose, { Document, Model, Schema } from 'mongoose'
 export interface IMoneyPayment extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   moneyRecordId: mongoose.Types.ObjectId
 
   /** Payment amount in minor currency units (paise for INR). */
@@ -24,6 +26,8 @@ export interface IMoneyPayment extends Document {
 const MoneyPaymentSchema = new Schema<IMoneyPayment>(
   {
     userId:        { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:    { type: String, required: true, index: true },
     moneyRecordId: { type: Schema.Types.ObjectId, ref: 'MoneyRecord', required: true, index: true },
     amountMinor:   {
       type: Number,

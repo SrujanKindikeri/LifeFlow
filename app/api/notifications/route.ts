@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
 // POST /api/notifications — internal use (create a notification)
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
     const { title, message, type = 'general' } = body
 
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     }
 
     await connectDB()
-    const notification = await Notification.create({ userId, title, message, type })
+    const notification = await Notification.create({ userId, lifeFlowId, title, message, type })
 
     return NextResponse.json({ notification: serialize(notification) }, { status: 201 })
   } catch (error) {

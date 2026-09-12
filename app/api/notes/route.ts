@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = noteSchema.safeParse(body)
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const note = await Note.create({ ...parsed.data, userId })
+    const note = await Note.create({ ...parsed.data, userId, lifeFlowId })
 
     return NextResponse.json(
       {

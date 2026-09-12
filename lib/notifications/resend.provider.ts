@@ -31,7 +31,11 @@ export class ResendProvider implements NotificationProvider {
 
   async send(message: EmailMessage): Promise<EmailResult> {
     try {
-      const { Resend } = await import('resend' as any)
+      // Use an indirect import to prevent Next.js from statically tracing
+      // this optional dependency at build time when EMAIL_PROVIDER=smtp.
+      // The package is only required at runtime when EMAIL_PROVIDER=resend.
+      const pkg = 'resend'
+      const { Resend } = await import(/* webpackIgnore: true */ pkg as any)
       const client     = new Resend(this.apiKey)
 
       const { data, error } = await client.emails.send({

@@ -36,6 +36,8 @@ export type ActivityType =
 export interface IActivity extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   type: ActivityType
   /** ID of the related entity (Task, Note, Goal, etc.) */
   referenceId?: mongoose.Types.ObjectId
@@ -49,6 +51,8 @@ export interface IActivity extends Document {
 const ActivitySchema = new Schema<IActivity>(
   {
     userId:      { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:  { type: String, required: true, index: true },
     type: {
       type: String,
       enum: [

@@ -5,11 +5,14 @@ import Person from '@/models/Person'
 import { z } from 'zod'
 
 const updateSchema = z.object({
-  name:       z.string().min(1).max(100).optional(),
-  phone:      z.string().max(20).optional(),
-  email:      z.string().email().max(200).optional().or(z.literal('')),
-  lifeFlowId: z.string().max(20).optional(),
-  notes:      z.string().max(500).optional(),
+  name:             z.string().min(1).max(100).optional(),
+  phone:            z.string().max(20).optional(),
+  email:            z.string().email().max(200).optional().or(z.literal('')),
+  /** The linked contact's LifeFlow account ID (another user's LF-XXXXXXXX). */
+  linkedLifeFlowId: z.string().max(20).optional(),
+  notes:            z.string().max(500).optional(),
+  // NOTE: `lifeFlowId` (the document owner field) is intentionally NOT allowed
+  // here. Users cannot change the ownership identifier through this endpoint.
 })
 
 export async function PATCH(
@@ -40,13 +43,13 @@ export async function PATCH(
 
     return NextResponse.json({
       person: {
-        _id:       person._id.toString(),
-        name:      person.name,
-        phone:     person.phone,
-        email:     person.email,
-        lifeFlowId: person.lifeFlowId,
-        notes:     person.notes,
-        updatedAt: person.updatedAt.toISOString(),
+        _id:              person._id.toString(),
+        name:             person.name,
+        phone:            person.phone,
+        email:            person.email,
+        linkedLifeFlowId: person.linkedLifeFlowId,
+        notes:            person.notes,
+        updatedAt:        person.updatedAt.toISOString(),
       },
     })
   } catch (error) {

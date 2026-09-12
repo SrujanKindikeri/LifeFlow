@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = goalSchema.safeParse(body)
@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
 
     const goal = await Goal.create({
       userId,
+      lifeFlowId,
       ...rest,
       ...(projectId ? { projectId: new mongoose.Types.ObjectId(projectId) } : {}),
       linkedTaskIds:  linkedTaskIds.map((id) => new mongoose.Types.ObjectId(id)),
@@ -98,6 +99,7 @@ export async function POST(req: NextRequest) {
     // Activity
     await Activity.create({
       userId,
+      lifeFlowId,
       type: 'goal_created',
       referenceId: goal._id,
       title: `Created goal: ${goal.title}`,

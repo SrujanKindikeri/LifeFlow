@@ -6,6 +6,8 @@ export type TaskRecurring = 'none' | 'daily' | 'weekly' | 'monthly'
 export interface ITask extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   title: string
   description?: string
   completed: boolean
@@ -22,6 +24,8 @@ export interface ITask extends Document {
 const TaskSchema = new Schema<ITask>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     title: { type: String, required: true, trim: true, maxlength: 200 },
     description: { type: String, trim: true, maxlength: 1000 },
     completed: { type: Boolean, default: false },

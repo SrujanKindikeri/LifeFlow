@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
     const { habitId, completed = true, date } = body
 
@@ -74,10 +74,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'Habit log removed' })
     }
 
-    // Upsert: create or update
+    // Upsert: create or update.
+    // lifeFlowId is set via $setOnInsert so it is written on initial creation
+    // but never overwritten on subsequent updates of the same log entry.
     const log = await HabitLog.findOneAndUpdate(
       { userId, habitId, date: logDate },
-      { $set: { completed: true } },
+      {
+        $set: { completed: true },
+        $setOnInsert: { lifeFlowId },
+      },
       { upsert: true, new: true }
     )
 

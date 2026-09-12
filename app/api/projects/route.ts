@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = projectSchema.safeParse(body)
@@ -105,10 +105,11 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const project = await Project.create({ userId, ...parsed.data })
+    const project = await Project.create({ userId, lifeFlowId, ...parsed.data })
 
     await Activity.create({
       userId,
+      lifeFlowId,
       type: 'project_created',
       referenceId: project._id,
       title: `Created project: ${project.title}`,

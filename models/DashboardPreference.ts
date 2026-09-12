@@ -13,6 +13,8 @@ export interface IDashboardSection {
 export interface IDashboardPreference extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   sections: IDashboardSection[]
   createdAt: Date
   updatedAt: Date
@@ -30,6 +32,8 @@ const DashboardSectionSchema = new Schema<IDashboardSection>(
 const DashboardPreferenceSchema = new Schema<IDashboardPreference>(
   {
     userId:   { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     sections: { type: [DashboardSectionSchema], default: DEFAULT_SECTIONS },
   },
   { timestamps: true }

@@ -47,7 +47,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = habitSchema.safeParse(body)
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const habit = await Habit.create({ ...parsed.data, userId })
+    const habit = await Habit.create({ ...parsed.data, userId, lifeFlowId })
 
     return NextResponse.json({ habit: serializeHabit(habit) }, { status: 201 })
   } catch (error) {

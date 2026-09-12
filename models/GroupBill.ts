@@ -36,6 +36,8 @@ export type SplitMode = 'item' | 'equal' | 'custom'
 export interface IGroupBill extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId // owner / creator (the "You" person)
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   name: string
   date: string // YYYY-MM-DD
   currency: string
@@ -118,6 +120,8 @@ const SettlementSchema = new Schema<ISettlement>(
 const GroupBillSchema = new Schema<IGroupBill>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     name: { type: String, required: true, trim: true, maxlength: 200 },
     date: { type: String, required: true },
     currency: { type: String, default: 'INR', maxlength: 5 },

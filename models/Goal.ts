@@ -14,6 +14,8 @@ export type GoalCategory =
 export interface IGoal extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   projectId?: mongoose.Types.ObjectId // optional — null means standalone goal
   title: string
   description?: string
@@ -33,6 +35,8 @@ export interface IGoal extends Document {
 const GoalSchema = new Schema<IGoal>(
   {
     userId:         { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:     { type: String, required: true, index: true },
     projectId:      { type: Schema.Types.ObjectId, ref: 'Project', index: true, default: null },
     title:          { type: String, required: true, trim: true, maxlength: 200 },
     description:    { type: String, trim: true, maxlength: 1000 },

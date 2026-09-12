@@ -3,6 +3,8 @@ import mongoose, { Document, Model, Schema } from 'mongoose'
 export interface IHabitLog extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   habitId: mongoose.Types.ObjectId
   date: string // ISO date string YYYY-MM-DD
   completed: boolean
@@ -13,6 +15,8 @@ export interface IHabitLog extends Document {
 const HabitLogSchema = new Schema<IHabitLog>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     habitId: { type: Schema.Types.ObjectId, ref: 'Habit', required: true },
     date: { type: String, required: true }, // YYYY-MM-DD
     completed: { type: Boolean, default: true },

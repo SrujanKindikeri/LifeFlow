@@ -213,7 +213,8 @@ export interface ProcessResult {
  */
 async function processSubscription(
   sub: ISubscription,
-  todayStr: string
+  todayStr: string,
+  lifeFlowId: string
 ): Promise<ProcessResult> {
   const result: ProcessResult = {
     subscriptionId: sub._id.toString(),
@@ -249,6 +250,7 @@ async function processSubscription(
       try {
         await Expense.create({
           userId:                  sub.userId,
+          lifeFlowId,
           // amount: stored as rupees (float) in the Expense model.
           // Subscription stores amountMinor (paise). Convert here.
           amount:                  paiseToRupees(sub.amountMinor),
@@ -267,10 +269,11 @@ async function processSubscription(
         // ── Notification ────────────────────────────────────────────────────
         // One notification per expense created (not per scheduler run).
         await Notification.create({
-          userId:  sub.userId,
-          title:   'Subscription expense added',
-          message: `${sub.serviceName} · ₹${paiseToRupees(sub.amountMinor).toLocaleString('en-IN')} · ${billingDate}`,
-          type:    'expense',
+          userId:    sub.userId,
+          lifeFlowId,
+          title:     'Subscription expense added',
+          message:   `${sub.serviceName} · ₹${paiseToRupees(sub.amountMinor).toLocaleString('en-IN')} · ${billingDate}`,
+          type:      'expense',
         }).catch(() => {
           // Notification failure must never abort the expense creation.
         })
@@ -384,15 +387,17 @@ export async function runSubscriptionScheduler(): Promise<SchedulerRunResult> {
     }
   }
 
-  // Load timezones for all relevant users in one query.
+  // Load timezones and lifeFlowIds for all relevant users in one query.
   const userIds = [...new Set(dueSubs.map((s) => s.userId.toString()))]
   const users = await User.find(
     { _id: { $in: userIds } },
-    { _id: 1, timezone: 1 }
+    { _id: 1, timezone: 1, publicId: 1 }
   ).lean()
   const tzMap: Record<string, string> = {}
+  const lfIdMap: Record<string, string> = {}
   for (const u of users) {
-    tzMap[u._id.toString()] = u.timezone ?? 'Asia/Kolkata'
+    tzMap[u._id.toString()]   = u.timezone  ?? 'Asia/Kolkata'
+    lfIdMap[u._id.toString()] = u.publicId
   }
 
   const details: ProcessResult[] = []
@@ -400,8 +405,9 @@ export async function runSubscriptionScheduler(): Promise<SchedulerRunResult> {
   let actioned = 0
 
   for (const subLean of dueSubs) {
-    const tz = tzMap[subLean.userId.toString()] ?? 'Asia/Kolkata'
-    const todayStr = todayInTimezone(tz)
+    const tz         = tzMap[subLean.userId.toString()]   ?? 'Asia/Kolkata'
+    const lifeFlowId = lfIdMap[subLean.userId.toString()] ?? ''
+    const todayStr   = todayInTimezone(tz)
 
     // Final guard: skip if the billing date hasn't arrived in user's timezone.
     if (subLean.nextBillingDate > todayStr) continue
@@ -415,7 +421,7 @@ export async function runSubscriptionScheduler(): Promise<SchedulerRunResult> {
     })
     if (!sub) continue
 
-    const result = await processSubscription(sub as ISubscription, todayStr)
+    const result = await processSubscription(sub as ISubscription, todayStr, lifeFlowId)
     details.push(result)
     totalCreated += result.expensesCreated
     if (result.cyclesProcessed > 0) actioned++

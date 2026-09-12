@@ -48,7 +48,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const { id } = await params
     const body = await req.json()
 
@@ -87,6 +87,7 @@ export async function PATCH(
     if (parsed.data.status === 'completed') {
       await Activity.create({
         userId,
+        lifeFlowId,
         type: 'goal_completed',
         referenceId: goal._id,
         title: `Completed goal: ${goal.title}`,
@@ -94,6 +95,7 @@ export async function PATCH(
     } else if (parsed.data.currentValue !== undefined) {
       await Activity.create({
         userId,
+        lifeFlowId,
         type: 'goal_updated',
         referenceId: goal._id,
         title: `Updated progress on: ${goal.title}`,

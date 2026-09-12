@@ -95,6 +95,8 @@ export interface ITransactionCapture {
 export interface IExpense extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   amount: number
   category: ExpenseCategory
   description?: string
@@ -177,6 +179,8 @@ const TransactionCaptureSchema = new Schema<ITransactionCapture>(
 const ExpenseSchema = new Schema<IExpense>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     amount: { type: Number, required: true, min: 0.01 },
     category: {
       type: String,

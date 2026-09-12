@@ -198,10 +198,11 @@ export type GroupBillUpdateInput = z.infer<typeof groupBillUpdateSchema>
 // ─── Money Tracker ────────────────────────────────────────────────────────────
 
 const moneyPersonSchema = z.object({
-  name:        z.string().min(1, 'Person name is required').max(100),
-  phone:       z.string().max(20).optional(),
-  email:       z.string().email().max(200).optional().or(z.literal('')),
-  lifeFlowId:  z.string().max(20).optional(),
+  name:             z.string().min(1, 'Person name is required').max(100),
+  phone:            z.string().max(20).optional(),
+  email:            z.string().email().max(200).optional().or(z.literal('')),
+  /** The linked contact's LifeFlow account ID — optional, not the document owner. */
+  linkedLifeFlowId: z.string().max(20).optional(),
 })
 
 export const moneyRecordSchema = z.object({

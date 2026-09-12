@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = expenseSchema.safeParse(body)
@@ -163,6 +163,7 @@ export async function POST(req: NextRequest) {
     const expense = await Expense.create({
       ...parsed.data,
       userId,
+      lifeFlowId,
       source: 'personal',
     })
 

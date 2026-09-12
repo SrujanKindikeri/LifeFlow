@@ -12,6 +12,8 @@ export interface ITransactionProof extends Document {
   _id: mongoose.Types.ObjectId
   /** Always derived from session — never from request body. */
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   /** Original filename as reported by the browser. */
   filename: string
   mimeType: string
@@ -28,6 +30,8 @@ export interface ITransactionProof extends Document {
 const TransactionProofSchema = new Schema<ITransactionProof>(
   {
     userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     filename:  { type: String, required: true, trim: true, maxlength: 255 },
     mimeType:  { type: String, required: true, maxlength: 100 },
     sizeBytes: { type: Number, required: true },

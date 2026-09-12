@@ -74,7 +74,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const { id: recordId } = await params
     await connectDB()
 
@@ -136,6 +136,7 @@ export async function POST(
     // ── 6. Create payment ─────────────────────────────────────────────────────
     const payment = await MoneyPayment.create({
       userId,
+      lifeFlowId,
       moneyRecordId: recordId,
       amountMinor,
       paymentDate,
@@ -173,7 +174,7 @@ export async function POST(
           record.direction === 'given'
             ? `${personName} has fully repaid ${formatPaise(record.originalAmountMinor, record.currency)}.`
             : `You have fully repaid ${formatPaise(record.originalAmountMinor, record.currency)} to ${personName}.`
-        await Notification.create({ userId, title, message, type: 'general' })
+        await Notification.create({ userId, lifeFlowId, title, message, type: 'general' })
       } else {
         // Partial payment notification
         const title =
@@ -186,7 +187,7 @@ export async function POST(
           record.direction === 'given'
             ? `${personName} paid you ${amountStr}.${noteClause} Remaining: ${remainingStr}.`
             : `You paid ${personName} ${amountStr}.${noteClause} Remaining: ${remainingStr}.`
-        await Notification.create({ userId, title, message, type: 'general' })
+        await Notification.create({ userId, lifeFlowId, title, message, type: 'general' })
       }
     } catch (notifErr) {
       // Non-fatal — log but do not fail the payment

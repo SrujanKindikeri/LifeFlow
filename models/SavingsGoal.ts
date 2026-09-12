@@ -3,6 +3,8 @@ import mongoose, { Document, Model, Schema } from 'mongoose'
 export interface ISavingsGoal extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   title: string
   /** Target amount in minor currency units (paise for INR). */
   targetAmountMinor: number
@@ -18,6 +20,8 @@ export interface ISavingsGoal extends Document {
 const SavingsGoalSchema = new Schema<ISavingsGoal>(
   {
     userId:            { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:        { type: String, required: true, index: true },
     title:             { type: String, required: true, trim: true, maxlength: 200 },
     targetAmountMinor: {
       type: Number,

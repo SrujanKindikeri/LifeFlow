@@ -86,10 +86,10 @@ const savingsGoalFinalizeSchema = z.object({
 const moneyRecordFinalizeSchema = z.object({
   direction: z.enum(['given', 'borrowed']),
   person: z.object({
-    name:       z.string().min(1, 'Person name is required').max(100),
-    phone:      z.string().max(20).optional(),
-    email:      z.string().email().max(200).optional().or(z.literal('')),
-    lifeFlowId: z.string().max(20).optional(),
+    name:             z.string().min(1, 'Person name is required').max(100),
+    phone:            z.string().max(20).optional(),
+    email:            z.string().email().max(200).optional().or(z.literal('')),
+    linkedLifeFlowId: z.string().max(20).optional(),
   }),
   amount:    z.number().positive('Amount must be positive').max(10_000_000),
   currency:  z.string().max(5).default('INR'),
@@ -107,7 +107,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const { id } = await params
     const body = await req.json()
 
@@ -139,7 +139,7 @@ export async function POST(
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
       }
-      const doc = await Note.create({ ...parsed.data, userId })
+      const doc = await Note.create({ ...parsed.data, userId, lifeFlowId })
       created = { _id: doc._id.toString(), type: 'note' }
     }
 
@@ -148,7 +148,7 @@ export async function POST(
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
       }
-      const doc = await Task.create({ ...parsed.data, userId })
+      const doc = await Task.create({ ...parsed.data, userId, lifeFlowId })
       created = { _id: doc._id.toString(), type: 'task' }
     }
 
@@ -157,7 +157,7 @@ export async function POST(
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
       }
-      const doc = await Habit.create({ ...parsed.data, userId })
+      const doc = await Habit.create({ ...parsed.data, userId, lifeFlowId })
       created = { _id: doc._id.toString(), type: 'habit' }
     }
 
@@ -166,7 +166,7 @@ export async function POST(
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
       }
-      const doc = await Expense.create({ ...parsed.data, userId, source: 'personal' })
+      const doc = await Expense.create({ ...parsed.data, userId, lifeFlowId, source: 'personal' })
       created = { _id: doc._id.toString(), type: 'expense' }
     }
 
@@ -192,7 +192,7 @@ export async function POST(
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
       }
-      const doc = await Goal.create({ ...parsed.data, userId, currentValue: 0, status: 'active' })
+      const doc = await Goal.create({ ...parsed.data, userId, lifeFlowId, currentValue: 0, status: 'active' })
       created = { _id: doc._id.toString(), type: 'goal' }
     }
 
@@ -201,7 +201,7 @@ export async function POST(
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
       }
-      const doc = await Project.create({ ...parsed.data, userId })
+      const doc = await Project.create({ ...parsed.data, userId, lifeFlowId })
       created = { _id: doc._id.toString(), type: 'project' }
     }
 
@@ -213,7 +213,7 @@ export async function POST(
       const amountMinor = Math.round(parsed.data.amount * 100)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { amount: _amount, ...rest } = parsed.data
-      const doc = await Subscription.create({ ...rest, amountMinor, userId })
+      const doc = await Subscription.create({ ...rest, amountMinor, userId, lifeFlowId })
       created = { _id: doc._id.toString(), type: 'subscription' }
     }
 
@@ -225,7 +225,7 @@ export async function POST(
       const targetAmountMinor = Math.round(parsed.data.targetAmount * 100)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { targetAmount: _ta, ...rest } = parsed.data
-      const doc = await SavingsGoal.create({ ...rest, targetAmountMinor, userId })
+      const doc = await SavingsGoal.create({ ...rest, targetAmountMinor, userId, lifeFlowId })
       created = { _id: doc._id.toString(), type: 'savingsGoal' }
     }
 
@@ -243,6 +243,7 @@ export async function POST(
         direction,
         originalAmountMinor,
         userId,
+        lifeFlowId,
         status: 'pending',
       })
       created = { _id: doc._id.toString(), type: direction === 'given' ? 'moneyGiven' : 'moneyBorrowed' }

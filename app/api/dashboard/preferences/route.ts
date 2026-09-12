@@ -31,7 +31,7 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
     await connectDB()
 
@@ -56,7 +56,10 @@ export async function PUT(req: NextRequest) {
 
     const pref = await DashboardPreference.findOneAndUpdate(
       { userId },
-      { $set: { sections } },
+      {
+        $set: { sections },
+        $setOnInsert: { lifeFlowId },
+      },
       { upsert: true, new: true }
     ).lean()
 

@@ -39,7 +39,7 @@ const MAX_BYTES    = 8 * 1024 * 1024  // 8 MB
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
 
     // ── Parse multipart ───────────────────────────────────────────────────────
     let formData: FormData
@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
 
     const proof = await TransactionProof.create({
       userId,
+      lifeFlowId,
       filename:  file.name,
       mimeType,
       sizeBytes: file.size,

@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
     await connectDB()
 
@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
     if (!existing) {
       await RecentActivity.create({
         userId,
+        lifeFlowId,
         type,
         entityId: new mongoose.Types.ObjectId(entityId),
         entityTitle: entityTitle.slice(0, 200),

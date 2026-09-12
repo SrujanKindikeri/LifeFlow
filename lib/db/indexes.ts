@@ -51,6 +51,7 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, dueDate: 1 } },
       { key: { userId: 1, completed: 1, dueDate: 1 } },
       { key: { userId: 1, projectId: 1 }, options: { sparse: true } },
+      { key: { lifeFlowId: 1, createdAt: -1 } },
     ],
   },
 
@@ -59,6 +60,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'habits',
     indexes: [
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -69,6 +71,7 @@ const INDEX_SPECS: IndexSpec[] = [
       // Prevent duplicate log entries for the same habit+date
       { key: { userId: 1, habitId: 1, date: 1 }, options: { unique: true } },
       { key: { userId: 1, date: 1 } },
+      { key: { lifeFlowId: 1, date: 1 } },
     ],
   },
 
@@ -80,6 +83,7 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, pinned: -1, createdAt: -1 } },
       { key: { userId: 1, archived: 1, createdAt: -1 } },
       { key: { userId: 1, projectId: 1 }, options: { sparse: true } },
+      { key: { lifeFlowId: 1, createdAt: -1 } },
     ],
   },
 
@@ -91,6 +95,7 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, category: 1, date: -1 } },
       { key: { userId: 1, source: 1, date: -1 } },
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1, date: -1 } },
       // Idempotency index: prevents duplicate subscription-generated expenses.
       // A duplicate insert (E11000) is caught and silently swallowed by the scheduler.
       {
@@ -107,6 +112,7 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, createdAt: -1 } },
       // Ownership lookup when serving proof images
       { key: { _id: 1, userId: 1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -118,6 +124,7 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, createdAt: -1 } },
       // Scheduler query: active subs with autoCreateExpense=true due today
       { key: { status: 1, autoCreateExpense: 1, nextBillingDate: 1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -127,6 +134,7 @@ const INDEX_SPECS: IndexSpec[] = [
     indexes: [
       { key: { userId: 1, createdAt: -1 } },
       { key: { userId: 1, date: -1 } },
+      { key: { lifeFlowId: 1, date: -1 } },
     ],
   },
 
@@ -136,6 +144,7 @@ const INDEX_SPECS: IndexSpec[] = [
     indexes: [
       { key: { userId: 1, month: 1, category: 1 }, options: { unique: true } },
       { key: { userId: 1, month: -1 } },
+      { key: { lifeFlowId: 1, month: -1 } },
     ],
   },
 
@@ -145,6 +154,7 @@ const INDEX_SPECS: IndexSpec[] = [
     indexes: [
       { key: { userId: 1, status: 1, targetDate: 1 } },
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -154,6 +164,7 @@ const INDEX_SPECS: IndexSpec[] = [
     indexes: [
       { key: { userId: 1, status: 1, dueDate: 1 } },
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -164,6 +175,7 @@ const INDEX_SPECS: IndexSpec[] = [
       { key: { userId: 1, status: 1, createdAt: -1 } },
       { key: { userId: 1, direction: 1, status: 1 } },
       { key: { userId: 1, dueDate: 1 }, options: { sparse: true } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -172,6 +184,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'moneypayments',
     indexes: [
       { key: { userId: 1, moneyRecordId: 1, paymentDate: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -180,6 +193,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'savingsgoals',
     indexes: [
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -188,6 +202,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'savingscontributions',
     indexes: [
       { key: { userId: 1, savingsGoalId: 1, date: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -197,6 +212,7 @@ const INDEX_SPECS: IndexSpec[] = [
     indexes: [
       { key: { userId: 1, read: 1, createdAt: -1 } },
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -205,6 +221,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'activities',
     indexes: [
       { key: { userId: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -213,6 +230,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'recentactivities',
     indexes: [
       { key: { userId: 1, timestamp: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -221,6 +239,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'dashboardpreferences',
     indexes: [
       { key: { userId: 1 }, options: { unique: true } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -229,6 +248,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'people',
     indexes: [
       { key: { userId: 1, name: 1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 
@@ -237,6 +257,7 @@ const INDEX_SPECS: IndexSpec[] = [
     collection: 'drafts',
     indexes: [
       { key: { userId: 1, type: 1, createdAt: -1 } },
+      { key: { lifeFlowId: 1 } },
     ],
   },
 ]

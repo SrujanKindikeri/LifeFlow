@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = groupBillSchema.safeParse(body)
@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
     const bill = await GroupBill.create({
       ...data,
       userId,
+      lifeFlowId,
       subtotal: result.totals.subtotal,
       discountAmount: result.totals.discountAmount,
       taxAmount: result.totals.taxAmount,

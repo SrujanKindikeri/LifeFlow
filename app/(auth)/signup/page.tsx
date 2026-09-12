@@ -39,9 +39,9 @@ function SignupForm() {
       })
       const json = await res.json()
       if (!res.ok) { error(json.error ?? 'Signup failed'); return }
-      success('Account created!')
-      router.push('/app/dashboard')
-      router.refresh()
+      // Account created — user must verify email before logging in
+      success('Account created! Please check your email to verify.')
+      router.push(`/check-email?email=${encodeURIComponent(data.email.toLowerCase())}`)
     } catch {
       error('Something went wrong. Please try again.')
     } finally {

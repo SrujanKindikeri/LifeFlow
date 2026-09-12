@@ -1,4 +1,3 @@
-
 import mongoose, { Document, Model, Schema } from 'mongoose'
 
 export type MoneyDirection = 'given' | 'borrowed'
@@ -8,12 +7,20 @@ export interface IMoneyPerson {
   name: string
   phone?: string
   email?: string
-  lifeFlowId?: string
+  /**
+   * The LifeFlow ID of the *contact* (the other party in the transaction),
+   * if they have a registered LifeFlow account.
+   * Renamed from `lifeFlowId` to avoid collision with the document-owner
+   * `lifeFlowId` field on IMoneyRecord.
+   */
+  linkedLifeFlowId?: string
 }
 
 export interface IMoneyRecord extends Document {
   _id: mongoose.Types.ObjectId
-  userId: mongoose.Types.ObjectId                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+  userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
 
   person: IMoneyPerson
   direction: MoneyDirection
@@ -37,10 +44,15 @@ export interface IMoneyRecord extends Document {
 
 const MoneyPersonSchema = new Schema<IMoneyPerson>(
   {
-    name:        { type: String, required: true, trim: true, maxlength: 100 },
-    phone:       { type: String, trim: true, maxlength: 20 },
-    email:       { type: String, trim: true, maxlength: 200 },
-    lifeFlowId:  { type: String, trim: true, maxlength: 20 },
+    name:             { type: String, required: true, trim: true, maxlength: 100 },
+    phone:            { type: String, trim: true, maxlength: 20 },
+    email:            { type: String, trim: true, maxlength: 200 },
+    /**
+     * Stored as `lifeFlowId` in MongoDB for backward compatibility with
+     * existing documents. The TypeScript interface uses `linkedLifeFlowId`
+     * to distinguish this contact-link field from the document-owner field.
+     */
+    linkedLifeFlowId: { type: String, trim: true, maxlength: 20 },
   },
   { _id: false }
 )
@@ -48,6 +60,8 @@ const MoneyPersonSchema = new Schema<IMoneyPerson>(
 const MoneyRecordSchema = new Schema<IMoneyRecord>(
   {
     userId:              { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:          { type: String, required: true, index: true },
     person:              { type: MoneyPersonSchema, required: true },
     direction:           { type: String, enum: ['given', 'borrowed'], required: true },
     originalAmountMinor: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'Must be integer paise' } },

@@ -3,6 +3,8 @@ import mongoose, { Document, Model, Schema } from 'mongoose'
 export interface ISavingsContribution extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   savingsGoalId: mongoose.Types.ObjectId
   /** Contribution amount in minor currency units (paise for INR). Must be > 0. */
   amountMinor: number
@@ -15,6 +17,8 @@ export interface ISavingsContribution extends Document {
 const SavingsContributionSchema = new Schema<ISavingsContribution>(
   {
     userId:        { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:    { type: String, required: true, index: true },
     savingsGoalId: { type: Schema.Types.ObjectId, ref: 'SavingsGoal', required: true, index: true },
     amountMinor: {
       type: Number,

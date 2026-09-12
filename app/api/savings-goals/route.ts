@@ -89,7 +89,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = savingsGoalSchema.safeParse(body)
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const goal = await SavingsGoal.create({ userId, targetAmountMinor, ...rest })
+    const goal = await SavingsGoal.create({ userId, lifeFlowId, targetAmountMinor, ...rest })
 
     return NextResponse.json({ goal: serializeGoal(goal, 0) }, { status: 201 })
   } catch (error) {

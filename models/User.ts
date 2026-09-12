@@ -3,6 +3,13 @@ import mongoose, { Document, Model, Schema } from 'mongoose'
 export interface IUser extends Document {
   _id: mongoose.Types.ObjectId
   publicId: string
+  /**
+   * Canonical LifeFlow identifier for this user — always in the form LF-XXXXXXXX.
+   * This is a virtual that returns `publicId`. It is NOT stored separately in MongoDB.
+   * Use `user.lifeFlowId` throughout server-side code when stamping owned documents.
+   * Use `user.publicId` only when you specifically need the stored field name.
+   */
+  lifeFlowId: string
   name: string
   email: string
   passwordHash: string
@@ -15,6 +22,33 @@ export interface IUser extends Document {
     spendingAlerts: boolean
     dailySummary: boolean
   }
+
+  // ── Email verification ────────────────────────────────────────────────────
+  /** true once the user has clicked a valid verification link */
+  emailVerified: boolean
+  /** SHA-256 hash of the raw token; never store the raw token */
+  emailVerificationTokenHash: string | null
+  /** UTC expiry — token is invalid at or after this date */
+  emailVerificationExpiresAt: Date | null
+
+  // ── TOTP / Google Authenticator ───────────────────────────────────────────
+  /** Whether TOTP 2FA is active for this account */
+  twoFactorEnabled: boolean
+  /**
+   * AES-256-GCM encrypted TOTP base32 secret.
+   * Format: "<iv_hex>:<authTag_hex>:<ciphertext_hex>"
+   * Never store this as plaintext.
+   */
+  twoFactorSecretEncrypted: string | null
+  /** Timestamp when 2FA was successfully verified and enabled */
+  twoFactorVerifiedAt: Date | null
+  /**
+   * Hashed single-use recovery codes.
+   * Each entry: SHA-256 hash of the raw code.
+   * An entry is removed from the array once used.
+   */
+  twoFactorRecoveryCodeHashes: string[]
+
   createdAt: Date
   updatedAt: Date
 }
@@ -60,12 +94,57 @@ const UserSchema = new Schema<IUser>(
       spendingAlerts: { type: Boolean, default: true },
       dailySummary: { type: Boolean, default: false },
     },
+
+    // ── Email verification ──────────────────────────────────────────────────
+    emailVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+      index: true,  // fast lookup during verification
+      sparse: true,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ── TOTP / Google Authenticator ─────────────────────────────────────────
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    twoFactorSecretEncrypted: {
+      type: String,
+      default: null,
+    },
+    twoFactorVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    twoFactorRecoveryCodeHashes: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true }
 )
 
-// Index for fast lookup by publicId (in addition to the unique constraint)
-UserSchema.index({ publicId: 1 })
+// publicId already has a unique index from the schema field definition above.
+// No additional explicit index needed.
+
+/**
+ * lifeFlowId virtual — returns publicId so all downstream code can reference
+ * `user.lifeFlowId` uniformly without storing a second field.
+ * Not included in lean() results; use `user.publicId` when working with lean docs,
+ * or call toObject({ virtuals: true }).
+ */
+UserSchema.virtual('lifeFlowId').get(function (this: IUser) {
+  return this.publicId
+})
 
 const User: Model<IUser> =
   mongoose.models.User || mongoose.model<IUser>('User', UserSchema)

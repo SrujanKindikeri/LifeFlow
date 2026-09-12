@@ -6,6 +6,8 @@ export type ActivityAction = 'created' | 'updated' | 'opened' | 'completed'
 export interface IRecentActivity extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   type: ActivityType
   entityId: mongoose.Types.ObjectId
   entityTitle: string
@@ -15,6 +17,8 @@ export interface IRecentActivity extends Document {
 
 const RecentActivitySchema = new Schema<IRecentActivity>({
   userId:      { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+  lifeFlowId:  { type: String, required: true, index: true },
   type:        { type: String, enum: ['note', 'task', 'habit', 'expense', 'groupBill'], required: true },
   entityId:    { type: Schema.Types.ObjectId, required: true },
   entityTitle: { type: String, required: true, trim: true, maxlength: 200 },

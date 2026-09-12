@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = budgetSchema.safeParse(body)
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
           currency: rest.currency ?? 'INR',
           status: 'active',
         },
-        $setOnInsert: { userId, category: rest.category, month: targetMonth },
+        $setOnInsert: { userId, lifeFlowId, category: rest.category, month: targetMonth },
       },
       { upsert: true, new: true }
     )

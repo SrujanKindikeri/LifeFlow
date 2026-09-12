@@ -1,4 +1,4 @@
-import { requireAuth } from '@/lib/session'
+import { requireAuth, getSession } from '@/lib/session'
 import { redirect } from 'next/navigation'
 import { getDashboardData } from '@/lib/dashboard'
 import { DashboardClient } from './DashboardClient'
@@ -7,7 +7,22 @@ export default async function DashboardPage() {
   let session
   try {
     session = await requireAuth()
+    console.log('[AUTH] dashboard session present', { userId: session.userId })
   } catch {
+    // Destroy the cookie before redirecting to /login.
+    // Without this, the proxy sees isLoggedIn=true in the stale cookie and
+    // bounces every /login visit straight back to /app/dashboard, creating
+    // the ERR_TOO_MANY_REDIRECTS loop.
+    console.log('[AUTH] dashboard session missing or invalid — destroying session and redirecting to login')
+    try {
+      const s = await getSession()
+      s.destroy()
+    } catch {
+      // If we can't destroy (e.g. env missing), still redirect — the loop
+      // is broken by the proxy's isVerified check (emailVerified not set in
+      // a legacy/corrupt session means the proxy sends to /verify-email, not
+      // back to /app/dashboard).
+    }
     redirect('/login')
   }
 

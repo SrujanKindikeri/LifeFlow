@@ -31,7 +31,11 @@ export class SendGridProvider implements NotificationProvider {
 
   async send(message: EmailMessage): Promise<EmailResult> {
     try {
-      const sgMail = await import('@sendgrid/mail' as any)
+      // Use an indirect import to prevent Next.js from statically tracing
+      // this optional dependency at build time when EMAIL_PROVIDER=smtp.
+      // The package is only required at runtime when EMAIL_PROVIDER=sendgrid.
+      const pkg = '@sendgrid/mail'
+      const sgMail = await import(/* webpackIgnore: true */ pkg as any)
       sgMail.default.setApiKey(this.apiKey)
 
       await sgMail.default.send({

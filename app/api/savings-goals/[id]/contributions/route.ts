@@ -58,7 +58,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const { id } = await params
     const body = await req.json()
 
@@ -79,6 +79,7 @@ export async function POST(
 
     const contribution = await SavingsContribution.create({
       userId,
+      lifeFlowId,
       savingsGoalId: id,
       amountMinor,
       date: parsed.data.date,
@@ -87,6 +88,7 @@ export async function POST(
 
     await Activity.create({
       userId,
+      lifeFlowId,
       type: 'savings_contributed',
       referenceId: goal._id,
       title: `Added ₹${parsed.data.amount.toLocaleString('en-IN')} to ${goal.title}`,

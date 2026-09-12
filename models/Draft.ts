@@ -167,6 +167,8 @@ export type DraftData =
 export interface IDraft extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   type: DraftType
   title: string          // human-readable title for display in Drafts list
   data: Record<string, unknown>  // the partial form data
@@ -184,6 +186,8 @@ const DraftSchema = new Schema<IDraft>(
       required: true,
       index: true,
     },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId: { type: String, required: true, index: true },
     type: {
       type: String,
       enum: [

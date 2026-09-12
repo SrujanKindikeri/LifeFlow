@@ -90,7 +90,7 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
 
 export async function PATCH(req: NextRequest, { params }: RouteContext) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const { id } = await params
     const body = await req.json()
     await connectDB()
@@ -168,6 +168,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
       // Create the personal expense — only the user's share, never the full bill total
       const expense = await Expense.create({
         userId,
+        lifeFlowId,
         amount: Math.round(myShare.total * 100) / 100,
         category,
         description: `${bill.name} (your share)`,

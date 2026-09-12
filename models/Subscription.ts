@@ -17,6 +17,8 @@ export type SubscriptionCategory =
 export interface ISubscription extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   serviceName: string
   /** Amount in minor currency units (paise for INR). */
   amountMinor: number
@@ -43,6 +45,8 @@ export interface ISubscription extends Document {
 const SubscriptionSchema = new Schema<ISubscription>(
   {
     userId:              { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:          { type: String, required: true, index: true },
     serviceName:         { type: String, required: true, trim: true, maxlength: 100 },
     amountMinor:         {
       type: Number,

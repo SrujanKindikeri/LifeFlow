@@ -54,6 +54,14 @@ const OPTIONAL_SERVER_VARS = [
   'EMAIL_PROVIDER',
   'EMAIL_API_KEY',
   'EMAIL_FROM',
+  'EMAIL_FROM_NAME',
+  // SMTP relay (required when EMAIL_PROVIDER=smtp)
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_USER',
+  'SMTP_PASSWORD',
+  // TOTP secret encryption key (required when 2FA is in use)
+  'TOTP_ENCRYPTION_KEY',
   'DEFAULT_TIMEZONE',
 ] as const
 
@@ -141,6 +149,18 @@ export function getServerEnv() {
     EMAIL_PROVIDER: (process.env.EMAIL_PROVIDER ?? 'none') as EmailProvider,
     EMAIL_API_KEY:  process.env.EMAIL_API_KEY ?? '',
     EMAIL_FROM:     process.env.EMAIL_FROM ?? 'noreply@lifeflow.app',
+    EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME ?? 'LifeFlow',
+
+    // SMTP relay (used when EMAIL_PROVIDER=smtp)
+    SMTP_HOST:     process.env.SMTP_HOST ?? '',
+    SMTP_PORT:     parseInt(process.env.SMTP_PORT ?? '587', 10),
+    SMTP_USER:     process.env.SMTP_USER ?? '',
+    SMTP_PASSWORD: process.env.SMTP_PASSWORD ?? process.env.SMTP_PASS ?? '',
+
+    // TOTP 2FA — AES-256-GCM encryption key for stored secrets
+    // Must be a 32-byte (256-bit) hex string.
+    // Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+    TOTP_ENCRYPTION_KEY: process.env.TOTP_ENCRYPTION_KEY ?? '',
 
     // App
     DEFAULT_TIMEZONE: process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata',
@@ -193,6 +213,16 @@ export const serverEnv = {
   get EMAIL_PROVIDER() { return (process.env.EMAIL_PROVIDER ?? 'none') as EmailProvider },
   get EMAIL_API_KEY()  { return process.env.EMAIL_API_KEY ?? '' },
   get EMAIL_FROM()     { return process.env.EMAIL_FROM ?? 'noreply@lifeflow.app' },
+  get EMAIL_FROM_NAME() { return process.env.EMAIL_FROM_NAME ?? 'LifeFlow' },
+
+  // SMTP relay
+  get SMTP_HOST()     { return process.env.SMTP_HOST ?? '' },
+  get SMTP_PORT()     { return parseInt(process.env.SMTP_PORT ?? '587', 10) },
+  get SMTP_USER()     { return process.env.SMTP_USER ?? '' },
+  get SMTP_PASSWORD() { return process.env.SMTP_PASSWORD ?? process.env.SMTP_PASS ?? '' },
+
+  // TOTP 2FA encryption key
+  get TOTP_ENCRYPTION_KEY() { return process.env.TOTP_ENCRYPTION_KEY ?? '' },
 
   // App
   get DEFAULT_TIMEZONE() { return process.env.DEFAULT_TIMEZONE ?? 'Asia/Kolkata' },

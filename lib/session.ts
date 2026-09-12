@@ -1,12 +1,56 @@
 import { getIronSession, IronSession, SessionOptions } from 'iron-session'
 import { cookies } from 'next/headers'
 import { getServerEnv } from '@/lib/env'
+import { connectDB } from '@/lib/db'
 
 export interface SessionData {
   userId: string
   name: string
   email: string
   isLoggedIn: boolean
+
+  /**
+   * Whether the user's email address has been verified.
+   * Set to true at login time — only users who have verified their email
+   * reach the session-creation code in the login route.
+   * The proxy uses this to redirect unverified users to /verify-email
+   * without hitting the database on every request.
+   */
+  emailVerified?: boolean
+
+  /**
+   * Set to true after password is verified but BEFORE the TOTP step is
+   * completed.  Guards the /api/auth/verify-2fa endpoint.
+   * Must be false (or absent) for a fully-authenticated session.
+   */
+  twoFactorPending?: boolean
+  /**
+   * Holds the userId during the 2FA challenge window so we know which
+   * account to complete the login for.  Only valid when twoFactorPending=true.
+   */
+  pendingUserId?: string
+  /**
+   * Unix timestamp (ms) when the 2FA challenge was issued.
+   * Allows us to expire the pending session after a short window.
+   */
+  twoFactorPendingAt?: number
+}
+
+/**
+ * The shape returned by requireAuth().
+ * Always server-derived — never trust lifeFlowId from client input.
+ */
+export interface AuthUser {
+  userId: string
+  name: string
+  email: string
+  isLoggedIn: boolean
+  /**
+   * The authenticated user's LifeFlow ID (LF-XXXXXXXX).
+   * Sourced from User.publicId in the database.
+   * NEVER trust a lifeFlowId supplied by the client — always use this value.
+   */
+  lifeFlowId: string
 }
 
 /**
@@ -24,7 +68,13 @@ export function getSessionOptions(): SessionOptions {
     password: getServerEnv().SESSION_SECRET,
     cookieName: 'lifeflow_session',
     cookieOptions: {
-      secure: process.env.NODE_ENV === 'production',
+      // Only mark the cookie Secure when we are actually running over HTTPS.
+      // Using NODE_ENV === 'production' alone would break local HTTP dev if
+      // the server is ever started with NODE_ENV=production locally.
+      // This check requires BOTH production mode AND an HTTPS app URL.
+      secure:
+        process.env.NODE_ENV === 'production' &&
+        (process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://') ?? false),
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7 days
@@ -38,15 +88,36 @@ export async function getSession(): Promise<IronSession<SessionData>> {
   return session
 }
 
-export async function requireAuth(): Promise<SessionData> {
+/**
+ * Verify the session is authenticated and return the authenticated user's
+ * identity, including their server-derived lifeFlowId.
+ *
+ * The lifeFlowId is read from the User document in MongoDB — it is NEVER
+ * taken from the request body, query string, or any client-supplied value.
+ *
+ * Throws Error('Unauthorized') if the session is not authenticated.
+ */
+export async function requireAuth(): Promise<AuthUser> {
   const session = await getSession()
   if (!session.isLoggedIn || !session.userId) {
     throw new Error('Unauthorized')
   }
+
+  // Lazy import to avoid circular dependency at module load time
+  const { default: User } = await import('@/models/User')
+
+  await connectDB()
+  const user = await User.findById(session.userId).select('publicId name email').lean()
+  if (!user) {
+    // Session refers to a deleted account — treat as unauthorized
+    throw new Error('Unauthorized')
+  }
+
   return {
-    userId: session.userId!,
-    name: session.name!,
-    email: session.email!,
+    userId:     session.userId,
+    name:       session.name!,
+    email:      session.email!,
     isLoggedIn: session.isLoggedIn,
+    lifeFlowId: user.publicId,
   }
 }

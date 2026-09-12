@@ -129,7 +129,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     await connectDB()
 
     const body = await req.json()
@@ -146,6 +146,7 @@ export async function POST(req: NextRequest) {
 
     const record = await MoneyRecord.create({
       userId,
+      lifeFlowId,
       ...rest,
       originalAmountMinor,
       currency: currency ?? 'INR',

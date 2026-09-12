@@ -92,7 +92,7 @@ async function enrichPerson(
     name:              person.name,
     phone:             person.phone,
     email:             person.email,
-    lifeFlowId:        person.lifeFlowId,
+    linkedLifeFlowId:  person.linkedLifeFlowId,
     notes:             person.notes,
     createdAt:         person.createdAt.toISOString(),
     updatedAt:         person.updatedAt.toISOString(),
@@ -129,12 +129,12 @@ export async function GET(req: NextRequest) {
     if (!withFinancials) {
       return NextResponse.json({
         people: people.map((p) => ({
-          _id:   p._id.toString(),
-          name:  p.name,
-          phone: p.phone,
-          email: p.email,
-          lifeFlowId: p.lifeFlowId,
-          notes: p.notes,
+          _id:             p._id.toString(),
+          name:            p.name,
+          phone:           p.phone,
+          email:           p.email,
+          linkedLifeFlowId: p.linkedLifeFlowId,
+          notes:           p.notes,
         })),
       })
     }
@@ -155,7 +155,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = personSchema.safeParse(body)
@@ -165,17 +165,25 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const person = await Person.create({ userId, ...parsed.data })
+    // Map incoming lifeFlowId (the contact's account) to linkedLifeFlowId
+    // so it doesn't collide with the ownership lifeFlowId field.
+    const { lifeFlowId: contactLifeFlowId, ...personData } = parsed.data
+    const person = await Person.create({
+      userId,
+      lifeFlowId,
+      ...personData,
+      ...(contactLifeFlowId ? { linkedLifeFlowId: contactLifeFlowId } : {}),
+    })
 
     return NextResponse.json({
       person: {
-        _id:       person._id.toString(),
-        name:      person.name,
-        phone:     person.phone,
-        email:     person.email,
-        lifeFlowId: person.lifeFlowId,
-        notes:     person.notes,
-        createdAt: person.createdAt.toISOString(),
+        _id:             person._id.toString(),
+        name:            person.name,
+        phone:           person.phone,
+        email:           person.email,
+        linkedLifeFlowId: person.linkedLifeFlowId,
+        notes:           person.notes,
+        createdAt:       person.createdAt.toISOString(),
       },
     }, { status: 201 })
   } catch (error) {

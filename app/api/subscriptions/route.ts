@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const body = await req.json()
 
     const parsed = subSchema.safeParse(body)
@@ -117,9 +117,10 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const sub = await Subscription.create({ userId, amountMinor, ...rest })
+    const sub = await Subscription.create({ userId, lifeFlowId, amountMinor, ...rest })
     await Activity.create({
       userId,
+      lifeFlowId,
       type: 'subscription_added',
       referenceId: sub._id,
       title: `Added subscription: ${sub.serviceName}`,

@@ -6,6 +6,8 @@ export type BudgetStatus = 'active' | 'paused'
 export interface IBudget extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
+  /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
+  lifeFlowId: string
   category: ExpenseCategory
   /** Budget limit in minor currency units (paise for INR). */
   amountMinor: number
@@ -25,6 +27,8 @@ export interface IBudget extends Document {
 const BudgetSchema = new Schema<IBudget>(
   {
     userId:      { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
+    lifeFlowId:  { type: String, required: true, index: true },
     category: {
       type: String,
       enum: ['food', 'transport', 'shopping', 'bills', 'entertainment', 'education', 'health', 'subscriptions', 'other'],

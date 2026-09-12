@@ -93,7 +93,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await requireAuth()
+    const { userId, lifeFlowId } = await requireAuth()
     const { id } = await params
     const body = await req.json()
 
@@ -117,6 +117,7 @@ export async function PATCH(
     if (parsed.data.status === 'completed') {
       await Activity.create({
         userId,
+        lifeFlowId,
         type: 'project_completed',
         referenceId: project._id,
         title: `Completed project: ${project.title}`,
