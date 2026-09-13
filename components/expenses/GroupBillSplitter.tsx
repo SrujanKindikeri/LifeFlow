@@ -30,6 +30,7 @@ import {
   newPersonId,
 } from './types'
 import { getTodayString } from '@/lib/utils'
+import { BillScannerModal, type ScanResult } from './BillScannerModal'
 
 // ─── Step type ──────────────────────────────────────────────────────────────
 
@@ -53,6 +54,12 @@ interface GroupBillSplitterProps {
   onSave: (bill: GroupBillData) => Promise<void>
   onCancel: () => void
   saving?: boolean
+  /**
+   * When true, the wizard skips directly to the Items step and opens the
+   * bill scanner automatically. Set by ExpensesClient when the user chose
+   * "Scan a Bill" in the choice modal.
+   */
+  startWithScan?: boolean
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -62,6 +69,7 @@ export function GroupBillSplitter({
   onSave,
   onCancel,
   saving = false,
+  startWithScan = false,
 }: GroupBillSplitterProps) {
   const { error: toastError, success: toastSuccess, warning: toastWarning } = useToast()
 
@@ -95,9 +103,66 @@ export function GroupBillSplitter({
   const [tipType, setTipType] = useState<ChargeValueType>(initialData?.tipType ?? 'amount')
   const [tipValue, setTipValue] = useState(initialData?.tipValue ?? 0)
 
+  // ── Bill scanner ───────────────────────────────────────────────────────
+  const [scannerOpen, setScannerOpen] = useState(false)
+
+  function handleScanResult(result: ScanResult) {
+    // ── Items ──────────────────────────────────────────────────────────────
+    const newItems: BillItem[] = result.items.map((si) => ({
+      id: newItemId(),
+      name: si.name,
+      // BillItem.price is unit price; lineTotal = quantity × price
+      price: si.unitPrice,
+      quantity: si.quantity,
+      assignedPeople: [],
+    }))
+    // Replace existing items only if we got at least one from the scan;
+    // otherwise leave current items untouched.
+    if (newItems.length > 0) {
+      setItems(newItems)
+    }
+
+    // ── Charges ────────────────────────────────────────────────────────────
+    // Only overwrite a charge if the scanner found a non-zero value,
+    // to avoid wiping values the user already entered.
+    if (result.taxAmount !== null && result.taxAmount > 0) {
+      setTaxType('amount')
+      setTaxValue(result.taxAmount)
+    }
+    if (result.serviceCharge !== null && result.serviceCharge > 0) {
+      setServiceChargeType('amount')
+      setServiceChargeValue(result.serviceCharge)
+    }
+    if (result.discount !== null && result.discount > 0) {
+      setDiscountType('amount')
+      setDiscountValue(result.discount)
+    }
+
+    // ── Split mode suggestion ───────────────────────────────────────────────
+    if (result.suggestItemSplit) {
+      setSplitMode('item')
+    }
+
+    // ── Navigate to items step so the user can assign items to people ────────
+    setStep('items')
+  }
+
   // ── Step navigation ────────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('details')
   const stepIdx = STEP_ORDER.indexOf(step)
+
+  // When the user chose "Scan a Bill" from the entry-point choice modal,
+  // jump straight to the Items step and open the scanner automatically.
+  // The `useRef` guard ensures this runs only once on mount, not on every render.
+  const didAutoScan = useRef(false)
+  useEffect(() => {
+    if (startWithScan && !didAutoScan.current) {
+      didAutoScan.current = true
+      setStep('items')
+      setScannerOpen(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Live calculation ───────────────────────────────────────────────────
   const calcResult = useMemo<BillCalculationResult>(() => {
@@ -227,6 +292,7 @@ export function GroupBillSplitter({
               items={items} setItems={setItems}
               people={people} currency={currency}
               calcResult={calcResult}
+              onScanBill={() => setScannerOpen(true)}
             />
           )}
           {step === 'charges' && (
@@ -284,6 +350,15 @@ export function GroupBillSplitter({
           </GlassButton>
         )}
       </div>
+
+      {/* Bill scanner modal — loaded lazily, only mounted when open */}
+      {scannerOpen && (
+        <BillScannerModal
+          isOpen={scannerOpen}
+          onClose={() => setScannerOpen(false)}
+          onConfirm={handleScanResult}
+        />
+      )}
     </div>
   )
 }
@@ -529,13 +604,14 @@ export { PersonChip }
 // ══════════════════════════════════════════════════════════════════════════
 
 function ItemsStep({
-  items, setItems, people, currency, calcResult,
+  items, setItems, people, currency, calcResult, onScanBill,
 }: {
   items: BillItem[]
   setItems: React.Dispatch<React.SetStateAction<BillItem[]>>
   people: BillPerson[]
   currency: string
   calcResult: BillCalculationResult
+  onScanBill: () => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -581,11 +657,23 @@ function ItemsStep({
     <GlassCard padding="lg" className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>Items</h2>
-        {subtotal > 0 && (
-          <span className="text-sm font-semibold text-indigo-300">
-            {formatMoney(subtotal, currency)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          <GlassButton
+            variant="secondary"
+            size="sm"
+            className="gap-1.5"
+            onClick={onScanBill}
+            title="Scan a receipt to auto-fill items"
+          >
+            <ReceiptText size={13} />
+            Scan Bill
+          </GlassButton>
+          {subtotal > 0 && (
+            <span className="text-sm font-semibold text-indigo-300">
+              {formatMoney(subtotal, currency)}
+            </span>
+          )}
+        </div>
       </div>
 
       <AnimatePresence>

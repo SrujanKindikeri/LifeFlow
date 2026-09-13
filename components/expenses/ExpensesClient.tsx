@@ -12,6 +12,7 @@ import { GroupBillList } from './GroupBillList'
 import { GroupBillSplitter } from './GroupBillSplitter'
 import { GroupBillDetail } from './GroupBillDetail'
 import { GroupBillCalendar } from './GroupBillCalendar'
+import { SplitBillChoiceModal } from './SplitBillChoiceModal'
 
 type View = 'list' | 'create' | 'edit' | 'detail'
 
@@ -172,8 +173,19 @@ export function ExpensesClient() {
   }
 
   // ── Navigation ───────────────────────────────────────────────────────────────
-  function openCreate()                      { setEditingBill(null); setView('create') }
-  function openEdit(bill: GroupBillData)     { setEditingBill(bill); setView('edit') }
+
+  // "+ Split a Bill" now shows a choice modal first.
+  const [choiceOpen,   setChoiceOpen]   = useState(false)
+  // Whether the create view should auto-open the scanner on mount.
+  const [startWithScan, setStartWithScan] = useState(false)
+
+  /** Called by the "+ Split a Bill" button — opens the Scan / Manual choice. */
+  function openCreate()                      { setChoiceOpen(true) }
+  /** User chose "Enter Manually" in the choice modal. */
+  function openManual()                      { setStartWithScan(false); setEditingBill(null); setView('create') }
+  /** User chose "Scan a Bill" in the choice modal. */
+  function openScan()                        { setStartWithScan(true);  setEditingBill(null); setView('create') }
+  function openEdit(bill: GroupBillData)     { setStartWithScan(false); setEditingBill(bill); setView('edit') }
   function openDetail(bill: GroupBillData)   { setSelectedBill(bill); setView('detail') }
   function goToList()                        { setView('list'); setSelectedBill(null); setEditingBill(null) }
 
@@ -360,7 +372,9 @@ export function ExpensesClient() {
                 {view === 'create' ? 'New Group Bill' : 'Edit Group Bill'}
               </h1>
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                {view === 'create' ? 'Split a bill with your group' : 'Update bill details'}
+                {view === 'create'
+                  ? (startWithScan ? 'Scan a receipt to split with your group' : 'Split a bill with your group')
+                  : 'Update bill details'}
               </p>
             </div>
             <GroupBillSplitter
@@ -372,6 +386,7 @@ export function ExpensesClient() {
                   : goToList
               }
               saving={saving}
+              startWithScan={view === 'create' ? startWithScan : false}
             />
           </motion.div>
         )}
@@ -394,6 +409,14 @@ export function ExpensesClient() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Split Bill choice — shown when user clicks "+ Split a Bill" */}
+      <SplitBillChoiceModal
+        isOpen={choiceOpen}
+        onClose={() => setChoiceOpen(false)}
+        onScanBill={openScan}
+        onManualEntry={openManual}
+      />
     </div>
   )
 }
