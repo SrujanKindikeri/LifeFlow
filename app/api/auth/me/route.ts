@@ -29,6 +29,7 @@ export async function GET() {
         currency: user.currency,
         timezone: user.timezone,
         notificationPreferences: user.notificationPreferences,
+        emailNotifications: user.emailNotifications,
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       },
@@ -70,9 +71,20 @@ export async function PATCH(req: NextRequest) {
 
     // ── Update notification preferences ──
     if (body.action === 'updateNotifications') {
+      // Build the $set payload — only include keys that are present in the body
+      // so a client that only sends notificationPreferences doesn't wipe emailNotifications
+      // and vice versa.
+      const setPayload: Record<string, unknown> = {}
+      if (body.notificationPreferences !== undefined) {
+        setPayload['notificationPreferences'] = body.notificationPreferences
+      }
+      if (body.emailNotifications !== undefined) {
+        setPayload['emailNotifications'] = body.emailNotifications
+      }
+
       const user = await User.findByIdAndUpdate(
         userId,
-        { $set: { notificationPreferences: body.notificationPreferences } },
+        { $set: setPayload },
         { new: true }
       ).select('-passwordHash')
       if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -87,6 +99,7 @@ export async function PATCH(req: NextRequest) {
           currency: user.currency,
           timezone: user.timezone,
           notificationPreferences: user.notificationPreferences,
+          emailNotifications: user.emailNotifications,
           createdAt: user.createdAt.toISOString(),
           updatedAt: user.updatedAt.toISOString(),
         },
@@ -124,6 +137,7 @@ export async function PATCH(req: NextRequest) {
         currency: user.currency,
         timezone: user.timezone,
         notificationPreferences: user.notificationPreferences,
+        emailNotifications: user.emailNotifications,
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       },

@@ -5,6 +5,7 @@
  *   • Tomorrow's tasks (grouped, one notification)
  *   • Tomorrow's habits (grouped, one notification)
  *   • Today's incomplete tasks (end-of-day reminder)
+ *   • Habit reminder (morning, incomplete habits)
  *   • Spending / budget alerts (threshold crossed)
  *   • Daily summary (optional, one per day)
  *
@@ -15,28 +16,26 @@
  *
  * 2. Timezone-awareness.  "Today" and "tomorrow" are computed using each user's
  *    `timezone` field (falls back to DEFAULT_TIMEZONE env var → 'Asia/Kolkata').
- *    A user in India and a user in the US get their reminders at the correct
- *    local time regardless of when the scheduler (UTC) fires.
  *
  * 3. User isolation.  Queries always include userId.  Users never see each
  *    other's data.
  *
- * 4. Delivery channels.  Each notification is delivered to all three channels
- *    that the user has enabled:
+ * 4. Delivery channels.  Each notification is delivered to all channels the
+ *    user has enabled:
  *      a) In-app  — always created in the Notification collection
  *      b) Push    — sent via lib/pushSender.ts (silently skipped if no VAPID)
- *      c) Email   — sent via getNotificationService() (silently skipped if
- *                   EMAIL_PROVIDER=none)
+ *      c) Email   — sent via getNotificationService() only when:
+ *                   • emailNotifications.enabled === true
+ *                   • the per-category flag for the notification type is true
+ *                   • EMAIL_PROVIDER != 'none'
  *    Channel failures do not abort other channels.
  *
- * 5. Quiet hours.  Notifications are skipped if the current UTC time falls
- *    within the user's configured quiet window.  Default quiet window when
- *    not configured: 22:00–07:00 local time.
+ * 5. Quiet hours.  Notifications are skipped if the local hour falls within
+ *    the configured quiet window (default: 22:00–07:00 local time).
  *
- * 6. Conservative email defaults.  Email is only sent for daily summary if the
- *    user has dailySummary enabled.  Task/habit/spending emails are delivered
- *    only via in-app + push by default to avoid inbox flooding.  This can be
- *    extended later per user preference.
+ * 6. Email recipient security.  The recipient address is always resolved from
+ *    the authenticated user's database record (user.email).  No client-supplied
+ *    address is ever used.
  *
  * 7. Privacy.  Push notification bodies are concise summaries only — no full
  *    task titles, financial amounts, or other private data that could appear
@@ -44,22 +43,17 @@
  *
  * EMAIL VERIFICATION SAFETY
  * ─────────────────────────
- * This module calls getNotificationService() for summary emails only.
- * It never touches verification token generation, verification routes, or
- * the token expiry logic.  Verification emails are sent exclusively by the
+ * This module never touches verification token generation, verification routes,
+ * or token expiry logic.  Verification emails are sent exclusively by the
  * auth routes (app/api/auth/signup, app/api/auth/resend-verification).
  *
  * SCHEDULER TIMING (recommended cron: every hour, on the hour)
  * ─────────────────────────────────────────────────────────────
  *   • Tomorrow tasks/habits:    sent in the evening window (18:00–21:00 local)
  *   • Incomplete today:         sent in the late-afternoon window (17:00–20:00 local)
+ *   • Habit reminder:           sent in the morning window (09:00–11:00 local)
  *   • Spending alerts:          sent any time (checked per run)
  *   • Daily summary:            sent in the morning window (08:00–10:00 local)
- *
- * These windows are checked against the user's local hour at scheduler run time.
- * If the scheduler fires hourly, each notification will be sent once per day
- * within its window — deduplication ensures it is not repeated if the scheduler
- * fires again during the same window.
  */
 
 import mongoose from 'mongoose'
@@ -75,12 +69,15 @@ import NotificationLog, { type ScheduledNotificationType } from '@/models/Notifi
 import { sendPushToUser } from '@/lib/pushSender'
 import { getNotificationService } from '@/lib/notifications'
 import {
+  buildTomorrowTasksEmail,
+  buildIncompleteTasksEmail,
+  buildTomorrowHabitsEmail,
   buildSpendingAlertEmail,
   buildDailySummaryEmail,
 } from '@/lib/auth/email-templates'
 import logger from '@/lib/logger'
 
-// ─── Date helpers (reuse pattern from subscriptionScheduler) ──────────────────
+// ─── Date helpers ─────────────────────────────────────────────────────────────
 
 /**
  * Return today's date as YYYY-MM-DD in the given IANA timezone.
@@ -204,13 +201,75 @@ async function checkAndRecord(
   }
 }
 
+// ─── Type definitions ─────────────────────────────────────────────────────────
+
+interface NotifPrefs {
+  taskReminders:  boolean
+  habitReminders: boolean
+  spendingAlerts: boolean
+  dailySummary:   boolean
+}
+
+interface EmailNotifPrefs {
+  enabled:        boolean
+  taskReminders:  boolean
+  habitReminders: boolean
+  spendingAlerts: boolean
+  dailySummary:   boolean
+}
+
+interface UserRecord {
+  _id:                     mongoose.Types.ObjectId
+  publicId:                string
+  name:                    string
+  email:                   string
+  timezone:                string
+  notificationPreferences: NotifPrefs
+  emailNotifications:      EmailNotifPrefs
+}
+
+/** Results for a single user's notification run. */
+interface UserResult {
+  userId:  string
+  sent:    number
+  skipped: number
+  errors:  string[]
+}
+
+// ─── Email eligibility helper ─────────────────────────────────────────────────
+
+/**
+ * Determine whether an email should be sent for a given category.
+ *
+ * Rules (all must be true):
+ *   1. emailNotifications.enabled is true  (master switch)
+ *   2. The per-category flag is true
+ *   3. The user has a valid email address
+ *
+ * The email address is ALWAYS sourced from the user's DB record — never from
+ * client input.
+ */
+function shouldSendEmail(
+  emailPrefs: EmailNotifPrefs,
+  categoryKey: keyof Omit<EmailNotifPrefs, 'enabled'>,
+  userEmail: string
+): boolean {
+  if (!emailPrefs.enabled) return false
+  if (!emailPrefs[categoryKey]) return false
+  if (!userEmail || !userEmail.includes('@')) return false
+  return true
+}
+
 // ─── Delivery helper ──────────────────────────────────────────────────────────
 
 interface DeliveryOptions {
-  userId:      mongoose.Types.ObjectId
-  lifeFlowId:  string
-  prefs:       { taskReminders: boolean; habitReminders: boolean; spendingAlerts: boolean; dailySummary: boolean }
-  prefKey:     keyof { taskReminders: boolean; habitReminders: boolean; spendingAlerts: boolean; dailySummary: boolean }
+  userId:          mongoose.Types.ObjectId
+  lifeFlowId:      string
+  prefs:           NotifPrefs
+  prefKey:         keyof NotifPrefs
+  emailPrefs:      EmailNotifPrefs
+  emailPrefKey:    keyof Omit<EmailNotifPrefs, 'enabled'>
+  userEmail:       string
   inApp: {
     title:   string
     message: string
@@ -223,7 +282,6 @@ interface DeliveryOptions {
     tag:   string
   }
   email?: {
-    to:      string
     subject: string
     html:    string
     text:    string
@@ -232,10 +290,17 @@ interface DeliveryOptions {
 
 /**
  * Deliver a notification across all enabled channels.
- * Failures in any single channel do not abort the others.
+ *
+ * Channel independence: a failure in push does not abort email, and vice versa.
+ * The recipient email address is always taken from `opts.userEmail` which must
+ * be the authenticated user's registered address from the database.
  */
 async function deliver(opts: DeliveryOptions): Promise<void> {
-  const { userId, lifeFlowId, prefs, prefKey, inApp, push, email } = opts
+  const {
+    userId, lifeFlowId, prefs, prefKey,
+    emailPrefs, emailPrefKey, userEmail,
+    inApp, push, email,
+  } = opts
 
   if (!prefs[prefKey]) return // user has this category disabled
 
@@ -264,18 +329,28 @@ async function deliver(opts: DeliveryOptions): Promise<void> {
   }
 
   // ── Email ──────────────────────────────────────────────────────────────────
-  if (email) {
+  // Only send when the user has email notifications enabled for this category.
+  // The recipient is always the user's own registered address — never a
+  // client-supplied address.
+  if (email && shouldSendEmail(emailPrefs, emailPrefKey, userEmail)) {
     try {
       const notifier = await getNotificationService()
-      await notifier.send({
-        to:      email.to,
+      const result = await notifier.send({
+        to:      userEmail,
         subject: email.subject,
         html:    email.html,
         text:    email.text,
       })
+      if (!result.ok) {
+        logger.warn('[notifScheduler] Email delivery failed', {
+          userId:        userId.toString(),
+          providerError: result.error,
+        })
+      }
     } catch (err: unknown) {
-      logger.warn('[notifScheduler] Email delivery failed', {
-        userId: userId.toString(),
+      // Email failure never aborts in-app or push — log and continue.
+      logger.warn('[notifScheduler] Email send threw unexpectedly', {
+        userId:       userId.toString(),
         errorMessage: err instanceof Error ? err.message : String(err),
       })
     }
@@ -284,26 +359,16 @@ async function deliver(opts: DeliveryOptions): Promise<void> {
 
 // ─── Per-user notification processors ────────────────────────────────────────
 
-interface UserRecord {
-  _id: mongoose.Types.ObjectId
-  publicId: string
-  name: string
-  email: string
-  timezone: string
-  notificationPreferences: {
-    habitReminders: boolean
-    taskReminders:  boolean
-    spendingAlerts: boolean
-    dailySummary:   boolean
-  }
-}
-
-/** Results for a single user's notification run. */
-interface UserResult {
-  userId:     string
-  sent:       number
-  skipped:    number
-  errors:     string[]
+const CATEGORY_LABELS: Record<string, string> = {
+  food:          'Food & Dining',
+  transport:     'Transport',
+  shopping:      'Shopping',
+  bills:         'Bills & Utilities',
+  entertainment: 'Entertainment',
+  education:     'Education',
+  health:        'Health & Wellness',
+  subscriptions: 'Subscriptions',
+  other:         'Other',
 }
 
 // ─── 1. Tomorrow tasks ────────────────────────────────────────────────────────
@@ -311,7 +376,7 @@ interface UserResult {
 async function processTomorrowTasks(
   user: UserRecord,
   now: Date,
-  _appUrl: string
+  appUrl: string
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
   if (!prefs.taskReminders) return { sent: false }
@@ -341,23 +406,26 @@ async function processTomorrowTasks(
   if (tasks.length === 0) {
     // Nothing scheduled — delete the log record so we don't block future runs
     await NotificationLog.deleteOne({
-      userId: user._id,
-      type:   'TASK_TOMORROW',
+      userId:  user._id,
+      type:    'TASK_TOMORROW',
       forDate: tomorrow,
     }).catch(() => undefined)
     return { sent: false }
   }
 
-  const count      = tasks.length
-  const titles     = tasks.slice(0, 5).map((t) => t.title)
-  const _dateLabel  = formatDateLabel(tomorrow, tz)
-  const taskWord   = count === 1 ? 'task' : 'tasks'
+  const count     = tasks.length
+  const titles    = tasks.slice(0, 5).map((t) => t.title)
+  const dateLabel = formatDateLabel(tomorrow, tz)
+  const taskWord  = count === 1 ? 'task' : 'tasks'
 
   await deliver({
-    userId:     user._id,
-    lifeFlowId: user.publicId,
+    userId:       user._id,
+    lifeFlowId:   user.publicId,
     prefs,
-    prefKey:    'taskReminders',
+    prefKey:      'taskReminders',
+    emailPrefs:   user.emailNotifications,
+    emailPrefKey: 'taskReminders',
+    userEmail:    user.email,
     inApp: {
       title:   `Tomorrow: ${count} ${taskWord} scheduled`,
       message: titles.slice(0, 3).join(' • '),
@@ -369,7 +437,13 @@ async function processTomorrowTasks(
       url:   '/app/tasks',
       tag:   'TASK_TOMORROW',
     },
-    // Task reminders are push + in-app only by default (not email, to avoid inbox flooding)
+    email: buildTomorrowTasksEmail({
+      toName:        user.name,
+      taskCount:     count,
+      taskTitles:    titles,
+      tomorrowLabel: dateLabel,
+      appUrl,
+    }),
   })
 
   logger.info('[notifScheduler] TASK_TOMORROW sent', { userId: user._id.toString(), count })
@@ -381,7 +455,7 @@ async function processTomorrowTasks(
 async function processIncompleteTasks(
   user: UserRecord,
   now: Date,
-  _appUrl: string
+  appUrl: string
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
   if (!prefs.taskReminders) return { sent: false }
@@ -409,8 +483,8 @@ async function processIncompleteTasks(
 
   if (tasks.length === 0) {
     await NotificationLog.deleteOne({
-      userId: user._id,
-      type:   'TASK_INCOMPLETE_TODAY',
+      userId:  user._id,
+      type:    'TASK_INCOMPLETE_TODAY',
       forDate: today,
     }).catch(() => undefined)
     return { sent: false }
@@ -418,14 +492,17 @@ async function processIncompleteTasks(
 
   const count     = tasks.length
   const titles    = tasks.slice(0, 5).map((t) => t.title)
-  const _dateLabel = formatDateLabel(today, tz)
+  const dateLabel = formatDateLabel(today, tz)
   const taskWord  = count === 1 ? 'task' : 'tasks'
 
   await deliver({
-    userId:     user._id,
-    lifeFlowId: user.publicId,
+    userId:       user._id,
+    lifeFlowId:   user.publicId,
     prefs,
-    prefKey:    'taskReminders',
+    prefKey:      'taskReminders',
+    emailPrefs:   user.emailNotifications,
+    emailPrefKey: 'taskReminders',
+    userEmail:    user.email,
     inApp: {
       title:   `${count} ${taskWord} still incomplete today`,
       message: titles.slice(0, 3).join(' • '),
@@ -437,12 +514,13 @@ async function processIncompleteTasks(
       url:   '/app/tasks',
       tag:   'TASK_INCOMPLETE_TODAY',
     },
-    // Email: only send if user has taskReminders on — kept in-app/push only by default
-    // Uncomment the block below to enable email for incomplete tasks:
-    // email: {
-    //   to: user.email,
-    //   ...buildIncompleteTasksEmail({ toName: user.name, taskCount: count, taskTitles: titles, todayLabel: dateLabel, appUrl }),
-    // },
+    email: buildIncompleteTasksEmail({
+      toName:     user.name,
+      taskCount:  count,
+      taskTitles: titles,
+      todayLabel: dateLabel,
+      appUrl,
+    }),
   })
 
   logger.info('[notifScheduler] TASK_INCOMPLETE_TODAY sent', { userId: user._id.toString(), count })
@@ -454,7 +532,7 @@ async function processIncompleteTasks(
 async function processTomorrowHabits(
   user: UserRecord,
   now: Date,
-  _appUrl: string
+  appUrl: string
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
   if (!prefs.habitReminders) return { sent: false }
@@ -471,7 +549,6 @@ async function processTomorrowHabits(
   const alreadySent = await checkAndRecord(user._id, 'HABIT_TOMORROW', tomorrow)
   if (alreadySent) return { sent: false }
 
-  // Get all daily habits for this user
   const habits = await Habit.find({ userId: user._id, frequency: 'daily' })
     .select('name icon')
     .sort({ createdAt: 1 })
@@ -479,22 +556,26 @@ async function processTomorrowHabits(
 
   if (habits.length === 0) {
     await NotificationLog.deleteOne({
-      userId: user._id,
-      type:   'HABIT_TOMORROW',
+      userId:  user._id,
+      type:    'HABIT_TOMORROW',
       forDate: tomorrow,
     }).catch(() => undefined)
     return { sent: false }
   }
 
-  const count      = habits.length
-  const names      = habits.slice(0, 5).map((h) => `${h.icon} ${h.name}`)
-  const habitWord  = count === 1 ? 'habit' : 'habits'
+  const count     = habits.length
+  const names     = habits.slice(0, 5).map((h) => `${h.icon} ${h.name}`)
+  const dateLabel = formatDateLabel(tomorrow, tz)
+  const habitWord = count === 1 ? 'habit' : 'habits'
 
   await deliver({
-    userId:     user._id,
-    lifeFlowId: user.publicId,
+    userId:       user._id,
+    lifeFlowId:   user.publicId,
     prefs,
-    prefKey:    'habitReminders',
+    prefKey:      'habitReminders',
+    emailPrefs:   user.emailNotifications,
+    emailPrefKey: 'habitReminders',
+    userEmail:    user.email,
     inApp: {
       title:   `Tomorrow: ${count} ${habitWord} planned`,
       message: names.slice(0, 3).join(' • '),
@@ -506,6 +587,13 @@ async function processTomorrowHabits(
       url:   '/app/habits',
       tag:   'HABIT_TOMORROW',
     },
+    email: buildTomorrowHabitsEmail({
+      toName:        user.name,
+      habitCount:    count,
+      habitNames:    names,
+      tomorrowLabel: dateLabel,
+      appUrl,
+    }),
   })
 
   logger.info('[notifScheduler] HABIT_TOMORROW sent', { userId: user._id.toString(), count })
@@ -533,7 +621,6 @@ async function processHabitReminder(
   const alreadySent = await checkAndRecord(user._id, 'HABIT_REMINDER', today)
   if (alreadySent) return { sent: false }
 
-  // Find daily habits not yet completed today
   const allDailyHabits = await Habit.find({ userId: user._id, frequency: 'daily' })
     .select('_id name icon')
     .lean()
@@ -548,8 +635,8 @@ async function processHabitReminder(
   }
 
   const completedLogs = await HabitLog.find({
-    userId: user._id,
-    date:   today,
+    userId:    user._id,
+    date:      today,
     completed: true,
   })
     .select('habitId')
@@ -559,7 +646,8 @@ async function processHabitReminder(
   const incomplete   = allDailyHabits.filter((h) => !completedIds.has(h._id.toString()))
 
   if (incomplete.length === 0) {
-    // All habits done — no reminder needed
+    // All habits done — no reminder needed; remove the dedup key so it
+    // won't prevent a legitimate send if habits are reset later in the day.
     await NotificationLog.deleteOne({
       userId:  user._id,
       type:    'HABIT_REMINDER',
@@ -572,11 +660,16 @@ async function processHabitReminder(
   const names     = incomplete.slice(0, 3).map((h) => `${h.icon} ${h.name}`)
   const habitWord = count === 1 ? 'habit' : 'habits'
 
+  // Habit reminder is push + in-app only — no email (morning window is already
+  // covered by the daily summary for email users).  This avoids over-emailing.
   await deliver({
-    userId:     user._id,
-    lifeFlowId: user.publicId,
+    userId:       user._id,
+    lifeFlowId:   user.publicId,
     prefs,
-    prefKey:    'habitReminders',
+    prefKey:      'habitReminders',
+    emailPrefs:   user.emailNotifications,
+    emailPrefKey: 'habitReminders',
+    userEmail:    user.email,
     inApp: {
       title:   `${count} ${habitWord} to complete today`,
       message: names.join(' • '),
@@ -588,6 +681,8 @@ async function processHabitReminder(
       url:   '/app/habits',
       tag:   'HABIT_REMINDER',
     },
+    // No email — habit reminder overlaps with the morning daily summary email.
+    // Sending another email 1–2 hours later would be noisy.
   })
 
   logger.info('[notifScheduler] HABIT_REMINDER sent', { userId: user._id.toString(), count })
@@ -600,18 +695,6 @@ async function processHabitReminder(
 const ALERT_THRESHOLDS = [80, 100] as const
 type AlertThreshold = typeof ALERT_THRESHOLDS[number]
 
-const CATEGORY_LABELS: Record<string, string> = {
-  food:          'Food & Dining',
-  transport:     'Transport',
-  shopping:      'Shopping',
-  bills:         'Bills & Utilities',
-  entertainment: 'Entertainment',
-  education:     'Education',
-  health:        'Health & Wellness',
-  subscriptions: 'Subscriptions',
-  other:         'Other',
-}
-
 async function processSpendingAlerts(
   user: UserRecord,
   now: Date,
@@ -620,14 +703,13 @@ async function processSpendingAlerts(
   const prefs = user.notificationPreferences
   if (!prefs.spendingAlerts) return { sent: 0 }
 
-  const tz    = user.timezone
-  const hr    = localHour(now, tz)
+  const tz = user.timezone
+  const hr = localHour(now, tz)
   if (isQuietHour(hr)) return { sent: 0 }
 
   const month = currentMonth(now, tz)
   const today = dateInTimezone(now, tz)
 
-  // Find active budgets for this month
   const budgets = await Budget.find({
     userId: user._id,
     month,
@@ -639,7 +721,6 @@ async function processSpendingAlerts(
   let sentCount = 0
 
   for (const budget of budgets) {
-    // Sum expenses in this category for this month
     const startOfMonth = `${month}-01`
     const expenseAgg = await Expense.aggregate([
       {
@@ -658,7 +739,6 @@ async function processSpendingAlerts(
 
     const percentUsed = Math.round((totalRupees / budgetRupees) * 100)
 
-    // Find the highest threshold that has been crossed
     let crossedThreshold: AlertThreshold | null = null
     for (const threshold of ALERT_THRESHOLDS) {
       if (percentUsed >= threshold) crossedThreshold = threshold
@@ -686,10 +766,13 @@ async function processSpendingAlerts(
       : `Your ${categoryLabel} budget is ${percentUsed}% used.`
 
     await deliver({
-      userId:     user._id,
-      lifeFlowId: user.publicId,
+      userId:       user._id,
+      lifeFlowId:   user.publicId,
       prefs,
-      prefKey:    'spendingAlerts',
+      prefKey:      'spendingAlerts',
+      emailPrefs:   user.emailNotifications,
+      emailPrefKey: 'spendingAlerts',
+      userEmail:    user.email,
       inApp: {
         title:   pushTitle,
         message: pushBody,
@@ -701,15 +784,12 @@ async function processSpendingAlerts(
         url:   '/app/budgets',
         tag:   `SPENDING_ALERT_${budget.category}`,
       },
-      email: {
-        to: user.email,
-        ...buildSpendingAlertEmail({
-          toName:        user.name,
-          categoryLabel,
-          percentUsed,
-          appUrl,
-        }),
-      },
+      email: buildSpendingAlertEmail({
+        toName:        user.name,
+        categoryLabel,
+        percentUsed,
+        appUrl,
+      }),
     })
 
     sentCount++
@@ -745,7 +825,6 @@ async function processDailySummary(
   const alreadySent = await checkAndRecord(user._id, 'DAILY_SUMMARY', today)
   if (alreadySent) return { sent: false }
 
-  // Gather stats
   const [
     tasksCompleted,
     tasksRemaining,
@@ -758,7 +837,6 @@ async function processDailySummary(
     HabitLog.countDocuments({ userId: user._id, date: today, completed: true }),
   ])
 
-  // Skip if there is nothing useful to report
   const hasAnything = tasksCompleted > 0 || tasksRemaining > 0 || allDailyHabits > 0
   if (!hasAnything) {
     await NotificationLog.deleteOne({
@@ -769,8 +847,7 @@ async function processDailySummary(
     return { sent: false }
   }
 
-  // Optional spending note (most over-budget category, if any)
-  const month  = currentMonth(now, tz)
+  const month   = currentMonth(now, tz)
   const budgets = await Budget.find({ userId: user._id, month, status: 'active' }).lean()
   let spendingNote: string | undefined
 
@@ -795,23 +872,26 @@ async function processDailySummary(
       spendingNote = pct >= 100
         ? `${label} budget has been exceeded.`
         : `${label} budget is ${pct}% used.`
-      break // report only the first alert in the summary
+      break
     }
   }
 
-  const dateLabel = formatDateLabel(today, tz)
+  const dateLabel    = formatDateLabel(today, tz)
   const summaryTitle = 'Your LifeFlow daily summary'
-  const summaryMsg = [
+  const summaryMsg   = [
     `Tasks: ${tasksCompleted} done, ${tasksRemaining} remaining`,
     `Habits: ${completedLogs}/${allDailyHabits} completed`,
     ...(spendingNote ? [spendingNote] : []),
   ].join(' · ')
 
   await deliver({
-    userId:     user._id,
-    lifeFlowId: user.publicId,
+    userId:       user._id,
+    lifeFlowId:   user.publicId,
     prefs,
-    prefKey:    'dailySummary',
+    prefKey:      'dailySummary',
+    emailPrefs:   user.emailNotifications,
+    emailPrefKey: 'dailySummary',
+    userEmail:    user.email,
     inApp: {
       title:   summaryTitle,
       message: summaryMsg,
@@ -823,23 +903,20 @@ async function processDailySummary(
       url:   '/app/dashboard',
       tag:   'DAILY_SUMMARY',
     },
-    email: {
-      to: user.email,
-      ...buildDailySummaryEmail({
-        toName:          user.name,
-        todayLabel:      dateLabel,
-        tasksCompleted,
-        tasksRemaining,
-        habitsCompleted: completedLogs,
-        habitsTotal:     allDailyHabits,
-        spendingNote,
-        appUrl,
-      }),
-    },
+    email: buildDailySummaryEmail({
+      toName:          user.name,
+      todayLabel:      dateLabel,
+      tasksCompleted,
+      tasksRemaining,
+      habitsCompleted: completedLogs,
+      habitsTotal:     allDailyHabits,
+      spendingNote,
+      appUrl,
+    }),
   })
 
   logger.info('[notifScheduler] DAILY_SUMMARY sent', {
-    userId:    user._id.toString(),
+    userId:          user._id.toString(),
     tasksCompleted,
     tasksRemaining,
     habitsCompleted: completedLogs,
@@ -866,7 +943,7 @@ async function processUser(
     fn: (u: UserRecord, n: Date, a: string) => Promise<{ sent: boolean } | { sent: number }>
   ) => {
     try {
-      const r = await fn(user, now, appUrl)
+      const r        = await fn(user, now, appUrl)
       const sentCount = typeof r.sent === 'boolean' ? (r.sent ? 1 : 0) : r.sent
       result.sent    += sentCount
       result.skipped += sentCount === 0 ? 1 : 0
@@ -888,11 +965,11 @@ async function processUser(
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export interface NotificationSchedulerResult {
-  usersProcessed:     number
-  totalSent:          number
-  totalSkipped:       number
-  errors:             string[]
-  durationMs:         number
+  usersProcessed: number
+  totalSent:      number
+  totalSkipped:   number
+  errors:         string[]
+  durationMs:     number
 }
 
 /**
@@ -927,7 +1004,7 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
       { 'notificationPreferences.dailySummary':   true },
     ],
   })
-    .select('publicId name email timezone notificationPreferences')
+    .select('publicId name email timezone notificationPreferences emailNotifications')
     .lean<UserRecord[]>()
 
   logger.info('[notifScheduler] Starting run', {
@@ -937,7 +1014,19 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
 
   for (const user of users) {
     try {
-      const userResult = await processUser(user, now, appUrl)
+      // Provide a safe default for emailNotifications in case the field doesn't
+      // exist yet on legacy documents (before the schema migration).
+      const safeUser: UserRecord = {
+        ...user,
+        emailNotifications: user.emailNotifications ?? {
+          enabled:        false,
+          taskReminders:  true,
+          habitReminders: true,
+          spendingAlerts: true,
+          dailySummary:   true,
+        },
+      }
+      const userResult = await processUser(safeUser, now, appUrl)
       result.usersProcessed++
       result.totalSent    += userResult.sent
       result.totalSkipped += userResult.skipped

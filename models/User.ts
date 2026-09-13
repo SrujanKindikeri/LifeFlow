@@ -22,6 +22,24 @@ export interface IUser extends Document {
     spendingAlerts: boolean
     dailySummary: boolean
   }
+  /**
+   * Per-category email notification preferences.
+   * Completely separate from push/in-app channels — users can mix-and-match.
+   * emailNotifications.enabled is the master switch; category flags are only
+   * checked when enabled is true.
+   */
+  emailNotifications: {
+    /** Master switch — set to false to suppress all notification emails. */
+    enabled: boolean
+    /** Email for task reminders (tomorrow tasks + incomplete today). */
+    taskReminders: boolean
+    /** Email for habit reminders (tomorrow habits + daily habit reminder). */
+    habitReminders: boolean
+    /** Email for spending/budget alerts. */
+    spendingAlerts: boolean
+    /** Email for the daily summary. */
+    dailySummary: boolean
+  }
 
   // ── Email verification ────────────────────────────────────────────────────
   /** true once the user has clicked a valid verification link */
@@ -93,6 +111,18 @@ const UserSchema = new Schema<IUser>(
       taskReminders: { type: Boolean, default: true },
       spendingAlerts: { type: Boolean, default: true },
       dailySummary: { type: Boolean, default: false },
+    },
+
+    // ── Email notification preferences ──────────────────────────────────────
+    // Independent from push/in-app channels — users can enable email for
+    // some categories and push for others.  The master `enabled` switch must
+    // be true before any category flag is evaluated.
+    emailNotifications: {
+      enabled:       { type: Boolean, default: false },
+      taskReminders: { type: Boolean, default: true  },
+      habitReminders:{ type: Boolean, default: true  },
+      spendingAlerts:{ type: Boolean, default: true  },
+      dailySummary:  { type: Boolean, default: true  },
     },
 
     // ── Email verification ──────────────────────────────────────────────────

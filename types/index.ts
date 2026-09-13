@@ -14,6 +14,18 @@ export interface User {
     spendingAlerts: boolean
     dailySummary: boolean
   }
+  /**
+   * Per-category email notification preferences.
+   * emailNotifications.enabled is the master toggle.
+   * Category flags are only evaluated when enabled is true.
+   */
+  emailNotifications: {
+    enabled: boolean
+    taskReminders: boolean
+    habitReminders: boolean
+    spendingAlerts: boolean
+    dailySummary: boolean
+  }
   createdAt: string
   updatedAt: string
 }
