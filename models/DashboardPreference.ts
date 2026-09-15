@@ -39,7 +39,10 @@ const DashboardPreferenceSchema = new Schema<IDashboardPreference>(
   { timestamps: true }
 )
 
-DashboardPreferenceSchema.index({ userId: 1 }, { unique: true })
+// NOTE: The unique index on userId is already declared via `unique: true` in
+// the field definition above. A second explicit .index() call for the same
+// field causes Mongoose to register it twice, which produces a
+// "duplicate schema index" warning at startup. The .index() call is removed.
 
 const DashboardPreference: Model<IDashboardPreference> =
   mongoose.models.DashboardPreference ||

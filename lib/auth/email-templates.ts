@@ -1139,3 +1139,227 @@ export function buildDailySummaryEmail(opts: DailySummaryEmailOptions): {
 
   return { subject, html, text }
 }
+
+// ─── Password reset ───────────────────────────────────────────────────────────
+
+export interface PasswordResetEmailOptions {
+  toName: string
+  resetUrl: string
+  /** Token lifetime in minutes (default: 15). */
+  expiresInMinutes?: number
+}
+
+/**
+ * Password reset email — sent when a user requests a password reset.
+ *
+ * Design goals (matching the verification email):
+ *  - Premium, Apple-inspired transactional email
+ *  - No external resources, no JS, no tracking
+ *  - Single clear action: reset password
+ *  - Security notice for users who did not request the reset
+ *  - Inline CSS only, table-based layout, responsive to 320 px
+ *
+ * Security notes:
+ *  - resetUrl contains the raw token — it is NEVER logged by this function
+ *  - The plain-text version repeats the URL so all clients can act on it
+ */
+export function buildPasswordResetEmail(opts: PasswordResetEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, resetUrl, expiresInMinutes = 15 } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+
+  const expiryLabel =
+    expiresInMinutes < 60
+      ? `${expiresInMinutes} minutes`
+      : `${Math.round(expiresInMinutes / 60)} hour${Math.round(expiresInMinutes / 60) !== 1 ? 's' : ''}`
+
+  const subject = `Reset your ${BRAND_NAME} password`
+
+  const html = wrapHtml(`
+
+    <!-- ══ 1. Lock icon ════════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 30px;">
+      <tr>
+        <td align="center">
+          <svg width="72" height="72" viewBox="0 0 72 72" fill="none"
+               xmlns="http://www.w3.org/2000/svg"
+               role="img" aria-label="Password reset"
+               style="display:block;margin:0 auto;">
+
+            <!-- ░ Outer glow circle -->
+            <circle cx="36" cy="36" r="36" fill="#eff6ff"/>
+
+            <!-- ░ Inner circle -->
+            <circle cx="36" cy="36" r="28" fill="#dbeafe"/>
+
+            <!-- ░ Lock body — rounded rectangle -->
+            <rect x="22" y="34" width="28" height="20" rx="4"
+                  fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
+
+            <!-- ░ Lock shackle — open arc going left-to-right -->
+            <path d="M27 34 V28 a9 9 0 0 1 18 0 V34"
+                  fill="none" stroke="${BRAND_COLOR}" stroke-width="2.2"
+                  stroke-linecap="round"/>
+
+            <!-- ░ Keyhole circle -->
+            <circle cx="36" cy="44" r="3" fill="${BRAND_COLOR}"/>
+
+            <!-- ░ Keyhole stem -->
+            <rect x="34.5" y="44" width="3" height="5" rx="1" fill="${BRAND_COLOR}"/>
+
+          </svg>
+        </td>
+      </tr>
+    </table>
+
+    <!-- ══ 2. Heading ══════════════════════════════════════════════════════ -->
+    <h1 class="heading"
+        style="margin:0 0 8px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'SF Pro Text','Segoe UI',Arial,sans-serif;
+               font-size:26px;font-weight:700;color:#0f172a;
+               letter-spacing:-0.5px;line-height:1.2;text-align:center;">
+      Reset your password
+    </h1>
+
+    <p style="margin:0 0 28px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#64748b;line-height:1.6;text-align:center;">
+      We received a request to reset the password for your ${BRAND_NAME} account.
+    </p>
+
+    <!-- ══ 3. Greeting + body copy ════════════════════════════════════════ -->
+    <p style="margin:0 0 12px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)},
+    </p>
+    <p style="margin:0 0 28px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Click the button below to choose a new password. This link is valid for
+      <strong>${expiryLabel}</strong> and can only be used once.
+    </p>
+
+    <!-- ══ 4. CTA button ══════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 24px;">
+      <tr>
+        <td align="center">
+          <a href="${escapeHtml(resetUrl)}"
+             class="btn-cta"
+             target="_blank"
+             rel="noopener noreferrer"
+             style="display:inline-block;
+                    padding:15px 36px;
+                    background-color:${BRAND_COLOR};
+                    color:#ffffff;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:15px;font-weight:600;
+                    text-decoration:none;
+                    border-radius:10px;
+                    letter-spacing:-0.1px;
+                    mso-padding-alt:0;
+                    box-shadow:0 2px 8px rgba(37,99,235,0.35);">
+            Reset Password &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <!-- ══ 5. Expiry notice ════════════════════════════════════════════════ -->
+    <p style="margin:0 0 28px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#94a3b8;line-height:1.6;text-align:center;">
+      This link expires in <strong style="color:#64748b;">${expiryLabel}</strong>
+      and becomes invalid after use.
+    </p>
+
+    <!-- ══ 6. Thin rule ═══════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="border-top:1px solid #e2e8f0;font-size:0;line-height:0;">&nbsp;</td>
+      </tr>
+    </table>
+
+    <!-- ══ 7. Fallback URL ════════════════════════════════════════════════ -->
+    <p style="margin:0 0 6px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:12px;color:#94a3b8;line-height:1.5;text-align:center;">
+      Button not working? Copy and paste this link into your browser:
+    </p>
+    <p class="fallback-url"
+       style="margin:0 0 24px;
+              font-family:'Courier New',Courier,monospace;
+              font-size:12px;color:#64748b;
+              line-height:1.5;text-align:center;
+              word-break:break-all;">
+      ${escapeHtml(resetUrl)}
+    </p>
+
+    <!-- ══ 8. Thin rule ═══════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="border-top:1px solid #e2e8f0;font-size:0;line-height:0;">&nbsp;</td>
+      </tr>
+    </table>
+
+    <!-- ══ 9. Security notice ══════════════════════════════════════════════ -->
+    <div style="background:#fef9ec;border:1px solid #fde68a;border-radius:10px;
+                padding:14px 16px;margin:0;">
+      <p style="margin:0;
+                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                             'Segoe UI',Arial,sans-serif;
+                font-size:13px;color:#92400e;line-height:1.65;">
+        <strong>&#x26A0;&#xFE0F; Didn't request this?</strong>
+        If you did not ask to reset your password, you can safely ignore this email.
+        Your password will remain unchanged. If you believe your account may be
+        at risk, please log in and review your security settings.
+      </p>
+    </div>
+
+  `)
+
+  const text = [
+    `${BRAND_NAME}`,
+    `${BRAND_TAGLINE}`,
+    ``,
+    `Reset your ${BRAND_NAME} password`,
+    `${'─'.repeat(40)}`,
+    ``,
+    `Hi ${firstName},`,
+    ``,
+    `We received a request to reset the password for your ${BRAND_NAME} account.`,
+    ``,
+    `Click the link below to choose a new password. This link is valid for ${expiryLabel} and can only be used once.`,
+    ``,
+    resetUrl,
+    ``,
+    `This link expires in ${expiryLabel} and becomes invalid after use.`,
+    ``,
+    `${'─'.repeat(40)}`,
+    ``,
+    `Didn't request this?`,
+    `If you did not ask to reset your password, you can safely ignore this email.`,
+    `Your password will remain unchanged.`,
+    ``,
+    `${'─'.repeat(40)}`,
+    ``,
+    `\u00A9 2026 ${BRAND_NAME}. All rights reserved.`,
+    `This is an automated email. Please do not reply.`,
+  ].join('\n')
+
+  return { subject, html, text }
+}

@@ -1,4 +1,4 @@
-import { requireAuth, getSession } from '@/lib/session'
+import { requireAuth } from '@/lib/session'
 import { redirect } from 'next/navigation'
 import { getDashboardData } from '@/lib/dashboard'
 import { DashboardClient } from './DashboardClient'
@@ -7,23 +7,39 @@ export default async function DashboardPage() {
   let session
   try {
     session = await requireAuth()
-    console.log('[AUTH] dashboard session present', { userId: session.userId })
-  } catch {
-    // Destroy the cookie before redirecting to /login.
-    // Without this, the proxy sees isLoggedIn=true in the stale cookie and
-    // bounces every /login visit straight back to /app/dashboard, creating
-    // the ERR_TOO_MANY_REDIRECTS loop.
-    console.log('[AUTH] dashboard session missing or invalid — destroying session and redirecting to login')
-    try {
-      const s = await getSession()
-      s.destroy()
-    } catch {
-      // If we can't destroy (e.g. env missing), still redirect — the loop
-      // is broken by the proxy's isVerified check (emailVerified not set in
-      // a legacy/corrupt session means the proxy sends to /verify-email, not
-      // back to /app/dashboard).
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+
+    // Next.js static-generation guard: during `next build` the App Router
+    // attempts to statically pre-render every route. Pages that call cookies()
+    // are inherently dynamic and cannot be pre-rendered — Next.js throws this
+    // specific error to signal that. It is NOT a session or DB failure; let
+    // Next.js handle it normally (it marks the route as dynamic and moves on).
+    const isBuildTimeError = message.includes('Dynamic server usage')
+    if (isBuildTimeError) {
+      throw err   // let Next.js handle the dynamic-route detection as intended
     }
-    redirect('/login')
+
+    // Stale session: userId was not found in the database (confirmed reachable).
+    // Redirect to the clear-session Route Handler which runs in a context where
+    // Set-Cookie headers ARE sent, so it can properly expire the lifeflow_session
+    // cookie before redirecting to /login. Do NOT redirect to /login directly —
+    // the proxy sees the still-present stale cookie and bounces back to /app/dashboard,
+    // creating an infinite loop.
+    if (message === 'UserNotFound') {
+      redirect('/api/auth/clear-session')
+    }
+
+    // No session at all — send straight to login (no stale cookie to clear).
+    if (message === 'Unauthorized') {
+      redirect('/login')
+    }
+
+    // Infrastructure failure (MongoDB unreachable, network error, etc.).
+    // Do NOT clear the session — the user IS authenticated, the DB is just down.
+    // Re-throw so Next.js error.tsx renders instead of kicking the user out.
+    console.error('[dashboard] infrastructure error:', message)
+    throw new Error(message)
   }
 
   let data

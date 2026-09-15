@@ -26,6 +26,18 @@ export interface IPerson extends Document {
    * to avoid collision with the document-owner `lifeFlowId` field above.
    */
   linkedLifeFlowId?: string
+  /**
+   * Stable MongoDB ObjectId reference to the linked LifeFlow user account.
+   * Only set when source === 'lifeflow'. Used for efficient duplicate detection
+   * and future cross-account features. Never exposed to the client.
+   */
+  linkedUserId?: mongoose.Types.ObjectId
+  /**
+   * How this contact was created:
+   *   'manual'   — entered by the owner (may or may not have a LifeFlow account)
+   *   'lifeflow' — added via LifeFlow ID lookup (linkedUserId is always set)
+   */
+  source: 'manual' | 'lifeflow'
   notes?: string
   createdAt: Date
   updatedAt: Date
@@ -44,13 +56,23 @@ const PersonSchema = new Schema<IPerson>(
      * This is the LifeFlow account of the contact, not the document owner.
      */
     linkedLifeFlowId: { type: String, trim: true, maxlength: 20 },
-    notes:           { type: String, trim: true, maxlength: 500 },
+    /**
+     * Stable ObjectId reference to the linked LifeFlow user.
+     * Only present when source === 'lifeflow'. Used for duplicate detection.
+     * Never sent to the client.
+     */
+    linkedUserId:     { type: Schema.Types.ObjectId, ref: 'User', sparse: true },
+    source:           { type: String, enum: ['manual', 'lifeflow'], default: 'manual', required: true },
+    notes:            { type: String, trim: true, maxlength: 500 },
   },
   { timestamps: true }
 )
 
 PersonSchema.index({ userId: 1, name: 1 })
 PersonSchema.index({ userId: 1, createdAt: -1 })
+// Prevent the same LifeFlow user from being added twice by the same owner.
+// sparse: true so manual contacts (linkedUserId is absent) are not counted.
+PersonSchema.index({ userId: 1, linkedUserId: 1 }, { unique: true, sparse: true })
 
 const Person: Model<IPerson> =
   mongoose.models.Person || mongoose.model<IPerson>('Person', PersonSchema)

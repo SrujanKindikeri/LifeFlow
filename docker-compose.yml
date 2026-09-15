@@ -29,6 +29,11 @@ services:
     environment:
       # ── Required ─────────────────────────────────────────────────────────────
       MONGODB_URI:       ${MONGODB_URI}
+      # IMPORTANT: If your Atlas URI has no database name in the path (e.g. ends
+      # with /?appName=...) this value selects the database. Must match the
+      # database where your User collection lives. Defaults to "test" which is
+      # the Atlas default when no database was specified during initial setup.
+      MONGODB_DB_NAME:   ${MONGODB_DB_NAME:-test}
       SESSION_SECRET:    ${SESSION_SECRET}
 
       # ── Scheduler / Cron ─────────────────────────────────────────────────────

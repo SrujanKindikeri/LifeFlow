@@ -5,8 +5,9 @@ import { NotificationsClient } from '@/components/notifications/NotificationsCli
 export default async function NotificationsPage() {
   try {
     await requireAuth()
-  } catch {
-    redirect('/login')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
   }
 
   return (

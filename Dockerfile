@@ -66,6 +66,22 @@ RUN npm run build
 # ── Stage 3: runner ───────────────────────────────────────────────────────────
 # Minimal production image — only the standalone output + public assets.
 # No source code, no node_modules, no devDependencies, no build tools.
+#
+# Group Bill Receipt Scanner — Ollama networking notes:
+#
+#   The scanner uses a two-tier pipeline:
+#     1. Ollama local vision model  (if OLLAMA_BASE_URL is reachable)
+#     2. Tesseract.js HOCR parser   (always available, zero config)
+#
+#   If Ollama runs on the Docker HOST:
+#     - Linux:   use --network=host  OR  OLLAMA_BASE_URL=http://172.17.0.1:11434
+#     - macOS/Windows: use OLLAMA_BASE_URL=http://host.docker.internal:11434
+#
+#   If Ollama runs in a separate container on the same compose network:
+#     - Set OLLAMA_BASE_URL=http://<ollama-service-name>:11434
+#
+#   Leave OLLAMA_BASE_URL empty to skip Ollama and use Tesseract only.
+#   The app NEVER calls OpenAI, Gemini, or any paid cloud API.
 FROM node:22-alpine AS runner
 
 RUN apk add --no-cache libc6-compat curl

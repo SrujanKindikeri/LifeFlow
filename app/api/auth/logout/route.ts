@@ -5,7 +5,7 @@ import logger from '@/lib/logger'
 export async function POST() {
   try {
     const session = await getSession()
-    session.destroy()
+    await session.destroy()
     return NextResponse.json({ message: 'Logged out successfully' })
   } catch (error) {
     logger.error('[logout]', {

@@ -211,3 +211,66 @@ export function getClientIp(req: { headers: { get(name: string): string | null }
   }
   return req.headers.get('x-real-ip') ?? '0.0.0.0'
 }
+
+// ─── Password reset limiters ──────────────────────────────────────────────────
+
+/**
+ * Rate limit for POST /api/auth/forgot-password.
+ *
+ * Three guards applied in order — all must pass:
+ *
+ *   1. Cooldown  — per email: 1 request per PASSWORD_RESET_RESEND_COOLDOWN_SECONDS
+ *      (default 60 s). Prevents rapid hammering within the hourly budget.
+ *
+ *   2. Hourly cap — per email: at most PASSWORD_RESET_MAX_PER_HOUR requests
+ *      per 60-minute window (default 3).
+ *
+ *   3. IP cap    — per IP: at most 10 requests per hour across all accounts.
+ *      Secondary defence against enumeration from a single origin.
+ *
+ * The generic response pattern ensures rate-limited responses never reveal
+ * whether the email exists in the database.
+ */
+export function checkPasswordResetRequestLimit(ip: string, email: string): RateLimitResult {
+  const normalised = email.toLowerCase()
+
+  const cooldownSeconds = parseInt(process.env.PASSWORD_RESET_RESEND_COOLDOWN_SECONDS ?? '60', 10) || 60
+  const maxPerHour      = parseInt(process.env.PASSWORD_RESET_MAX_PER_HOUR            ?? '3',  10) || 3
+
+  // ── 1. Per-email cooldown ──────────────────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `pw-reset:cooldown:${normalised}`,
+    limit:    1,
+    windowMs: cooldownSeconds * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Hourly cap per email ───────────────────────────────────────────────
+  const hourly = checkRateLimit({
+    key:      `pw-reset:hourly:${normalised}`,
+    limit:    maxPerHour,
+    windowMs: 60 * 60 * 1000,
+  })
+  if (!hourly.allowed) return hourly
+
+  // ── 3. Hourly cap per IP ─────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `pw-reset:ip:${ip}`,
+    limit:    10,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+/**
+ * Rate limit for POST /api/auth/reset-password (token submission attempts).
+ *   • Per token hash: 5 attempts per 15 minutes.
+ *   • Prevents brute-force guessing against a token bucket even if someone
+ *     intercepts an unexpired hash.
+ */
+export function checkPasswordResetAttemptLimit(tokenHash: string): RateLimitResult {
+  return checkRateLimit({
+    key:      `pw-reset:attempt:${tokenHash}`,
+    limit:    5,
+    windowMs: 15 * 60 * 1000,
+  })
+}

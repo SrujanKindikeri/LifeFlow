@@ -6,8 +6,9 @@ import { ProjectDetailClient } from '@/components/projects/ProjectDetailClient'
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAuth()
-  } catch {
-    redirect('/login')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
   }
   const { id } = await params
   return (

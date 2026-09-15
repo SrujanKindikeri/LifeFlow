@@ -1,349 +1,376 @@
 /**
  * POST /api/group-bills/scan
  *
- * Receipt scanner for the Group Bill feature.
- * Accepts a multipart/form-data upload with one image (field name: "image").
+ * Context-aware receipt scanner for Group Bills.
+ * Accepts multipart/form-data with field name "image".
  *
- * Pipeline:
- *   1. Validate file (MIME, extension, size)
- *   2. Run OCR  (Google Cloud Vision → Tesseract.js fallback)
- *   3. Quality-check the OCR text (is it actually a receipt?)
- *   4. Parse the text with receiptParser (items, GST, totals, reconciliation)
- *   5. Return structured result — NO database writes
+ * Three-tier provider pipeline:
+ *   Tier 1 — AI Vision API   (GROUP_BILL_AI_* env vars)
+ *   Tier 2 — Ollama           (OLLAMA_BASE_URL env var)
+ *   Tier 3 — Tesseract        (always available)
  *
- * The caller MUST show a review screen before using the extracted data.
- * The Group Bill is only created after the user confirms.
+ * Full pipeline per request:
+ *   1.  Validate authentication
+ *   2.  Validate image file (MIME, extension, size)
+ *   3.  Magic-byte check on buffer
+ *   4.  Primary extraction:
+ *         a. Try Tier 1/2/3 provider from factory
+ *         b. If Tier 1 fails with a recoverable error (unavailable / timeout /
+ *            rate-limited / extraction failure), fall through to Tier 3 and
+ *            attach a user-visible fallback message
+ *   5.  Financial reconciliation (integer paise arithmetic)
+ *   6.  Recovery pass (Tesseract PSM 3) when primary result is weak
+ *   7.  Build review flags
+ *   8.  Return ScanPipelineResult — NO database writes
+ *
+ * Response shape:
+ *   {
+ *     ok:              boolean
+ *     message:         string | null   — review warning or fallback notice
+ *     fallbackMessage: string | null   — set when AI was bypassed
+ *     result:          ScanPipelineResult | null
+ *     provider:        string
+ *   }
  *
  * Security:
  *   - Requires authenticated session (requireAuth).
- *   - userId comes from session, never from the request body.
- *   - OCR text is NEVER returned or logged (financial data protection).
- *   - Max file size: 10 MB (receipts can be larger than UPI screenshots).
- *
- * Returns:
- *   {
- *     ok:          boolean        — false if OCR or parsing failed entirely
- *     message:     string | null  — user-facing error / warning
- *     receipt:     ParsedReceipt | null
- *     ocrEngine:   'google_vision' | 'tesseract' | null
- *   }
+ *   - userId is sourced from the session only — never from the request body.
+ *   - OCR text and image data are NEVER returned or logged.
+ *   - AI/Ollama configuration (URLs, model names) is never returned to the client.
+ *   - The AI API key is never logged, stored, or included in any response.
+ *   - Max file size: 10 MB.
  */
 
 import { NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/session'
-import { parseReceiptText, checkOcrQuality } from '@/lib/receiptParser'
+import {
+  getReceiptVisionProvider,
+  getTesseractProvider,
+  validateImageFile,
+  reconcileExtraction,
+  shouldAttemptRecovery,
+  pickBetterExtraction,
+  buildReviewFlags,
+  ReceiptVisionError,
+  isValidImageBuffer,
+  isAiProviderConfigured,
+  RECOVERY_PSM,
+  RECOVERY_OEM,
+  PROVIDER_NAMES,
+  type ReceiptExtraction,
+  type ReconciliationResult,
+  type ScanPipelineResult,
+  type ScanStatus,
+} from '@/lib/receiptVision'
 
-// ─── Config ────────────────────────────────────────────────────────────────
+// ─── Fallback message shown to the user when AI was bypassed ──────────────────
 
-const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp'])
-const ALLOWED_EXT  = new Set(['.png', '.jpg', '.jpeg', '.webp'])
-const MAX_BYTES    = 10 * 1024 * 1024  // 10 MB — receipts can be high-res photos
+const AI_FALLBACK_MESSAGE =
+  'AI receipt reading is unavailable. We used basic receipt scanning instead.'
 
-/** Hard ceiling on OCR wall-clock time. */
-const OCR_TIMEOUT_MS = 30_000
-
-// ─── OCR result types ───────────────────────────────────────────────────────
-
-interface OcrSuccess {
-  type: 'success'
-  text: string
-  engine: 'google_vision' | 'tesseract'
-}
-interface OcrError {
-  type: 'error'
-  message: string
-}
-type OcrResult = OcrSuccess | OcrError
-
-// ─── POST ───────────────────────────────────────────────────────────────────
+// ─── POST ──────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
     await requireAuth()
 
-    // ── Parse multipart ─────────────────────────────────────────────────────
+    // ── Parse multipart ───────────────────────────────────────────────────────
     let formData: FormData
     try {
       formData = await req.formData()
     } catch {
       return Response.json(
-        { ok: false, message: 'Invalid request — expected multipart/form-data.', receipt: null },
-        { status: 400 }
+        { ok: false, message: 'Invalid request — expected multipart/form-data.', fallbackMessage: null, result: null, provider: null },
+        { status: 400 },
       )
     }
 
     const imageEntry = formData.get('image')
     if (!imageEntry || typeof imageEntry === 'string') {
       return Response.json(
-        { ok: false, message: 'No image provided. Use field name "image".', receipt: null },
-        { status: 400 }
+        { ok: false, message: 'No image provided. Use field name "image".', fallbackMessage: null, result: null, provider: null },
+        { status: 400 },
       )
     }
 
     const file = imageEntry as File
 
-    // ── Validate MIME ───────────────────────────────────────────────────────
-    const mimeType = file.type.toLowerCase()
-    if (!ALLOWED_MIME.has(mimeType)) {
+    // ── File validation ────────────────────────────────────────────────────────
+    const validation = validateImageFile(file)
+    if (!validation.ok) {
       return Response.json(
-        { ok: false, message: `Unsupported file type: ${mimeType}. Use PNG, JPG, or WEBP.`, receipt: null },
-        { status: 415 }
+        { ok: false, message: validation.reason, fallbackMessage: null, result: null, provider: null },
+        { status: validation.status },
       )
     }
 
-    // ── Validate extension ──────────────────────────────────────────────────
-    const ext = ('.' + (file.name.split('.').pop() ?? '')).toLowerCase()
-    if (!ALLOWED_EXT.has(ext)) {
-      return Response.json(
-        { ok: false, message: `Unsupported file extension: ${ext}.`, receipt: null },
-        { status: 415 }
-      )
-    }
-
-    // ── Validate size ───────────────────────────────────────────────────────
-    if (file.size > MAX_BYTES) {
-      return Response.json(
-        {
-          ok: false,
-          message: `Image too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`,
-          receipt: null,
-        },
-        { status: 413 }
-      )
-    }
-    if (file.size === 0) {
-      return Response.json(
-        { ok: false, message: 'The uploaded image is empty.', receipt: null },
-        { status: 400 }
-      )
-    }
-
-    // ── Read bytes ──────────────────────────────────────────────────────────
+    // ── Buffer + magic bytes ───────────────────────────────────────────────────
     const buffer = Buffer.from(await file.arrayBuffer())
-    const base64 = buffer.toString('base64')
+    if (!isValidImageBuffer(buffer)) {
+      return Response.json(
+        { ok: false, message: 'The uploaded file does not appear to be a valid image.', fallbackMessage: null, result: null, provider: null },
+        { status: 415 },
+      )
+    }
 
-    // ── OCR with timeout ────────────────────────────────────────────────────
-    let ocrResult: OcrResult
+    // ── Primary extraction pass ────────────────────────────────────────────────
+    //
+    // getReceiptVisionProvider() returns whichever tier is configured and ready.
+    // If the primary provider then fails at runtime with a recoverable error
+    // (e.g. AI API unreachable, timeout, rate-limited), we fall through to
+    // Tesseract rather than returning an error to the user.
+    const { provider, name: providerName } = await getReceiptVisionProvider()
+
+    let primaryExtraction: ReceiptExtraction
+    let actualProviderName = providerName
+    let fallbackMessage: string | null = null
+
     try {
-      ocrResult = await Promise.race([
-        runOcr(buffer, base64, mimeType),
-        ocrTimeout(OCR_TIMEOUT_MS),
-      ])
-    } catch (err) {
-      const isTimeout = err instanceof Error && err.message === 'OCR_TIMEOUT'
-      return Response.json(
-        {
-          ok: false,
-          message: isTimeout
-            ? 'Receipt scanning took too long. Try a smaller or clearer image.'
-            : "Couldn't read the receipt right now. Please try again.",
-          receipt: null,
-          ocrEngine: null,
-        },
-        { status: isTimeout ? 504 : 500 }
-      )
-    }
-
-    if (ocrResult.type === 'error') {
-      return Response.json(
-        { ok: false, message: ocrResult.message, receipt: null, ocrEngine: null },
-        { status: 422 }
-      )
-    }
-
-    const ocrText = ocrResult.text
-    const engine  = ocrResult.engine
-
-    // ── Quality check ───────────────────────────────────────────────────────
-    const quality = checkOcrQuality(ocrText)
-
-    if (!quality.looksLikeReceipt) {
-      let msg: string
-      if (quality.tooSparse) {
-        msg = 'Receipt is difficult to read. Please retake the photo with better lighting.'
-      } else if (!quality.hasItemLines && !quality.hasTotalLine) {
-        msg = 'Unable to read this receipt. Try a clearer photo.'
+      if ('extractFromBuffer' in provider) {
+        // TesseractReceiptProvider exposes extractFromBuffer (avoids base64 round-trip)
+        primaryExtraction = await (provider as {
+          extractFromBuffer: (b: Buffer) => Promise<ReceiptExtraction>
+        }).extractFromBuffer(buffer)
       } else {
-        msg = 'Some receipt information could not be read. Please review carefully.'
+        const mime = normaliseMime(file.type)
+        const b64  = buffer.toString('base64')
+        primaryExtraction = await provider.extractReceipt(b64, mime)
       }
+    } catch (err) {
+      // ── Decide whether to fall through or surface the error ─────────────────
+      //
+      // Fall through to Tesseract when:
+      //   - The error is recoverable (service unavailable, timeout, rate limit,
+      //     extraction failure) AND the primary provider was not Tesseract.
+      //   - Image-rejected errors are NOT recoverable — the image itself is the
+      //     problem; running Tesseract won't help.
+      //
+      // Surface the error immediately when:
+      //   - The primary provider was already Tesseract (no lower tier to fall to).
+      //   - The image was explicitly rejected by the provider.
 
-      // Still attempt to parse — return with a warning rather than hard-fail
-      const receipt = parseReceiptText(ocrText)
-      const hasAnyData = receipt.items.length > 0 || receipt.grandTotal !== null
-      if (!hasAnyData) {
+      const isRecoverable =
+        err instanceof ReceiptVisionError &&
+        err.code !== 'image_rejected' &&
+        providerName !== PROVIDER_NAMES.TESSERACT
+
+      if (!isRecoverable) {
         return Response.json(
-          { ok: false, message: msg, receipt: null, ocrEngine: engine },
-          { status: 422 }
+          {
+            ok: false,
+            message: ocrErrorMessage(err),
+            fallbackMessage: null,
+            result: null,
+            provider: providerName,
+          },
+          { status: ocrErrorStatus(err) },
         )
       }
-      return Response.json({
-        ok: true,
-        message: msg,
-        receipt,
-        ocrEngine: engine,
-      })
+
+      // Log the tier failure at warn level — never log the image, key, or raw error body
+      console.warn(
+        '[group-bills/scan] Primary provider failed, falling through to Tesseract.',
+        err instanceof ReceiptVisionError ? `[${err.code}]` : '[unknown]',
+      )
+
+      // Fall through: run Tesseract as the actual primary
+      try {
+        const tesseract = getTesseractProvider()
+        primaryExtraction = await tesseract.extractFromBuffer(buffer)
+        actualProviderName = PROVIDER_NAMES.TESSERACT
+        // Attach fallback notice only when AI was configured — if neither AI
+        // nor Ollama were set up, Tesseract is the expected path, not a fallback.
+        fallbackMessage = isAiProviderConfigured() ? AI_FALLBACK_MESSAGE : null
+      } catch (tessErr) {
+        // Tesseract itself failed — nothing left to fall back to
+        return Response.json(
+          {
+            ok: false,
+            message: ocrErrorMessage(tessErr),
+            fallbackMessage: null,
+            result: null,
+            provider: PROVIDER_NAMES.TESSERACT,
+          },
+          { status: ocrErrorStatus(tessErr) },
+        )
+      }
     }
 
-    // ── Parse the receipt ───────────────────────────────────────────────────
-    const receipt = parseReceiptText(ocrText)
+    // ── Primary reconciliation ─────────────────────────────────────────────────
+    let extraction = primaryExtraction
+    let recon      = reconcileExtraction(primaryExtraction)
+    let pass: 'primary' | 'recovery' = 'primary'
 
-    // Hard failure: no items AND no total found
-    if (receipt.items.length === 0 && receipt.grandTotal === null) {
+    // ── Recovery pass (Tesseract PSM 3 only) ──────────────────────────────────
+    //
+    // A second Tesseract pass with different segmentation always makes sense
+    // as a recovery strategy regardless of which provider ran first.
+    // Skip when the primary provider was already Tesseract with the recovery
+    // settings to avoid an identical duplicate pass.
+    if (shouldAttemptRecovery(primaryExtraction, recon)) {
+      try {
+        const tesseract = getTesseractProvider()
+        const recoveryExtraction = await tesseract.extractFromBuffer(
+          buffer,
+          RECOVERY_PSM,
+          RECOVERY_OEM,
+        )
+        const recoveryRecon = reconcileExtraction(recoveryExtraction)
+        const winner = pickBetterExtraction(
+          primaryExtraction, recon,
+          recoveryExtraction, recoveryRecon,
+        )
+        if (winner === 'b') {
+          extraction = recoveryExtraction
+          recon      = recoveryRecon
+          pass       = 'recovery'
+        }
+      } catch {
+        // Recovery is best-effort — never crash the primary flow
+      }
+    }
+
+    // ── Hard failure guard ─────────────────────────────────────────────────────
+    if (extraction.items.length === 0 && extraction.grandTotalMinor === null) {
       return Response.json(
         {
           ok: false,
-          message: 'Unable to extract items from this receipt. Try a clearer photo.',
-          receipt: null,
-          ocrEngine: engine,
+          message:
+            'Unable to extract any items from this receipt. ' +
+            'Try a clearer photo with better lighting.',
+          fallbackMessage,
+          result: null,
+          provider: actualProviderName,
         },
-        { status: 422 }
+        { status: 422 },
       )
     }
 
+    // ── Build review flags ─────────────────────────────────────────────────────
+    const reviewFlags = buildReviewFlags(extraction, recon)
+
+    // ── Determine scan status ──────────────────────────────────────────────────
+    const status = deriveScanStatus(extraction, recon, reviewFlags)
+
+    // ── Build pipeline result ──────────────────────────────────────────────────
+    const pipelineResult: ScanPipelineResult = {
+      status,
+      extraction,
+      reconciliation: recon,
+      pass,
+      reviewMessages: buildReviewMessages(status, reviewFlags, fallbackMessage),
+      reviewFlags,
+    }
+
+    // Primary user message: fallback notice takes priority over generic review
+    // messages so the user knows why AI was not used.
+    const userMessage =
+      fallbackMessage ??
+      (pipelineResult.reviewMessages.length > 0 ? pipelineResult.reviewMessages[0] : null)
+
     return Response.json({
-      ok: true,
-      message: receipt.requiresReview
-        ? 'Please review the highlighted values before continuing.'
-        : null,
-      receipt,
-      ocrEngine: engine,
+      ok:              true,
+      message:         userMessage,
+      fallbackMessage,
+      result:          pipelineResult,
+      provider:        actualProviderName,
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
-      return Response.json({ ok: false, message: 'Unauthorized', receipt: null }, { status: 401 })
+      return Response.json(
+        { ok: false, message: 'Unauthorized', fallbackMessage: null, result: null, provider: null },
+        { status: 401 },
+      )
     }
-    console.error('[group-bills/scan POST]', error instanceof Error ? error.message : String(error))
+    // Log only the error type and message — never the image or API key
+    console.error(
+      '[group-bills/scan POST]',
+      error instanceof Error ? error.message : String(error),
+    )
     return Response.json(
-      { ok: false, message: 'Failed to scan receipt.', receipt: null },
-      { status: 500 }
+      { ok: false, message: 'Failed to scan receipt. Please try again.', fallbackMessage: null, result: null, provider: null },
+      { status: 500 },
     )
   }
 }
 
-// ─── OCR timeout ────────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
-function ocrTimeout(ms: number): Promise<never> {
-  return new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('OCR_TIMEOUT')), ms)
-  )
+function normaliseMime(mime: string): string {
+  const m = mime.toLowerCase()
+  return m === 'image/jpg' ? 'image/jpeg' : m
 }
 
-// ─── OCR orchestrator ────────────────────────────────────────────────────────
+function deriveScanStatus(
+  e:     ReceiptExtraction,
+  r:     ReconciliationResult,
+  flags: string[],
+): ScanStatus {
+  if (e.items.length === 0)       return 'failed'
+  if (e.grandTotalMinor === null) return 'grand_total_missing'
 
-async function runOcr(
-  buffer: Buffer,
-  base64: string,
-  mimeType: string,
-): Promise<OcrResult> {
-  const googleApiKey = process.env.GOOGLE_VISION_API_KEY
-  if (googleApiKey) {
-    const result = await runGoogleVision(base64, googleApiKey, mimeType)
-    if (result.type === 'success') return result
-    // Fall through to Tesseract on Vision failure
-  }
-  return runTesseract(buffer)
+  const hasProblems =
+    !r.itemsMatchLinetotals ||
+    r.linetoalsSumToSubtotal === false ||
+    r.totalsReconcile === false ||
+    e.overallConfidence < 0.60 ||
+    flags.length > 0
+
+  return hasProblems ? 'review_required' : 'verified'
 }
 
-// ─── Google Cloud Vision ─────────────────────────────────────────────────────
+function buildReviewMessages(
+  status:          ScanStatus,
+  flags:           string[],
+  fallbackMessage: string | null,
+): string[] {
+  const messages: string[] = []
 
-async function runGoogleVision(
-  base64: string,
-  apiKey: string,
-  mimeType: string,
-): Promise<OcrResult> {
-  try {
-    // Use DOCUMENT_TEXT_DETECTION for receipts — better at dense text layouts.
-    // TEXT_DETECTION is optimised for sparse text (signs, labels).
-    const res = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: base64 },
-              features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
-              imageContext: {
-                languageHints: ['en', 'hi'],  // English + Hindi for Indian receipts
-              },
-            },
-          ],
-        }),
-      }
-    )
-
-    if (!res.ok) {
-      return { type: 'error', message: "Couldn't scan the receipt right now. Please try again." }
-    }
-
-    const data = (await res.json()) as {
-      responses?: Array<{
-        fullTextAnnotation?: { text?: string }
-        error?: { message?: string }
-      }>
-    }
-
-    if (data.responses?.[0]?.error) {
-      return { type: 'error', message: "Couldn't scan the receipt right now. Please try again." }
-    }
-
-    const text = data.responses?.[0]?.fullTextAnnotation?.text
-    if (!text || text.trim().length === 0) {
-      return { type: 'error', message: "No readable text was found in the image." }
-    }
-
-    return { type: 'success', text, engine: 'google_vision' }
-  } catch {
-    return { type: 'error', message: "Couldn't scan the receipt right now. Please try again." }
+  // Fallback notice is prepended first so it's the most visible
+  if (fallbackMessage) {
+    messages.push(fallbackMessage)
   }
+
+  if (status === 'review_required' || flags.length > 0) {
+    messages.push('Please review the highlighted values before continuing.')
+  }
+  if (status === 'grand_total_missing') {
+    messages.push('Grand total could not be read from this receipt.')
+  }
+  return messages
 }
 
-// ─── Tesseract.js ────────────────────────────────────────────────────────────
-
-async function runTesseract(imageBuffer: Buffer): Promise<OcrResult> {
-  if (!imageBuffer || imageBuffer.length < 100) {
-    return { type: 'error', message: 'This image could not be opened.' }
-  }
-
-  try {
-    const { createWorker } = await import('tesseract.js')
-
-    const worker = await createWorker('eng', 1, {
-      logger:       () => {},
-      errorHandler: () => {},
-    })
-
-    try {
-      // PSM 4 = "Assume a single column of text of variable sizes"
-      // Works better than PSM 6 for receipts which have multiple columns.
-      await worker.setParameters({
-        tessedit_pageseg_mode: '4' as unknown as Tesseract.PSM,
-        // Preserve more characters that receipts use
-        tessedit_char_whitelist: '',
-      })
-
-      const { data } = await worker.recognize(imageBuffer)
-      const text = data.text ?? ''
-
-      if (!text || text.trim().length < 10) {
-        return { type: 'error', message: 'No readable text was found in the image.' }
-      }
-
-      return { type: 'success', text, engine: 'tesseract' }
-    } finally {
-      await worker.terminate()
+function ocrErrorMessage(err: unknown): string {
+  if (err instanceof ReceiptVisionError) {
+    switch (err.code) {
+      case 'timeout':
+        return 'Scanning took too long. Try a smaller or clearer image.'
+      case 'image_rejected':
+        return 'This image could not be opened. Please try a different photo.'
+      case 'provider_unavailable':
+        return 'Receipt scanner is temporarily unavailable. Please try again.'
+      case 'rate_limited':
+        return 'Receipt scanner is busy. Please try again in a moment.'
+      case 'extraction_failed':
+        return err.message.length > 0
+          ? err.message
+          : "Couldn't read this receipt. Try a clearer photo with better lighting."
+      default:
+        return 'Receipt scanning failed. Please try again.'
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message.toLowerCase() : ''
-    if (
-      msg.includes('could not initialize') ||
-      msg.includes('failed to load') ||
-      msg.includes('invalid image') ||
-      msg.includes('unsupported image')
-    ) {
-      return { type: 'error', message: 'This image could not be opened.' }
-    }
-    return { type: 'error', message: "Couldn't scan the receipt right now." }
   }
+  return 'Failed to scan receipt. Please try again.'
+}
+
+function ocrErrorStatus(err: unknown): number {
+  if (err instanceof ReceiptVisionError) {
+    switch (err.code) {
+      case 'timeout':              return 504
+      case 'image_rejected':       return 415
+      case 'provider_unavailable': return 503
+      case 'rate_limited':         return 429
+      default:                     return 422
+    }
+  }
+  return 500
 }

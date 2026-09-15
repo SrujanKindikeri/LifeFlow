@@ -259,7 +259,10 @@ const INDEX_SPECS: IndexSpec[] = [
   {
     collection: 'dashboardpreferences',
     indexes: [
-      { key: { userId: 1 }, options: { unique: true } },
+      // NOTE: The unique index on userId is declared in the Mongoose schema
+      // (unique: true on the field definition). Repeating it here caused a
+      // duplicate-schema-index warning at startup. Only the lifeFlowId lookup
+      // index is registered here; Mongoose handles the unique userId index.
       { key: { lifeFlowId: 1 } },
     ],
   },
@@ -270,6 +273,9 @@ const INDEX_SPECS: IndexSpec[] = [
     indexes: [
       { key: { userId: 1, name: 1 } },
       { key: { lifeFlowId: 1 } },
+      // Prevents the same LifeFlow user from being added twice by the same owner.
+      // sparse: true so manual contacts (no linkedUserId) are excluded from the index.
+      { key: { userId: 1, linkedUserId: 1 }, options: { unique: true, sparse: true } },
     ],
   },
 

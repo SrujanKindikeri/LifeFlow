@@ -101,9 +101,34 @@ const CONNECTION_OPTIONS: mongoose.ConnectOptions = {
   // Fail fast so the caller sees the error immediately.
   bufferCommands: false,
 
-  // Fail after 10 seconds rather than the default 30-second wait.
-  // Keeps request latency predictable in cold-starts.
-  serverSelectionTimeoutMS: 10_000,
+  // ── IPv4 enforcement ──────────────────────────────────────────────────────
+  //
+  // Node.js v17+ (RFC 6724) prefers IPv6 addresses when a host returns both
+  // an IPv6 and an IPv4 record.  MongoDB Atlas shard hostnames return:
+  //   • A synthetic NAT64 IPv6 address (64:ff9b::/96 prefix)
+  //   • A real IPv4 address
+  //
+  // Atlas does NOT accept connections on the NAT64 IPv6 address — the TCP
+  // connection succeeds (the NAT64 gateway is reachable) but the TLS
+  // handshake never completes, so the driver waits until
+  // serverSelectionTimeoutMS fires and reports ETIMEDOUT.
+  //
+  // Setting family: 4 tells the Node.js DNS resolver to only return IPv4
+  // addresses, so the driver connects directly to the real Atlas IP.
+  // This is the correct fix for Node.js v17+ / v24 + MongoDB Atlas SRV.
+  family: 4,
+
+  // Abort TCP connect attempts after 10 seconds (belt-and-suspenders on top
+  // of serverSelectionTimeoutMS).  Without this, a NAT64 or firewall that
+  // accepts the TCP SYN but never completes the handshake can hold the
+  // socket open silently for the OS default (minutes).
+  connectTimeoutMS: 10_000,
+
+  // Fail server selection after 30 seconds.  30 s is generous enough to
+  // survive a transient Atlas primary failover (~15 s) without making the
+  // app feel permanently broken.  The previous value of 10 s was too tight
+  // for cold-starts and Atlas failover events.
+  serverSelectionTimeoutMS: 30_000,
 
   // Close idle sockets after 45 seconds to avoid stale connection errors
   // on platforms that enforce TCP idle timeouts (AWS, Azure load balancers).
@@ -140,13 +165,48 @@ export async function connectDB(): Promise<typeof mongoose> {
   if (!cached.promise) {
     // Validate env at runtime (not at module load) so `next build` succeeds
     // in Docker environments where secrets are not available during the build stage.
-    const uri = getServerEnv().MONGODB_URI
+    const env = getServerEnv()
+    const uri    = env.MONGODB_URI
+    const dbName = env.MONGODB_DB_NAME   // defaults to 'test' in getServerEnv()
+
+    if (process.env.NODE_ENV === 'development') {
+      // Extract ONLY the hostname from the URI — never log credentials.
+      // mongodb+srv://user:pass@hostname/db?opts  →  hostname
+      let safeHostname = '(unresolved)'
+      try {
+        // SRV URIs use the mongodb+srv:// scheme; URL() parses it fine.
+        safeHostname = new URL(uri).hostname
+      } catch {
+        safeHostname = '(unparseable URI)'
+      }
+      logger.info('[DB DEBUG] connecting', {
+        provider:               'mongodb',
+        hostname:               safeHostname,
+        database_name:          dbName,
+        NODE_ENV:               process.env.NODE_ENV,
+        MONGODB_URI_configured: !!uri,
+        // Confirms the IPv4-enforcement fix is active at runtime
+        dns_family:             (CONNECTION_OPTIONS as Record<string, unknown>).family ?? 'default',
+      })
+    }
 
     cached.promise = mongoose
-      .connect(uri, CONNECTION_OPTIONS)
+      .connect(uri, { ...CONNECTION_OPTIONS, dbName })
       .then((mongooseInstance) => {
         // Register event handlers on the default connection
         const conn = mongooseInstance.connection
+
+        conn.on('connect', () => {
+          if (process.env.NODE_ENV === 'development') {
+            logger.info('[DB DEBUG] connected', {
+              database_name:    conn.db?.databaseName ?? '(unknown)',
+              connection_state: 'connected',
+              // Confirms the correct Atlas cluster is in use
+              host:             conn.host ?? '(unknown)',
+              port:             conn.port ?? '(unknown)',
+            })
+          }
+        })
 
         conn.on('error', (err: Error) => {
           logger.error('[MongoDB] Connection error', { errorMessage: err.message })

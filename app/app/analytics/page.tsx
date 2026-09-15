@@ -5,8 +5,9 @@ import { AnalyticsClient } from '@/components/analytics/AnalyticsClient'
 export default async function AnalyticsPage() {
   try {
     await requireAuth()
-  } catch {
-    redirect('/login')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
   }
 
   return (

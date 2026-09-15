@@ -125,7 +125,13 @@ export function getServerEnv() {
   return {
     // Database
     MONGODB_URI:      process.env.MONGODB_URI!,
-    MONGODB_DB_NAME:  process.env.MONGODB_DB_NAME ?? 'lifeflow',
+    // Default to 'test' — that is the Atlas database where LifeFlow data lives
+    // when no explicit database name was provided during initial cluster setup.
+    // Both local (.env.local) and AWS (.env) must set MONGODB_DB_NAME=test.
+    // If the variable is absent, 'test' is the safe fallback that matches
+    // what Atlas created by default; 'lifeflow' would silently connect to
+    // an empty database and cause UserNotFound on every login.
+    MONGODB_DB_NAME:  process.env.MONGODB_DB_NAME ?? 'test',
 
     // Auth
     SESSION_SECRET: process.env.SESSION_SECRET!,
@@ -193,7 +199,9 @@ export function getServerEnv() {
 export const serverEnv = {
   // Database
   get MONGODB_URI()      { return process.env.MONGODB_URI ?? '' },
-  get MONGODB_DB_NAME()  { return process.env.MONGODB_DB_NAME ?? 'lifeflow' },
+  // Default to 'test' — matches the Atlas default and what docker-compose uses.
+  // See getServerEnv() comment above for why 'lifeflow' would be wrong.
+  get MONGODB_DB_NAME()  { return process.env.MONGODB_DB_NAME ?? 'test' },
 
   // Auth
   get SESSION_SECRET()   { return process.env.SESSION_SECRET ?? '' },

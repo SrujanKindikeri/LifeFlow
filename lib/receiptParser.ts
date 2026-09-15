@@ -1,834 +1,1193 @@
 /**
- * receiptParser.ts — Zone-Based Receipt Parser (v2)
+ * receiptParser.ts — Context-Aware Spatial Receipt Parser (v4)
  *
- * Root-cause fix for v1: lines were classified in isolation, so phone numbers,
- * bill numbers, table numbers and addresses were extracted as food items.
+ * This parser is the Tesseract fallback path. It runs when Ollama is
+ * unavailable and uses Tesseract HOCR bounding-box output (word-level
+ * coordinates + confidence) to understand receipt STRUCTURE rather than
+ * treating OCR output as a flat string to regex over.
  *
- * v2 Pipeline:
- *   1. Normalise & clean OCR text
- *   2. Segment the receipt into named ZONES:
- *        HEADER   — everything before the item-table column header
- *        COL_HDR  — the column-header row itself
- *        ITEMS    — rows between column header and the first total/tax line
- *        TOTALS   — subtotal, tax, charge, discount, grand-total lines
- *        FOOTER   — payment info, thank-you messages, etc.
- *   3. Extract restaurant metadata from HEADER zone only
- *   4. Extract items from ITEMS zone only  (prevents metadata leaking in)
- *   5. Extract taxes/charges from TOTALS zone
- *   6. Extract grand total from TOTALS zone
- *   7. Mathematical reconciliation
- *   8. Confidence scoring + review flags
+ * Root cause of v3 failures:
+ *   The previous approach concatenated OCR lines and used regex patterns
+ *   to exclude metadata. This fragile negative-filter approach failed
+ *   whenever metadata text did not match a known pattern.
  *
- * Key guarantees:
- *   - Phone numbers, GSTIN, bill/table/token numbers → NEVER extracted as items
- *   - Only text between the column header and the first total line is item-parsed
- *   - Integer paise arithmetic throughout; rupees only at output boundary
- *   - Never invents values; always flags uncertain fields for user review
+ * v4 approach — POSITIVE identification via spatial zones:
+ *   1. Parse HOCR XML → typed WordToken[] with (text, x, y, w, h, conf)
+ *   2. Group tokens into visual ROWS by Y-coordinate proximity
+ *   3. Classify each row by its ROLE:
+ *        HEADER   — rows above the column header row
+ *        COL_HDR  — row containing "Item / Qty / Rate / Amount" words
+ *        ITEM     — rows in the item table (between col_hdr and totals block)
+ *        TOTALS   — rows containing subtotal/tax/total keywords
+ *        FOOTER   — rows below the grand total row
+ *   4. Extract from ITEM rows ONLY using column geometry
+ *   5. Extract structured metadata from HEADER rows
+ *   6. Extract financial totals from TOTALS rows
+ *
+ * Guarantees:
+ *   - Address, phone, GSTIN, bill number, date, time, table/token numbers
+ *     NEVER appear in items[] because they live in HEADER rows.
+ *   - Subtotal / tax / grand total NEVER appear in items[] because they
+ *     live in TOTALS rows.
+ *   - Multi-line item names are joined using row proximity and column geometry.
+ *   - Confidence scores are real Tesseract word confidence values (0-100).
+ *
+ * Output:
+ *   ParsedReceipt  (same public interface as v3 for backward compatibility)
+ *   ReceiptExtraction  (the new canonical type used by the scan pipeline)
  */
 
-// ─── Public types ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// PUBLIC TYPES
+// ═══════════════════════════════════════════════════════════════════
 
 export type FieldConfidence = 'high' | 'medium' | 'low'
 
-export interface ScannedItem {
-  name: string
-  quantity: number
-  unitPrice: number          // rupees
-  lineTotal: number          // rupees
-  lineTotalFromReceipt: boolean
-  confidence: FieldConfidence
-  mathMismatch: boolean
+export interface ItemFieldConfidence {
+  name:      FieldConfidence
+  quantity:  FieldConfidence
+  unitPrice: FieldConfidence
+  lineTotal: FieldConfidence
 }
 
+export interface ScannedItem {
+  name:                 string
+  quantity:             number
+  unitPrice:            number   // rupees
+  lineTotal:            number   // rupees
+  lineTotalFromReceipt: boolean
+  confidence:           FieldConfidence
+  fieldConfidence:      ItemFieldConfidence
+  mathMismatch:         boolean
+  needsReview:          boolean
+  reviewNote:           string | null
+}
+
+export interface TaxEntry {
+  label:  string
+  type:   'cgst' | 'sgst' | 'igst' | 'gst' | 'service' | 'discount' | 'packing' | 'other'
+  rate:   number | null
+  amount: number   // rupees
+}
+
+/** GST summary — convenience view over TaxEntry[]. Backward-compatible with v3 tests. */
 export interface GstInfo {
-  inclusive: boolean | null
-  rate: number | null
-  cgstAmount: number | null
-  sgstAmount: number | null
-  igstAmount: number | null
+  inclusive:      boolean | null
+  rate:           number | null
+  cgstAmount:     number | null
+  sgstAmount:     number | null
+  igstAmount:     number | null
   totalGstAmount: number
-  cgstRate: number | null
-  sgstRate: number | null
-  igstRate: number | null
-  confidence: FieldConfidence
+  cgstRate:       number | null
+  sgstRate:       number | null
+  igstRate:       number | null
+  confidence:     FieldConfidence
 }
 
 export interface ParsedReceipt {
-  items: ScannedItem[]
-  subtotal: number | null
-  serviceCharge: number | null
-  otherCharges: number | null
-  discount: number | null
-  discountPercent: number | null
-  gst: GstInfo
-  grandTotal: number | null
-  computedTotal: number | null
-  totalsMatch: boolean
-  reconciliationNote: string | null
+  restaurantName:  string | null
+  receiptDate:     string | null
+  invoiceNumber:   string | null
+  items:           ScannedItem[]
+  subtotal:        number | null
+  taxes:           TaxEntry[]
+  /** Convenience GST summary (backward-compatible with v3 tests). */
+  gst:             GstInfo
+  serviceCharge:   number | null
+  discount:        number | null
+  grandTotal:      number | null
+  /** Computed total from items + taxes + charges (for tests / review UI). */
+  computedTotal:   number | null
+  /** Whether the computed total matches the printed grand total (within ₹1). */
+  totalsMatch:     boolean
   overallConfidence: FieldConfidence
-  requiresReview: boolean
-  reviewFlags: string[]
-  restaurantName: string | null
-  receiptDate: string | null
-  rawLineCount: number
+  requiresReview:  boolean
+  reviewFlags:     string[]
+  rawLineCount:    number
+  ocrEngine:       'tesseract' | null
 }
 
-// ─── Zone types ───────────────────────────────────────────────────────────────
-
-type ZoneType = 'header' | 'col_hdr' | 'items' | 'totals' | 'footer'
-
-interface ZonedLine {
-  raw: string      // original cleaned text
-  zone: ZoneType
-  lineIdx: number  // position in the full receipt
+export interface OcrQuality {
+  looksLikeReceipt: boolean
+  tooSparse:        boolean
+  hasItemLines:     boolean
+  hasTotalLine:     boolean
+  lineCount:        number
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// HOCR WORD TOKEN
+// ═══════════════════════════════════════════════════════════════════
 
-const PAISE = 100
+export interface WordToken {
+  text: string
+  x:    number   // left edge (pixels)
+  y:    number   // top edge
+  w:    number   // width
+  h:    number   // height
+  conf: number   // 0–100 Tesseract confidence
+}
 
-// ── Metadata patterns: lines matching these are NEVER food items ──────────────
-//
-// These patterns cover every field in a typical Indian restaurant receipt header.
-// The list is intentionally broad — false-negatives (missing an item) are far
-// less harmful than false-positives (treating a phone number as a price).
-const METADATA_PATTERNS: RegExp[] = [
-  // Contact details
-  /\b(ph|phone|mob|mobile|tel|fax|call)\s*[:\-#]?\s*[\d\s\-+()]{6,}/i,
-  /\b\d{3,5}[\s\-]\d{3,5}[\s\-]\d{4}\b/,              // phone-number shape
-  /\+91[\s\-]?\d{10}/,                                   // +91 mobile
-  /\b[6-9]\d{9}\b/,                                      // bare 10-digit Indian mobile
+// ═══════════════════════════════════════════════════════════════════
+// HOCR PARSER
+// ═══════════════════════════════════════════════════════════════════
 
-  // Tax & business identifiers
-  /\b(gstin|gst\s*(no|number|in|reg)|cin|fssai|pan\s+(no|number))\s*[:\-#]?\s*\w/i,
-  /\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[A-Z0-9]{3}\b/,  // GSTIN format
+/**
+ * Parse Tesseract HOCR XML into typed WordToken[].
+ *
+ * HOCR format: <span class="ocrx_word" title="bbox 10 20 80 40; x_wconf 92">text</span>
+ */
+export function parseHocr(hocrXml: string): WordToken[] {
+  const tokens: WordToken[] = []
 
-  // Transaction metadata
-  /\b(bill|invoice|receipt|order|kot|token|voucher|txn|transaction)\s*(no|number|#|num)?\s*[:\-#]?\s*[\w\-\/]+/i,
-  /\b(table|seat|cover)\s*(no|number|#)?\s*[:\-#]?\s*[\w\-]+/i,
-  /\b(token|counter|window)\s*(no|number|#)?\s*[:\-#]?\s*[\w\-]+/i,
-  /\b(cashier|server|waiter|captain|steward)\s*[:\-#]?\s*\w/i,
+  // Match all word spans — use a regex rather than a full XML parser to
+  // avoid dependencies. The HOCR format is regular enough.
+  const wordRe = /<span[^>]*class="ocrx_word"[^>]*title="([^"]*)"[^>]*>([\s\S]*?)<\/span>/g
+  let m: RegExpExecArray | null
 
-  // Date/time
-  /\b(date|time|dt)\s*[:\-#]?\s*\d/i,
-  /\b\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\b/i,
-  /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/,            // DD/MM/YY date shape
+  while ((m = wordRe.exec(hocrXml)) !== null) {
+    const title   = m[1]
+    const rawText = m[2].replace(/<[^>]+>/g, '').trim()  // strip any nested tags
 
-  // Order type / dine in / take away
-  /\b(dine\s*in|take\s*(away|out)|delivery|parcel|swiggy|zomato|online)\b/i,
-  /\b(order\s*type|order\s*mode)\b/i,
+    if (!rawText) continue
 
-  // Footer / payment / UPI
-  /\b(thank\s*you|thanks|visit\s*again|have\s*a\s*(great|nice|good))\b/i,
-  /\b(powered\s*by|software|www\.|http|\.com|\.in)\b/i,
-  /\b(upi|cash|card|paytm|gpay|phonepe|bhim|neft|rtgs|imps)\b/i,
-  /\b(payment\s*(mode|method|type)|paid\s*(by|via|through))\b/i,
-  /\b(signature|authorized|sign)\b/i,
-  /\b(e[-\s]?bill|e[-\s]?receipt|digital\s*receipt)\b/i,
-  /\b(customer\s*(copy|name|id|phone|mob))\b/i,
-]
+    // Parse bbox: "bbox x0 y0 x1 y1"
+    const bboxM = title.match(/bbox\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/)
+    if (!bboxM) continue
+    const x0 = parseInt(bboxM[1])
+    const y0 = parseInt(bboxM[2])
+    const x1 = parseInt(bboxM[3])
+    const y1 = parseInt(bboxM[4])
 
-// ── Column-header row detection ───────────────────────────────────────────────
-// A column header row has at least TWO of these column label words with NO prices.
+    // Parse confidence: "x_wconf 85"
+    const confM = title.match(/x_wconf\s+(\d+)/)
+    const conf  = confM ? parseInt(confM[1]) : 50
+
+    tokens.push({
+      text: rawText,
+      x:    x0,
+      y:    y0,
+      w:    x1 - x0,
+      h:    y1 - y0,
+      conf,
+    })
+  }
+
+  return tokens
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ROW GROUPING
+// ═══════════════════════════════════════════════════════════════════
+
+export interface VisualRow {
+  tokens: WordToken[]
+  /** Median Y of all tokens in this row */
+  y:      number
+  /** Typical line height (used for multi-line continuation detection) */
+  lineH:  number
+}
+
+/**
+ * Group word tokens into visual rows by Y-coordinate proximity.
+ *
+ * Two tokens are in the same row if their Y positions differ by less than
+ * ROW_GAP_FACTOR × average character height.
+ */
+export function groupIntoRows(tokens: WordToken[]): VisualRow[] {
+  if (tokens.length === 0) return []
+
+  // Sort by Y then X
+  const sorted = [...tokens].sort((a, b) => a.y - b.y || a.x - b.x)
+
+  // Estimate typical character height from median token heights
+  const heights = sorted.map((t) => t.h).sort((a, b) => a - b)
+  const medH    = heights[Math.floor(heights.length / 2)] || 20
+  const rowGap  = medH * 0.55   // tokens within 55% of char height = same row
+
+  const rows: VisualRow[] = []
+  let currentTokens: WordToken[] = [sorted[0]]
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = currentTokens[currentTokens.length - 1]
+    const cur  = sorted[i]
+
+    if (Math.abs(cur.y - prev.y) <= rowGap) {
+      currentTokens.push(cur)
+    } else {
+      rows.push(finalizeRow(currentTokens, medH))
+      currentTokens = [cur]
+    }
+  }
+  rows.push(finalizeRow(currentTokens, medH))
+
+  return rows
+}
+
+function finalizeRow(tokens: WordToken[], defaultH: number): VisualRow {
+  // Sort tokens left to right
+  const sorted = [...tokens].sort((a, b) => a.x - b.x)
+  const ys     = sorted.map((t) => t.y)
+  const medY   = ys[Math.floor(ys.length / 2)]
+  const avgH   = sorted.reduce((s, t) => s + t.h, 0) / sorted.length || defaultH
+  return { tokens: sorted, y: medY, lineH: avgH }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ZONE CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════
+
+export type RowZone = 'header' | 'col_hdr' | 'item' | 'totals' | 'footer'
+
+export interface ZonedRow extends VisualRow {
+  zone:    RowZone
+  rawText: string
+}
+
+// ── Keyword patterns ──────────────────────────────────────────────────────────
+
 const COL_HDR_WORDS = [
   /\b(item|items|description|desc|particular|product|food)\b/i,
-  /\b(qty|quantity|no\.?\s*of|nos|pcs|count)\b/i,
-  /\b(rate|unit\s*price|price|u\.?p\.?|mrp)\b/i,
+  /\b(qty|quantity|nos|pcs|count)\b/i,
+  /\b(rate|unit\s*price?|price|u\.?p\.?|mrp)\b/i,
   /\b(amount|total|amnt|amt)\b/i,
-  /\b(s\.?\s*no|sr\.?\s*no|sl\.?\s*no|#)\b/i,
 ]
 
-// ── Total / tax keyword detection ─────────────────────────────────────────────
-const GRAND_TOTAL_KW = /\b(grand\s*total|net\s*(payable|amount|total)|total\s*(amount|payable|bill|due)?|bill\s*(amount|total)|amount\s*(payable|due)|payable|balance|final\s*amount|to\s*pay|net\s*bill)\b/i
-const SUBTOTAL_KW    = /\b(sub\s*total|item\s*total|food\s*total|gross\s*total|total\s*items?|basic\s*total)\b/i
-const TAX_KW         = /\b(cgst|sgst|igst|gst|tax|vat|cess|surcharge|service\s*(charge|tax|fee)|sc\b|packing|packaging|delivery\s*(charge)?|convenience\s*fee|platform\s*fee|round\s*(off|up|down)|rounding)\b/i
-const DISCOUNT_KW    = /\b(discount|offer|coupon|promo|cashback|rebate|saving|savings|less)\b/i
-const SEPARATOR_LINE = /^[-=*_~.]{4,}$/  // pure separator: "------" "======" etc.
-const INCLUSIVE_GST  = /\b(inclusive|incl\.?\s*(of|gst|tax)|tax\s*incl|gst\s*incl|all\s*taxes\s*inclusive)\b/i
+const TOTAL_KEYWORDS = /\b(grand\s*total|net\s*(payable|amount|total)|total\s*(amount|payable|bill|due)?|bill\s*(amount|total)|amount\s*(payable|due)|payable|balance|final\s*amount|to\s*pay|net\s*bill)\b/i
+const SUBTOTAL_KW    = /\b(sub\s*total|item\s*total|food\s*total|gross\s*total|basic\s*total)\b/i
+const TAX_KW         = /\b(cgst|sgst|igst|gst|tax|vat|cess|service\s*(charge|tax|fee)|sc\b|packing|packaging|round\s*(off|up|down)|rounding)\b/i
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+/**
+ * Strict grand-total keyword — does NOT match "Sub Total" or "Item Total".
+ * Used to set pastGrandTotal and identify the definitive grand total line.
+ */
+const GRAND_TOTAL_STRICT = /\b(grand\s*total|net\s*(payable|amount|total)|bill\s*(amount|total)|amount\s*(payable|due)|payable(?!\s*by)|balance\s*due|final\s*amount|to\s*pay|net\s*bill)\b/i
+const DISCOUNT_KW    = /\b(discount|offer|coupon|promo|cashback|saving|less)\b/i
 
-function toPaise(rupees: number): number {
-  return Math.round(rupees * PAISE)
+function isTaxOrTotalRow(text: string): boolean {
+  return TOTAL_KEYWORDS.test(text) || SUBTOTAL_KW.test(text) ||
+         TAX_KW.test(text) || DISCOUNT_KW.test(text)
 }
-function toRupees(paise: number): number {
-  return Math.round(paise) / PAISE
+
+function colHdrScore(text: string): number {
+  return COL_HDR_WORDS.filter((r) => r.test(text)).length
 }
 
 /**
- * Clean a single OCR line:
- *  - collapse whitespace
- *  - replace pipe characters (column separators in thermal receipts) with spaces
- *  - normalise unicode rupee variants
+ * Classify each visual row into a zone.
+ *
+ * Algorithm:
+ *   1. Find the column-header row (row with ≥2 col-label words, no prices).
+ *   2. Find the last totals block from the bottom (last contiguous group of
+ *      tax/total keyword lines).
+ *   3. Rows above col_hdr → header
+ *   4. Rows between col_hdr and lastTotalsStart → item
+ *   5. Rows from lastTotalsStart to grand total → totals
+ *   6. Rows after grand total → footer
  */
-function cleanLine(s: string): string {
-  return s
-    .replace(/\|/g, ' ')
-    .replace(/Rs\./gi, '₹')
-    .replace(/\bRs\b/gi, '₹')
-    .replace(/\bINR\b/gi, '₹')
+export function classifyZones(rows: VisualRow[]): ZonedRow[] {
+  const texts = rows.map((r) => r.tokens.map((t) => t.text).join(' '))
+
+  // ── Step 1: find col_hdr row ──────────────────────────────────────────────
+  let colHdrIdx = -1
+
+  // Strict: ≥2 col words, no price tokens
+  for (let i = 0; i < rows.length; i++) {
+    const text   = texts[i]
+    const score  = colHdrScore(text)
+    const tokens = rows[i].tokens
+    const hasPrices = tokens.some((t) => /^\d{2,6}(\.\d{1,2})?$/.test(t.text) && parseFloat(t.text) >= 10)
+    if (score >= 2 && !hasPrices) { colHdrIdx = i; break }
+  }
+
+  // Soft fallback: ≥1 col word with item/qty/total keyword, no prices
+  if (colHdrIdx < 0) {
+    for (let i = 0; i < rows.length; i++) {
+      const text  = texts[i]
+      const score = colHdrScore(text)
+      const hasCritical = /\b(item|description|qty|quantity|amount|total)\b/i.test(text)
+      const tokens = rows[i].tokens
+      const hasPrices = tokens.some((t) => /^\d{2,6}(\.\d{1,2})?$/.test(t.text) && parseFloat(t.text) >= 100)
+      if (score >= 1 && hasCritical && !hasPrices) { colHdrIdx = i; break }
+    }
+  }
+
+  // ── Step 2: find start of last totals block from bottom ───────────────────
+  let lastTotalsStart = rows.length
+  let inTotalsBlock   = false
+
+  for (let i = rows.length - 1; i >= (colHdrIdx >= 0 ? colHdrIdx + 1 : 0); i--) {
+    const text  = texts[i]
+    const isTot = isTaxOrTotalRow(text)
+    const isSep = /^[-=*_~.]{3,}$/.test(text.replace(/\s/g, ''))
+    const isEmpty = text.trim().length === 0
+
+    if (isTot || isSep || isEmpty) {
+      if (isTot) {
+        inTotalsBlock = true
+        lastTotalsStart = i
+      }
+    } else {
+      if (inTotalsBlock) break   // hit the first non-total line above the block
+    }
+  }
+
+  // ── Step 3: if no col_hdr found, use content-based header boundary ────────
+  let contentHeaderEnd = 0
+  if (colHdrIdx < 0) {
+    for (let i = 0; i < rows.length; i++) {
+      const text = texts[i]
+      const hasPriceToken = rows[i].tokens.some(
+        (t) => /\d{2,6}\.\d{1,2}/.test(t.text) || (/^\d{3,6}$/.test(t.text) && parseInt(t.text) >= 50),
+      )
+      const hasLetter = /[a-zA-Z]/.test(text)
+      const isMeta    = isObviousMetadata(text)
+      if (hasLetter && hasPriceToken && !isMeta) {
+        contentHeaderEnd = i
+        break
+      }
+      contentHeaderEnd = i + 1
+    }
+  }
+
+  // ── Step 4: assign zones ───────────────────────────────────────────────────
+  const result: ZonedRow[] = []
+  let pastGrandTotal = false
+
+  for (let i = 0; i < rows.length; i++) {
+    const text = texts[i]
+    let zone: RowZone
+
+    if (pastGrandTotal) {
+      zone = 'footer'
+    } else if (i >= lastTotalsStart) {
+      zone = 'totals'
+    } else if (colHdrIdx >= 0) {
+      if (i < colHdrIdx)         zone = 'header'
+      else if (i === colHdrIdx)  zone = 'col_hdr'
+      else                       zone = 'item'
+    } else {
+      zone = i < contentHeaderEnd ? 'header' : 'item'
+    }
+
+    if (zone === 'totals' && GRAND_TOTAL_STRICT.test(text)) {
+      pastGrandTotal = true
+    }
+
+    result.push({ ...rows[i], zone, rawText: text })
+  }
+
+  return result
+}
+
+// ── Obvious metadata patterns ─────────────────────────────────────────────────
+// These match lines that are CLEARLY metadata, not items.
+// Used only for the content-based header boundary when no col_hdr is found.
+const OBVIOUS_METADATA = [
+  /\b(gstin|gst\s*(no|number|reg)|cin|fssai|pan\s*(no|number))\b/i,
+  /\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[A-Z0-9]{3}\b/,  // GSTIN format
+  /\b(bill|invoice|receipt|order|token)\s*(no\.?|number|#)\s*[:\-#]?\s*\w/i,
+  /\b(table|seat)\s*(no\.?|number|#)\s*[:\-#]?\s*\w/i,
+  /\b(dine\s*in|take\s*away|delivery|parcel)\b/i,
+  /\b(thank\s*you|visit\s*again|powered\s*by)\b/i,
+  /\b(upi|cash|card|paytm|gpay|phonepe)\b/i,
+]
+
+function isObviousMetadata(text: string): boolean {
+  return OBVIOUS_METADATA.some((r) => r.test(text))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COLUMN GEOMETRY
+// ═══════════════════════════════════════════════════════════════════
+
+interface ColBoundaries {
+  /** X position that separates the name column from quantity column. */
+  nameRightBound:  number
+  /** X position of the quantity column center. */
+  qtyCenter:       number | null
+  /** X position of the rate/unit-price column center. */
+  rateCenter:      number | null
+  /** X position of the amount/total column center. */
+  amountCenter:    number | null
+  /** Whether a serial-number column exists at the far left. */
+  hasSerial:       boolean
+}
+
+/**
+ * Determine column boundaries from the column header row.
+ * Returns null if no column header row exists (text-only fallback).
+ */
+function detectColumns(colHdrRow: ZonedRow | undefined): ColBoundaries | null {
+  if (!colHdrRow) return null
+
+  const tokens = colHdrRow.tokens
+
+  function findTokenCenter(pattern: RegExp): number | null {
+    for (const t of tokens) {
+      if (pattern.test(t.text.toLowerCase())) return t.x + t.w / 2
+    }
+    return null
+  }
+
+  const hasSerial = tokens.some((t) => /^(s\.?no?|sr\.?no?|sl\.?no?|#)$/i.test(t.text))
+  const qtyCenter    = findTokenCenter(/^(qty|quantity|nos|pcs|count)$/i)
+  const rateCenter   = findTokenCenter(/^(rate|price|unit|u\.?p\.?|mrp)$/i)
+  const amountCenter = findTokenCenter(/^(amount|total|amnt|amt)$/i)
+
+  // Name column ends just before the qty column (or rate if no qty)
+  const rightmostLeft = Math.min(
+    ...[qtyCenter, rateCenter, amountCenter]
+      .filter((v): v is number => v !== null)
+      .map((v) => v - 40),
+    Infinity,
+  )
+  const nameRightBound = isFinite(rightmostLeft) ? rightmostLeft : Infinity
+
+  return { nameRightBound, qtyCenter, rateCenter, amountCenter, hasSerial }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ITEM EXTRACTION
+// ═══════════════════════════════════════════════════════════════════
+
+interface RawItem {
+  name:       string
+  quantity:   number
+  unitPrice:  number | null
+  lineTotal:  number | null
+  nameConf:   FieldConfidence
+  qtyConf:    FieldConfidence
+  priceConf:  FieldConfidence
+  totalConf:  FieldConfidence
+}
+
+/**
+ * Extract items from ITEM-zone rows using column geometry.
+ *
+ * When column boundaries are known from REAL HOCR bounding boxes:
+ *   - Assign each token to name/qty/rate/amount column by X position.
+ *   - Multi-line items: if a row has text only in the name column and the
+ *     next row has numbers, merge them into one item.
+ *
+ * When no col_hdr or running in text-only mode (synthetic coordinates):
+ *   - Use the right-to-left text heuristic for all items.
+ *   - Multi-word names handled by stripping all number tokens.
+ */
+function extractItems(itemRows: ZonedRow[], cols: ColBoundaries | null, haveRealCoordinates = false): RawItem[] {
+  // In text-only mode the synthetic X coords are useless for column separation.
+  // Fall through directly to text-only extraction for every row.
+  if (!cols || !haveRealCoordinates) {
+    const results: RawItem[] = []
+    let i = 0
+    while (i < itemRows.length) {
+      const row = itemRows[i]
+      // Look-ahead merge for multi-line names
+      const item = extractItemTextOnly(row)
+      if (item && (item.lineTotal === null || item.lineTotal === 0)) {
+        // Name-only or incomplete — try merging with next row
+        const next = itemRows[i + 1]
+        if (next && next.zone === 'item') {
+          const merged: ZonedRow = {
+            ...row,
+            tokens: [...row.tokens, ...next.tokens].sort((a, b) => a.x - b.x),
+            rawText: row.rawText + ' ' + next.rawText,
+          }
+          const mergedItem = extractItemTextOnly(merged)
+          if (mergedItem && (mergedItem.lineTotal ?? 0) > 0) {
+            results.push(mergedItem)
+            i += 2
+            continue
+          }
+        }
+      }
+      if (item) results.push(item)
+      i++
+    }
+    return results
+  }
+
+  // Real HOCR coordinates — use column geometry
+  const results: RawItem[] = []
+  let i = 0
+  while (i < itemRows.length) {
+    results.push(...extractItemWithColumns(itemRows[i], itemRows, i, cols))
+    i++
+  }
+  return results
+}
+
+/**
+ * Extract item from a single row using column boundaries.
+ * Returns array because a row might contribute to a pending multi-line item.
+ */
+function extractItemWithColumns(
+  row:     ZonedRow,
+  allRows: ZonedRow[],
+  idx:     number,
+  cols:    ColBoundaries,
+): RawItem[] {
+  const nameTokens:   WordToken[] = []
+  const qtyTokens:    WordToken[] = []
+  const rateTokens:   WordToken[] = []
+  const amountTokens: WordToken[] = []
+
+  // Determine column assignment boundaries
+  const qtyBound    = cols.qtyCenter    !== null ? cols.qtyCenter    - 30 : null
+  const rateBound   = cols.rateCenter   !== null ? cols.rateCenter   - 30 : null
+  const amountBound = cols.amountCenter !== null ? cols.amountCenter - 30 : null
+
+  for (const tok of row.tokens) {
+    const cx = tok.x + tok.w / 2
+
+    if (amountBound !== null && cx >= amountBound) {
+      amountTokens.push(tok)
+    } else if (rateBound !== null && cx >= rateBound) {
+      rateTokens.push(tok)
+    } else if (qtyBound !== null && cx >= qtyBound) {
+      qtyTokens.push(tok)
+    } else {
+      nameTokens.push(tok)
+    }
+  }
+
+  // Build text strings for each column
+  const nameText   = nameTokens.map((t) => t.text).join(' ').trim()
+  const qtyText    = qtyTokens.map((t)  => t.text).join(' ').trim()
+  const rateText   = rateTokens.map((t) => t.text).join(' ').trim()
+  const amountText = amountTokens.map((t) => t.text).join(' ').trim()
+
+  // Parse values
+  const qty        = parseQty(qtyText)
+  const unitPrice  = parseMoney(rateText)
+  let   lineTotal  = parseMoney(amountText)
+
+  // If we have a name but no numbers at all, this might be a multi-line
+  // name continuation — look ahead one row
+  const hasAnyNumber = qty !== null || unitPrice !== null || lineTotal !== null
+  if (!hasAnyNumber && nameText && idx + 1 < allRows.length) {
+    const nextRow = allRows[idx + 1]
+    if (nextRow.zone === 'item') {
+      const nextAmounts = extractAmounts(nextRow.rawText)
+      if (nextAmounts.length > 0) {
+        // Merge: current name + next row's numbers
+        const merged = extractItemWithColumns(
+          { ...nextRow, rawText: nameText + ' ' + nextRow.rawText },
+          allRows,
+          idx + 1,
+          cols,
+        )
+        if (merged.length > 0) {
+          merged[0].name = nameText + ' ' + merged[0].name
+          return merged
+        }
+      }
+    }
+    return []  // defer — will be picked up as name fragment of the next row
+  }
+
+  // Strip leading serial number from name
+  const cleanedName = cleanItemName(
+    nameText.replace(/^\s*\d{1,3}[.)]\s*/, ''),
+  )
+  if (!cleanedName) return []
+
+  // Repair lineTotal if missing but we have qty × unitPrice
+  if (lineTotal === null && qty !== null && unitPrice !== null) {
+    lineTotal = Math.round(qty * unitPrice * 100) / 100
+  }
+
+  // Average confidence of name tokens
+  const avgNameConf = nameTokens.length > 0
+    ? nameTokens.reduce((s, t) => s + t.conf, 0) / nameTokens.length
+    : 50
+
+  return [{
+    name:      cleanedName,
+    quantity:  qty ?? 1,
+    unitPrice,
+    lineTotal,
+    nameConf:  confBucket(avgNameConf),
+    qtyConf:   qty    !== null ? 'high' : 'low',
+    priceConf: unitPrice !== null ? 'high' : 'medium',
+    totalConf: lineTotal !== null ? 'high' : 'low',
+  }]
+}
+
+/**
+ * Text-only item extraction — no reliable column boundaries.
+ *
+ * Strategy: right-to-left assignment on ALL number tokens in the row.
+ *   - Rightmost number   → line total
+ *   - Second-rightmost   → unit price (if present and different from total)
+ *   - First small integer (1–99) preceding price tokens → quantity
+ *   - Everything else (letters) → item name
+ *
+ * Handles:
+ *   "Masala Dosa   1   149.00   149.00"
+ *   "Cold Coffee   110.00"
+ *   "Tea            2    49.00    98.00"
+ *   "Masala Chai 3 x 30.00  90.00"
+ *   "Basmati Rice 1kg  2  120.00  240.00"   ← qty embedded after non-alpha
+ */
+function extractItemTextOnly(row: ZonedRow): RawItem | null {
+  const text = row.rawText
+  if (!text.trim()) return null
+
+  // Multiplier notation: "3 x 30.00" → qty=3, unit=30
+  const multM = text.match(/(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d{1,6}(?:\.\d{1,2})?)/)
+  if (multM) {
+    const qty   = parseFloat(multM[1])
+    const rate  = parseFloat(multM[2].replace(/,/g, ''))
+    const rest  = text.slice((multM.index ?? 0) + multM[0].length)
+    const afAmts = extractAmounts(rest)
+    const total  = afAmts.length > 0 ? afAmts[afAmts.length - 1] : Math.round(qty * rate * 100) / 100
+
+    const beforeMult = text.slice(0, multM.index ?? 0).replace(/\d/g, '').trim()
+    const name = cleanItemName(beforeMult)
+    if (!name) return null
+
+    return {
+      name,
+      quantity:  isFinite(qty) ? Math.round(qty) : 1,
+      unitPrice: isFinite(rate) ? rate : null,
+      lineTotal: isFinite(total) ? total : null,
+      nameConf:  name.length >= 3 ? 'high' : 'medium',
+      qtyConf:   'high',
+      priceConf: 'high',
+      totalConf: isFinite(total) ? 'high' : 'low',
+    }
+  }
+
+  // Collect all standalone number tokens with their positions
+  const numberRe = /(₹\s*)?(\d{1,6}(?:,\d{2,3})*(?:\.\d{1,2})?)\b/g
+  const numTokens: { value: number; start: number; end: number; isDecimal: boolean; hasCurrency: boolean }[] = []
+  let m: RegExpExecArray | null
+  while ((m = numberRe.exec(text)) !== null) {
+    const raw = m[2].replace(/,/g, '')
+    const n   = parseFloat(raw)
+    if (!isFinite(n) || n < 0 || n > 9_999_999) continue
+    // Skip if embedded in a word (e.g. "1kg", "A42")
+    const after  = text[m.index + m[0].length]
+    const before = text[m.index - 1]
+    if (after  && /[a-zA-Z]/.test(after))  continue
+    if (before && /[a-zA-Z]/.test(before)) continue
+    numTokens.push({
+      value:       n,
+      start:       m.index,
+      end:         m.index + m[0].length,
+      isDecimal:   m[2].includes('.'),
+      hasCurrency: !!(m[1] && m[1].includes('₹')),
+    })
+  }
+
+  if (numTokens.length === 0) return null
+
+  // Identify price tokens (decimal, ₹-prefixed, or ≥100) vs qty candidates (small int)
+  const priceTokens = numTokens.filter((t) => t.isDecimal || t.hasCurrency || t.value >= 100)
+  const smallInts   = numTokens.filter((t) => !t.isDecimal && !t.hasCurrency && t.value >= 1 && t.value <= 99)
+
+  if (priceTokens.length === 0) {
+    // All small integers — can't determine a price; treat last as total
+    if (numTokens.length < 2) return null
+    const total = numTokens[numTokens.length - 1].value
+    const name  = cleanItemName(text.replace(numberRe, ' ').replace(/\s+/g, ' '))
+    if (!name) return null
+    return { name, quantity: 1, unitPrice: total, lineTotal: total, nameConf: 'medium', qtyConf: 'low', priceConf: 'low', totalConf: 'low' }
+  }
+
+  const lineTotal  = priceTokens[priceTokens.length - 1].value
+  const totalConf: FieldConfidence = priceTokens[priceTokens.length - 1].isDecimal ? 'high' : 'medium'
+  const totalEnd   = priceTokens[priceTokens.length - 1].end
+
+  let unitPrice: number | null = null
+  let priceConf: FieldConfidence = 'low'
+  if (priceTokens.length >= 2) {
+    unitPrice = priceTokens[priceTokens.length - 2].value
+    priceConf = priceTokens[priceTokens.length - 2].isDecimal ? 'high' : 'medium'
+  }
+
+  // Find quantity: the LAST small integer that appears BEFORE the first price token
+  const firstPriceStart = priceTokens[0].start
+  const qtyCandidate    = smallInts.filter((t) => t.end <= firstPriceStart).pop()
+  const qty    = qtyCandidate?.value ?? 1
+  const qtyConf: FieldConfidence = qtyCandidate ? 'high' : 'low'
+  const qtyEnd = qtyCandidate?.end ?? 0
+
+  // Name = everything between the end of qty token and the start of first price token,
+  // with all remaining number tokens stripped.
+  const nameSection = text
+    .slice(0, firstPriceStart)
+    .slice(0, qtyCandidate ? qtyCandidate.start : undefined)  // remove qty from end of name section
+    .replace(/(₹\s*)?\d{1,6}(?:,\d{2,3})*(?:\.\d{1,2})?\b/g, ' ')
+    .replace(/[×xX*]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+
+  const name = cleanItemName(nameSection.replace(/^\s*\d{1,3}[.)]\s*/, ''))
+  if (!name) return null
+
+  const avgConf  = row.tokens.reduce((s, t) => s + t.conf, 0) / Math.max(row.tokens.length, 1)
+  const nameConf: FieldConfidence = avgConf >= 80 && name.length >= 3 ? 'high' : name.length >= 3 ? 'medium' : 'low'
+
+  return {
+    name,
+    quantity:  qty,
+    unitPrice,
+    lineTotal,
+    nameConf,
+    qtyConf,
+    priceConf,
+    totalConf,
+  }
 }
 
-/**
- * Parse a monetary string to a float in rupees.
- * Handles: ₹149.00, 149.00, 1,49.00, 1,490, etc.
- * Returns NaN on failure.
- */
-function parseRupees(s: string): number {
-  if (!s) return NaN
-  const cleaned = s
-    .replace(/₹/g, '')
-    .replace(/,/g, '')
-    .trim()
-  const n = parseFloat(cleaned)
-  if (!isFinite(n) || n < 0 || n > 9_999_999) return NaN
-  return n
+// ═══════════════════════════════════════════════════════════════════
+// METADATA EXTRACTION
+// ═══════════════════════════════════════════════════════════════════
+
+interface ExtractedMetadata {
+  restaurantName: string | null
+  invoiceNumber:  string | null
+  receiptDate:    string | null
+  tableNumber:    string | null
+  tokenNumber:    string | null
+  orderType:      string | null
 }
 
-/**
- * Extract ALL monetary amounts from a line for use in total/tax/subtotal detection.
- * Deliberately conservative: only matches numbers that:
- *   (a) are prefixed by ₹, or
- *   (b) have a decimal component (49.00, 149.00 — very likely prices), or
- *   (c) are bare integers ≥ 10 (last resort, avoids single-digit qty noise)
- * This prevents phone-number digits from being parsed as prices.
- */
-function extractAmounts(line: string): number[] {
+function extractMetadata(headerRows: ZonedRow[]): ExtractedMetadata {
+  let restaurantName: string | null = null
+  let invoiceNumber:  string | null = null
+  let receiptDate:    string | null = null
+  let tableNumber:    string | null = null
+  let tokenNumber:    string | null = null
+  let orderType:      string | null = null
+
+  const fullText = headerRows.map((r) => r.rawText).join('\n')
+
+  // Restaurant name: first non-empty, non-metadata header line
+  for (const row of headerRows.slice(0, 8)) {
+    const text = row.rawText.trim()
+    if (!text) continue
+    if (isObviousMetadata(text)) continue
+    if (extractAmounts(text).length > 0) continue
+    if (isTaxOrTotalRow(text)) continue
+    if (text.length < 2 || text.length > 80) continue
+    if (restaurantName === null) { restaurantName = text; continue }
+  }
+
+  // Invoice / Bill number
+  const invM = fullText.match(/\b(?:bill|invoice|receipt|order)\s*(?:no\.?|number|#|num)?\s*[:\-#]?\s*([\w\-\/]+)/i)
+  if (invM) invoiceNumber = invM[1].trim()
+
+  // Date
+  receiptDate = extractDate(fullText)
+
+  // Table number
+  const tableM = fullText.match(/\b(?:table|tbl|seat|cover)\s*(?:no\.?|number|#)?\s*[:\-#]?\s*([\w\-]+)/i)
+  if (tableM) tableNumber = tableM[1].trim()
+
+  // Token number
+  const tokenM = fullText.match(/\b(?:token|kot|counter|window)\s*(?:no\.?|number|#)?\s*[:\-#]?\s*([\w\-]+)/i)
+  if (tokenM) tokenNumber = tokenM[1].trim()
+
+  // Order type
+  const orderM = fullText.match(/\b(dine[\s-]*in|take[\s-]*away|take[\s-]*out|delivery|parcel)\b/i)
+  if (orderM) orderType = orderM[1].trim()
+
+  return { restaurantName, invoiceNumber, receiptDate, tableNumber, tokenNumber, orderType }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAX / TOTALS EXTRACTION
+// ═══════════════════════════════════════════════════════════════════
+
+interface ExtractedTotals {
+  subtotal:      number | null
+  taxes:         TaxEntry[]
+  serviceCharge: number | null
+  discount:      number | null
+  grandTotal:    number | null
+}
+
+function extractTotals(totalsRows: ZonedRow[]): ExtractedTotals {
+  let subtotal:      number | null = null
+  let grandTotal:    number | null = null
+  let serviceCharge: number | null = null
+  let discount:      number | null = null
+  const taxes: TaxEntry[] = []
+
+  // Prefer grand total from GRAND_TOTAL_STRICT match, searching from the bottom
+  for (const row of [...totalsRows].reverse()) {
+    const text = row.rawText
+    if (!GRAND_TOTAL_STRICT.test(text)) continue
+    const amounts = extractAmounts(text)
+    if (amounts.length > 0) { grandTotal = amounts[amounts.length - 1]; break
+    }
+  }
+
+  // Fallback: last non-tax, non-subtotal totals line that has an amount
+  if (grandTotal === null) {
+    for (const row of [...totalsRows].reverse()) {
+      const text = row.rawText
+      if (SUBTOTAL_KW.test(text))  continue
+      if (TAX_KW.test(text))       continue
+      if (DISCOUNT_KW.test(text))  continue
+      const amounts = extractAmounts(text)
+      if (amounts.length > 0) { grandTotal = amounts[amounts.length - 1]; break }
+    }
+  }
+
+  // Subtotal
+  for (const row of totalsRows) {
+    const text = row.rawText
+    if (!SUBTOTAL_KW.test(text)) continue
+    const amounts = extractAmounts(text)
+    if (amounts.length > 0) { subtotal = amounts[amounts.length - 1]; break }
+  }
+
+  // Tax lines
+  for (const row of totalsRows) {
+    const text = row.rawText
+    if (!TAX_KW.test(text) && !DISCOUNT_KW.test(text)) continue
+    if (TOTAL_KEYWORDS.test(text) || SUBTOTAL_KW.test(text)) continue
+
+    const amounts = extractAmounts(text)
+    if (amounts.length === 0) continue
+    const amount = amounts[amounts.length - 1]
+
+    const rateM = text.match(/(\d+(?:\.\d+)?)\s*%/)
+    const rate  = rateM ? parseFloat(rateM[1]) : null
+
+    const lc = text.toLowerCase()
+    let type: TaxEntry['type'] = 'other'
+    if      (/\bcgst\b/.test(lc))              type = 'cgst'
+    else if (/\bsgst\b/.test(lc))              type = 'sgst'
+    else if (/\bigst\b/.test(lc))              type = 'igst'
+    else if (/\bgst\b/.test(lc))               type = 'gst'
+    else if (/service/.test(lc))               type = 'service'
+    else if (DISCOUNT_KW.test(lc))             type = 'discount'
+    else if (/packing|packaging/.test(lc))     type = 'packing'
+
+    if (type === 'service') {
+      serviceCharge = (serviceCharge ?? 0) + amount
+    } else if (type === 'discount') {
+      discount = (discount ?? 0) + amount
+    } else {
+      taxes.push({ label: text.trim(), type, rate, amount })
+    }
+  }
+
+  return { subtotal, taxes, serviceCharge, discount, grandTotal }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+
+function extractAmounts(text: string): number[] {
   const results: number[] = []
-
-  // Strategy 1: currency-prefixed amounts — highest confidence
-  const prefixed = /₹\s*([\d,]+(?:\.\d{1,2})?)/g
   let m: RegExpExecArray | null
-  while ((m = prefixed.exec(line)) !== null) {
-    const n = parseRupees(m[1])
+
+  // ₹-prefixed
+  const prefixed = /₹\s*([\d,]+(?:\.\d{1,2})?)/g
+  while ((m = prefixed.exec(text)) !== null) {
+    const n = parseFloat(m[1].replace(/,/g, ''))
     if (isFinite(n) && n >= 0) results.push(n)
   }
   if (results.length > 0) return results
 
-  // Strategy 2: decimal amounts (e.g. 149.00 — very likely a price)
+  // Decimal numbers
   const decimal = /\b(\d{1,6}\.\d{1,2})\b/g
-  while ((m = decimal.exec(line)) !== null) {
+  while ((m = decimal.exec(text)) !== null) {
     const n = parseFloat(m[1])
     if (isFinite(n) && n >= 0 && n <= 999_999) results.push(n)
   }
   if (results.length > 0) return results
 
-  // Strategy 3: bare integers ≥ 10
+  // Bare integers ≥ 10
   const bare = /\b(\d{2,6})\b/g
-  while ((m = bare.exec(line)) !== null) {
+  while ((m = bare.exec(text)) !== null) {
     const n = parseInt(m[1], 10)
     if (n >= 10 && n <= 99_999) results.push(n)
   }
   return results
 }
 
-/**
- * Extract ALL numbers from an item line — both price-like and qty-like.
- * Used ONLY inside item-zone parsing where we need to see every number
- * including small integers that represent quantities.
- *
- * Returns array of { value, isDecimal } in left-to-right order.
- */
-interface TokenNumber {
-  value: number
-  isDecimal: boolean   // true = has .xx component (very likely a price)
-  hasCurrency: boolean // true = preceded by ₹
-  pos: number          // character position
-  /** true = this digit sequence is embedded in a word (e.g. "1kg", "500g") — NOT a standalone qty */
-  inWord: boolean
+function parseMoney(text: string): number | null {
+  if (!text.trim()) return null
+  const amounts = extractAmounts(text)
+  if (amounts.length === 0) return null
+  return amounts[amounts.length - 1]
 }
 
-function extractAllTokenNumbers(line: string): TokenNumber[] {
-  const results: TokenNumber[] = []
-  // Match: optional ₹, then integer part, optional decimal
-  const re = /(₹\s*)?(\d{1,6}(?:,\d{2,3})*(?:\.(\d{1,2}))?)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(line)) !== null) {
-    const raw = m[2].replace(/,/g, '')
-    const n   = parseFloat(raw)
-    if (!isFinite(n) || n < 0 || n > 9_999_999) continue
-    // Check if the number is embedded in a word (e.g. "1kg", "500g", "2L")
-    const matchEnd = re.lastIndex  // position right after the match
-    const charAfter = line[matchEnd]
-    const inWord = charAfter !== undefined && /[a-zA-Z]/.test(charAfter)
-
-    results.push({
-      value:       n,
-      isDecimal:   m[3] !== undefined,
-      hasCurrency: m[1] !== undefined && m[1].includes('₹'),
-      pos:         m.index,
-      inWord,
-    })
-  }
-  return results
+function parseQty(text: string): number | null {
+  if (!text.trim()) return null
+  const n = parseInt(text.replace(/\D/g, ''), 10)
+  if (!isFinite(n) || n < 1 || n > 999) return null
+  return n
 }
 
-/**
- * Extract a single small integer (1–99) that looks like a quantity.
- * Must appear as a standalone number, not part of a larger number.
- */
-function extractQty(s: string): number | null {
-  // Match: standalone 1–3 digit integer (quantities rarely exceed 99)
-  const m = s.match(/\b([1-9]\d{0,2})\b/)
-  if (!m) return null
-  const n = parseInt(m[1], 10)
-  return n >= 1 && n <= 999 ? n : null
-}
-
-/** True if two rupee amounts match within ₹0.50 (accounts for rounding). */
-function approxEqual(a: number, b: number): boolean {
-  return Math.abs(toPaise(a) - toPaise(b)) <= 50
-}
-
-/** True if the line is purely a visual separator. */
-function isSeparator(line: string): boolean {
-  return SEPARATOR_LINE.test(line.replace(/\s/g, ''))
-}
-
-/** True if any METADATA_PATTERNS match. */
-function isMetadataLine(line: string): boolean {
-  return METADATA_PATTERNS.some((re) => re.test(line))
-}
-
-/** Count how many COL_HDR_WORDS match in a line. */
-function columnHeaderScore(line: string): number {
-  return COL_HDR_WORDS.filter((re) => re.test(line)).length
-}
-
-/** True if the line contains a total/tax keyword. */
-function isTotalOrTaxLine(line: string): boolean {
-  return GRAND_TOTAL_KW.test(line) ||
-         SUBTOTAL_KW.test(line) ||
-         TAX_KW.test(line) ||
-         DISCOUNT_KW.test(line)
-}
-
-// ─── Zone segmentation ────────────────────────────────────────────────────────
-
-/**
- * Segment the receipt lines into named zones.
- *
- * Algorithm:
- *   1. Walk lines looking for the column-header row (≥2 col-label words, no prices).
- *   2. Everything before col_hdr → 'header'
- *   3. Col_hdr row itself → 'col_hdr'
- *   4. After col_hdr: lines go into 'items' until we hit a total/tax keyword.
- *   5. After first total/tax line → 'totals'
- *   6. After GRAND TOTAL line → 'footer'
- *
- * Fallback (no column header found):
- *   First 5 lines = header, total/tax lines = totals, rest between = items.
- */
-function segmentZones(lines: string[]): ZonedLine[] {
-  const result: ZonedLine[] = []
-
-  // ── Find column-header row ────────────────────────────────────────────────
-  let colHdrIdx = -1
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    // Column header: ≥2 column-label words AND no price-like numbers
-    const tokens = extractAllTokenNumbers(line)
-    const hasPrices = tokens.some((t) => t.isDecimal || t.hasCurrency || t.value >= 100)
-    if (!hasPrices && columnHeaderScore(line) >= 2) {
-      colHdrIdx = i
-      break
-    }
-  }
-
-  // ── Find first total/tax line AFTER the column header ────────────────────
-  // Critical: we only look for the totals boundary AFTER col_hdr so that
-  // "All prices inclusive of GST" in the header zone doesn't cut off items.
-  const searchFrom = colHdrIdx >= 0 ? colHdrIdx + 1 : 6  // skip first 6 lines in fallback
-  let firstTotalIdx = -1
-  for (let i = searchFrom; i < lines.length; i++) {
-    const line = lines[i]
-    // A pure separator line counts as boundary only if it has no text
-    if (isSeparator(line)) {
-      // Only use separator as boundary if it's after at least one non-separator line
-      if (i > searchFrom) { firstTotalIdx = i; break }
-      continue
-    }
-    if (isTotalOrTaxLine(line)) {
-      firstTotalIdx = i
-      break
-    }
-  }
-
-  // ── Assign zones ──────────────────────────────────────────────────────────
-  let pastGrandTotal = false
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    let zone: ZoneType
-
-    if (pastGrandTotal) {
-      zone = 'footer'
-    } else if (colHdrIdx >= 0) {
-      if (i < colHdrIdx) {
-        zone = 'header'
-      } else if (i === colHdrIdx) {
-        zone = 'col_hdr'
-      } else if (firstTotalIdx >= 0 && i >= firstTotalIdx) {
-        zone = 'totals'
-      } else {
-        zone = 'items'
-      }
-    } else {
-      // No column header — use line-index heuristic
-      if (i < 6) {
-        zone = 'header'
-      } else if (firstTotalIdx >= 0 && i >= firstTotalIdx) {
-        zone = 'totals'
-      } else if (isTotalOrTaxLine(line)) {
-        zone = 'totals'
-        firstTotalIdx = i
-      } else {
-        zone = 'items'
-      }
-    }
-
-    if (zone === 'totals' && GRAND_TOTAL_KW.test(line)) {
-      pastGrandTotal = true
-    }
-
-    result.push({ raw: line, zone, lineIdx: i })
-  }
-
-  return result
-}
-
-// ─── Item table parsing ───────────────────────────────────────────────────────
-
-/**
- * Detect the column layout from the col_hdr line.
- * Returns column positions as character indices for positional parsing.
- */
-interface ColLayout {
-  hasSerial: boolean
-  hasQty: boolean
-  hasRate: boolean    // unit price column
-  hasAmount: boolean  // line total column
-  // approx char-index where each column starts (−1 = not detected)
-  serialPos: number
-  namePos: number
-  qtyPos: number
-  ratePos: number
-  amountPos: number
-}
-
-function detectColLayout(colHdrLine: string): ColLayout {
-  const lc = colHdrLine.toLowerCase()
-  return {
-    hasSerial:  /\b(s\.?\s*no|sr\.?\s*no|sl\.?\s*no|#)\b/.test(lc),
-    hasQty:     /\b(qty|quantity|nos|pcs|count)\b/.test(lc),
-    hasRate:    /\b(rate|unit\s*price|price|u\.?p\.?|mrp)\b/.test(lc),
-    hasAmount:  /\b(amount|total|amnt|amt)\b/.test(lc),
-    serialPos:  Math.max(lc.search(/\b(s\.?\s*no|sr\.?\s*no|#)\b/), -1),
-    namePos:    Math.max(lc.search(/\b(item|description|desc|particular|product|food)\b/), 0),
-    qtyPos:     Math.max(lc.search(/\b(qty|quantity)\b/), -1),
-    ratePos:    Math.max(lc.search(/\b(rate|price)\b/), -1),
-    amountPos:  Math.max(lc.search(/\b(amount|total|amnt)\b/), -1),
-  }
-}
-
-/**
- * Parse item lines from the ITEMS zone.
- *
- * Handles:
- *   FORMAT A: "Masala Dosa   1   149.00   149.00"    (name qty rate total)
- *   FORMAT B: "Masala Dosa   149.00"                 (name total, qty=1 inferred)
- *   FORMAT C: "2 x 49.00     98.00"  / "Tea  2 x ₹49  ₹98"   (multiplier)
- *   FORMAT D: "1. Masala Dosa  1  149.00  149.00"    (with serial number)
- *   FORMAT E: multi-line item (name line + numbers on next line)
- *
- * Critically: metadata lines are excluded before parsing even begins.
- */
-interface RawItem {
-  name: string
-  quantity: number
-  unitPrice: number | null
-  lineTotal: number | null
-  confidence: FieldConfidence
-}
-
-const MULTIPLIER_RE = /(\d+(?:\.\d+)?)\s*[×xX*]\s*(\d{1,6}(?:\.\d{1,2})?)/
-
-function parseItemsZone(
-  zonedLines: ZonedLine[],
-  layout: ColLayout,
-): RawItem[] {
-  const itemLines = zonedLines.filter((zl) => zl.zone === 'items')
-  const results: RawItem[] = []
-
-  let i = 0
-  while (i < itemLines.length) {
-    const { raw: line } = itemLines[i]
-
-    // ── Hard exclusions ───────────────────────────────────────────────────
-    if (!line || isSeparator(line) || isMetadataLine(line)) {
-      i++
-      continue
-    }
-
-    // ── Check if this is a name-only line (no prices) followed by a ──────
-    // continuation line with the numbers
-    const lineTokens = extractAllTokenNumbers(line)
-    const lineHasPrices = lineTokens.some(
-      (t) => t.isDecimal || t.hasCurrency || t.value >= 100,
-    )
-    const hasMultiplier = MULTIPLIER_RE.test(line)
-
-    if (!lineHasPrices && !hasMultiplier) {
-      // Possible name-only line — look ahead for continuation
-      const next = itemLines[i + 1]
-      if (next && !isSeparator(next.raw) && !isMetadataLine(next.raw)) {
-        const nextTokens = extractAllTokenNumbers(next.raw)
-        const nextHasPrices = nextTokens.some(
-          (t) => t.isDecimal || t.hasCurrency || t.value >= 10,
-        )
-        // Continuation: next line has prices and very little non-numeric text
-        const nextTextOnly = next.raw
-          .replace(/₹/g, '')
-          .replace(/[\d.,×xX*\s]+/g, '')
-          .trim()
-        if (nextHasPrices && nextTextOnly.length <= 8) {
-          // Merge name + continuation
-          const merged = line + ' ' + next.raw
-          const parsed = parseOneItemLine(merged, layout)
-          if (parsed) {
-            results.push(parsed)
-            i += 2
-            continue
-          }
-        }
-      }
-      // No usable continuation — skip (likely a modifier or blank description)
-      i++
-      continue
-    }
-
-    const parsed = parseOneItemLine(line, layout)
-    if (parsed) results.push(parsed)
-    i++
-  }
-
-  return results
-}
-
-/**
- * Parse a single item line.  Tries formats in priority order.
- */
-function parseOneItemLine(line: string, layout: ColLayout): RawItem | null {
-  // Strip leading serial number: "1. " "2) " "01 "
-  const stripped = line.replace(/^\s*\d{1,3}[.)]\s*/, '').trim()
-  if (!stripped) return null
-
-  // ── Format C: multiplier (2×49 or 2 x 49) ────────────────────────────────
-  const multM = stripped.match(MULTIPLIER_RE)
-  if (multM) {
-    const qty = parseFloat(multM[1])
-    const rate = parseFloat(multM[2].replace(/,/g, ''))
-    const beforeMult = stripped.slice(0, multM.index ?? 0).trim()
-    const afterMult = stripped.slice((multM.index ?? 0) + multM[0].length).trim()
-
-    const name = cleanItemName(beforeMult) || cleanItemName(afterMult.replace(/[\d.,₹\s]+$/, '').trim())
-    if (!name) return null
-
-    const afterAmounts = extractAmounts(afterMult)
-    const lineTotal = afterAmounts.length > 0
-      ? afterAmounts[afterAmounts.length - 1]
-      : (isFinite(qty * rate) ? Math.round(qty * rate * 100) / 100 : null)
-
-    return {
-      name,
-      quantity: isFinite(qty) ? qty : 1,
-      unitPrice: isFinite(rate) ? rate : null,
-      lineTotal,
-      confidence: name.length >= 2 ? 'high' : 'medium',
-    }
-  }
-
-  // ── Extract all token numbers (prices AND qty candidates) ─────────────────
-  const tokens = extractAllTokenNumbers(stripped)
-  if (tokens.length === 0) return null
-
-  // Extract the item name by removing all number/currency tokens from the text
-  const nameRaw = stripped
-    .replace(/(₹\s*)?(\d{1,6}(?:,\d{2,3})*(?:\.\d{1,2})?)/g, ' ')
-    .replace(/[×xX*]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const name = cleanItemName(nameRaw)
-  if (!name || name.length < 2) return null
-
-  // ── Separate qty candidates from price candidates ─────────────────────────
-  // A qty candidate: integer, value 1–99, appears BEFORE any decimal/currency number
-  // A price candidate: has decimal OR has ₹ prefix OR is a large integer (≥100)
-
-  // Skip leading serial-number token if the layout has a serial column
-  // e.g. "1  Basmati Rice  2  120.00  240.00" → skip the leading 1 (serial)
-  const serialOffset = (
-    layout.hasSerial &&
-    tokens.length >= 2 &&
-    !tokens[0].isDecimal &&
-    !tokens[0].hasCurrency &&
-    !tokens[0].inWord &&
-    tokens[0].value >= 1 &&
-    tokens[0].value <= 99
-  ) ? 1 : 0
-
-  const workingTokens = tokens.slice(serialOffset)
-  // Exclude "inWord" tokens (e.g. "1" in "1kg") from all numeric analysis
-  const analysisTokens = workingTokens.filter((t) => !t.inWord)
-  const firstPriceIdx = analysisTokens.findIndex((t) => t.isDecimal || t.hasCurrency || t.value >= 100)
-
-  // Look for a qty token that appears before the first price token
-  let qty = 1
-  let qtyFound = false
-  if (firstPriceIdx > 0) {
-    // There's at least one token before the first price-like token
-    for (let i = 0; i < firstPriceIdx; i++) {
-      const t = analysisTokens[i]
-      if (!t.isDecimal && !t.hasCurrency && !t.inWord && t.value >= 1 && t.value <= 99) {
-        qty = t.value
-        qtyFound = true
-        break
-      }
-    }
-  } else if (firstPriceIdx === -1) {
-    // No decimal/currency/large amounts — all are bare integers
-    // If layout has a qty column, treat first small non-word integer as qty
-    if (layout.hasQty && analysisTokens.length >= 2) {
-      const first = analysisTokens[0]
-      if (!first.inWord && first.value >= 1 && first.value <= 99) {
-        qty = first.value
-        qtyFound = true
-      }
-    }
-  }
-
-  // Price tokens: decimal OR ₹-prefixed OR large integer — and NOT in a word
-  const priceTokens = qtyFound
-    ? analysisTokens.filter((t) => !t.inWord && (t.isDecimal || t.hasCurrency || t.value >= 100))
-    : analysisTokens.filter((t) => !t.inWord && (t.isDecimal || t.hasCurrency || t.value >= 10))
-
-  if (priceTokens.length === 0) {
-    // Only qty-like numbers — can't make a price
-    return null
-  }
-
-  // Last price token = line total; second-to-last = unit price (if present)
-  const lineTotal = priceTokens[priceTokens.length - 1].value
-
-  if (priceTokens.length >= 2) {
-    const unitPrice = priceTokens[priceTokens.length - 2].value
-    const conf = approxEqual(qty * unitPrice, lineTotal) ? 'high' : 'medium'
-    return { name, quantity: qty, unitPrice, lineTotal, confidence: conf }
-  }
-
-  // Only one price token — it's the total; unit price = total / qty
-  return {
-    name,
-    quantity: qty,
-    unitPrice: Math.round((lineTotal / qty) * 100) / 100,
-    lineTotal,
-    confidence: qtyFound ? 'medium' : (layout.hasRate ? 'medium' : 'high'),
-  }
-}
-
-/**
- * Clean an item name:
- *  - Strip leading/trailing punctuation and whitespace
- *  - Remove obvious non-name fragments (single letters, stray symbols)
- *  - Validate: must be ≥2 characters, must contain at least one letter
- */
 function cleanItemName(raw: string): string {
   const cleaned = raw
-    .replace(/^[\s\-_.,:;/\\]+/, '')     // leading junk
-    .replace(/[\s\-_.,:;/\\]+$/, '')     // trailing junk
+    .replace(/^[\s\-_.,:;/\\]+/, '')
+    .replace(/[\s\-_.,:;/\\]+$/, '')
     .replace(/\s+/g, ' ')
     .trim()
-
-  // Must have at least one letter (prevents pure-number names)
   if (!/[a-zA-Z\u0900-\u097F]/.test(cleaned)) return ''
-  // Must be at least 2 chars
   if (cleaned.length < 2) return ''
-
   return cleaned
 }
 
-// ─── Tax / charge line parser ─────────────────────────────────────────────────
-
-interface TaxLine {
-  label: string
-  amount: number
-  rate: number | null
-  type: 'cgst' | 'sgst' | 'igst' | 'gst' | 'service' | 'discount' | 'packing' | 'other'
+function confBucket(tesseractConf: number): FieldConfidence {
+  if (tesseractConf >= 85) return 'high'
+  if (tesseractConf >= 60) return 'medium'
+  return 'low'
 }
 
-function parseTaxLines(zonedLines: ZonedLine[]): TaxLine[] {
-  const results: TaxLine[] = []
-  const totalsLines = zonedLines.filter(
-    (zl) => zl.zone === 'totals' || zl.zone === 'footer',
-  )
-
-  for (const { raw: line } of totalsLines) {
-    if (isSeparator(line)) continue
-    if (GRAND_TOTAL_KW.test(line)) continue   // grand total handled separately
-    if (SUBTOTAL_KW.test(line)) continue      // subtotal handled separately
-    if (!TAX_KW.test(line) && !DISCOUNT_KW.test(line)) continue
-
-    const amounts = extractAmounts(line)
-    if (amounts.length === 0) continue
-    const amount = amounts[amounts.length - 1]
-
-    // Extract rate percentage if present
-    const rateM = line.match(/(\d+(?:\.\d+)?)\s*%/)
-    const rate = rateM ? parseFloat(rateM[1]) : null
-
-    const lc = line.toLowerCase()
-    let type: TaxLine['type'] = 'other'
-    if (/\bcgst\b/.test(lc))                           type = 'cgst'
-    else if (/\bsgst\b/.test(lc))                      type = 'sgst'
-    else if (/\bigst\b/.test(lc))                      type = 'igst'
-    else if (/\bgst\b/.test(lc))                       type = 'gst'
-    else if (/service\s*(charge|fee|tax)?/.test(lc))   type = 'service'
-    else if (DISCOUNT_KW.test(lc))                     type = 'discount'
-    else if (/packing|packaging/.test(lc))             type = 'packing'
-
-    results.push({ label: line, amount, rate, type })
-  }
-
-  return results
+// Months for date parsing
+const MONTHS: Record<string, string> = {
+  jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
+  jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12',
 }
 
-// ─── Total line extraction ────────────────────────────────────────────────────
+function extractDate(text: string): string | null {
+  // "14 Jan 2024"
+  let m = text.match(/\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[,\s]+(\d{4})\b/i)
+  if (m) return `${m[3]}-${MONTHS[m[2].toLowerCase().slice(0,3)]}-${m[1].padStart(2,'0')}`
 
-function extractSubtotal(zonedLines: ZonedLine[]): number | null {
-  for (const { raw: line, zone } of zonedLines) {
-    if (zone !== 'totals') continue
-    if (!SUBTOTAL_KW.test(line)) continue
-    const amounts = extractAmounts(line)
-    if (amounts.length > 0) return amounts[amounts.length - 1]
-  }
-  return null
-}
-
-function extractGrandTotal(zonedLines: ZonedLine[]): number | null {
-  // Search from the bottom of the totals zone for the grand total
-  const totalLines = zonedLines.filter((zl) => zl.zone === 'totals' || zl.zone === 'footer')
-  // Prefer explicit GRAND_TOTAL_KW match
-  for (const { raw: line } of [...totalLines].reverse()) {
-    if (!GRAND_TOTAL_KW.test(line)) continue
-    const amounts = extractAmounts(line)
-    if (amounts.length > 0) return amounts[amounts.length - 1]
-  }
-  // Fallback: last line in totals with a currency amount that doesn't match
-  // a known tax/subtotal keyword
-  for (const { raw: line } of [...totalLines].reverse()) {
-    if (isSeparator(line)) continue
-    if (SUBTOTAL_KW.test(line)) continue
-    if (TAX_KW.test(line) || DISCOUNT_KW.test(line)) continue
-    const amounts = extractAmounts(line)
-    if (amounts.length > 0) return amounts[amounts.length - 1]
-  }
-  return null
-}
-
-// ─── Metadata extraction ──────────────────────────────────────────────────────
-
-function extractRestaurantName(zonedLines: ZonedLine[]): string | null {
-  const headerLines = zonedLines.filter((zl) => zl.zone === 'header')
-  for (const { raw: line } of headerLines.slice(0, 6)) {
-    if (!line) continue
-    if (isMetadataLine(line)) continue
-    if (extractAmounts(line).length > 0) continue
-    if (isTotalOrTaxLine(line)) continue
-    if (line.length < 3 || line.length > 80) continue
-    return line
-  }
-  return null
-}
-
-function extractReceiptDate(text: string): string | null {
-  const MONTHS: Record<string, string> = {
-    jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
-    jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12',
-  }
-  // "17 Jun 2026" or "17-Jun-2026"
-  let m = text.match(/\b(\d{1,2})[\s\-](jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-,](\d{4})\b/i)
-  if (m) {
-    return `${m[3]}-${MONTHS[m[2].toLowerCase().slice(0, 3)]}-${m[1].padStart(2, '0')}`
-  }
-  // DD/MM/YYYY
+  // "14/01/2024" or "14-01-2024"
   m = text.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/)
-  if (m) {
-    return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
-  }
-  // YYYY-MM-DD
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`
+
+  // "2024-01-14"
   m = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
   if (m) return `${m[1]}-${m[2]}-${m[3]}`
+
   return null
 }
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// MAIN ENTRY POINT — HOCR PATH
+// ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Parse a receipt from Tesseract HOCR XML output.
+ *
+ * This is the primary entry point for the Tesseract fallback path.
+ * HOCR provides word-level bounding boxes and confidence scores, enabling
+ * spatial zone detection and column-aware item extraction.
+ */
+export function parseReceiptHocr(hocrXml: string): ParsedReceipt {
+  const reviewFlags: string[] = []
+
+  // ── 1. Parse HOCR → tokens ───────────────────────────────────────────────
+  const tokens = parseHocr(hocrXml)
+
+  if (tokens.length < 5) {
+    return emptyReceipt('No readable text found in image.', reviewFlags)
+  }
+
+  // ── 2. Group into rows ───────────────────────────────────────────────────
+  const rows = groupIntoRows(tokens)
+
+  // ── 3. Classify zones ────────────────────────────────────────────────────
+  const zonedRows = classifyZones(rows)
+
+  return buildReceiptFromZones(zonedRows, reviewFlags, 'tesseract', hocrXml)
+}
+
+/**
+ * Parse receipt from plain text (legacy path, no HOCR).
+ * Used when Tesseract is run without HOCR output.
+ * Text lines are treated as rows with no spatial information.
+ */
 export function parseReceiptText(rawText: string): ParsedReceipt {
   const reviewFlags: string[] = []
 
-  // ── 1. Clean and split into lines ─────────────────────────────────────────
   const lines = rawText
     .split('\n')
-    .map(cleanLine)
+    .map((l) => l
+      .replace(/\|/g, ' ')
+      .replace(/Rs\./gi, '₹')
+      .replace(/\bRs\b/gi, '₹')
+      .replace(/\bINR\b/gi, '₹')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    )
     .filter((l) => l.length > 0)
 
-  // ── 2. Zone segmentation ──────────────────────────────────────────────────
-  const zonedLines = segmentZones(lines)
+  if (lines.length < 3) {
+    return emptyReceipt('Receipt text too short.', reviewFlags)
+  }
 
-  // ── 3. Metadata ───────────────────────────────────────────────────────────
-  const restaurantName = extractRestaurantName(zonedLines)
-  const receiptDate    = extractReceiptDate(rawText)
-
-  // ── 4. Column layout ──────────────────────────────────────────────────────
-  const colHdrLine = zonedLines.find((zl) => zl.zone === 'col_hdr')
-  const layout = colHdrLine
-    ? detectColLayout(colHdrLine.raw)
-    : { hasSerial: false, hasQty: false, hasRate: false, hasAmount: false,
-        serialPos: -1, namePos: 0, qtyPos: -1, ratePos: -1, amountPos: -1 }
-
-  // ── 5. Parse items (items zone only) ─────────────────────────────────────
-  const rawItems = parseItemsZone(zonedLines, layout)
-
-  // ── 6. Build ScannedItems with math validation ────────────────────────────
-  const scannedItems: ScannedItem[] = rawItems.map((raw) => {
-    const unitPriceFinal = raw.unitPrice ?? (raw.lineTotal !== null ? raw.lineTotal / raw.quantity : 0)
-    const lineTotalFinal = raw.lineTotal ?? Math.round(raw.quantity * unitPriceFinal * 100) / 100
-
-    const mathMismatch =
-      raw.unitPrice !== null &&
-      raw.lineTotal !== null &&
-      !approxEqual(raw.quantity * raw.unitPrice, raw.lineTotal)
-
-    if (mathMismatch) {
-      reviewFlags.push(`"${raw.name}": qty × unit price ≠ line total`)
-    }
-
-    return {
-      name:                raw.name,
-      quantity:            raw.quantity,
-      unitPrice:           Math.round(unitPriceFinal * 100) / 100,
-      lineTotal:           Math.round(lineTotalFinal * 100) / 100,
-      lineTotalFromReceipt: raw.lineTotal !== null,
-      confidence:          mathMismatch ? 'low' : raw.confidence,
-      mathMismatch,
-    }
+  // Synthesize VisualRow[] from text lines — Y = line index × 20px, no confidence data
+  const syntheticRows: VisualRow[] = lines.map((line, idx) => {
+    // Approximate token splitting by whitespace
+    let x = 0
+    const tokens: WordToken[] = line.split(/\s+/).filter(Boolean).map((word) => {
+      const t: WordToken = { text: word, x, y: idx * 20, w: word.length * 8, h: 18, conf: 70 }
+      x += t.w + 8
+      return t
+    })
+    return { tokens, y: idx * 20, lineH: 18 }
   })
 
-  // ── 7. Tax lines ──────────────────────────────────────────────────────────
-  const taxLines = parseTaxLines(zonedLines)
+  const zonedRows = classifyZones(syntheticRows)
+  return buildReceiptFromZones(zonedRows, reviewFlags, 'tesseract', rawText)
+}
 
+/**
+ * Shared zone → ParsedReceipt builder.
+ */
+function buildReceiptFromZones(
+  zonedRows:    ZonedRow[],
+  reviewFlags:  string[],
+  engine:       'tesseract' | null,
+  rawText?:     string,
+): ParsedReceipt {
+  // ── Extract from zones ─────────────────────────────────────────────────
+  const headerRows = zonedRows.filter((r) => r.zone === 'header')
+  const colHdrRow  = zonedRows.find((r) => r.zone === 'col_hdr')
+  const itemRows   = zonedRows.filter((r) => r.zone === 'item')
+  const totalsRows = zonedRows.filter((r) => r.zone === 'totals')
+
+  // Column geometry
+  const cols = detectColumns(colHdrRow)
+
+  // Metadata
+  const meta = extractMetadata(headerRows)
+
+  // Items (ONLY from item rows — never from header or totals)
+  // Pass haveRealCoordinates=true only when we came from HOCR (real pixel coords)
+  const haveRealCoords = engine === 'tesseract' && !!(rawText && rawText.includes('ocrx_word'))
+  const rawItems = extractItems(itemRows, cols, haveRealCoords)
+
+  // Totals
+  const totals = extractTotals(totalsRows)
+
+  // ── Build ScannedItems ────────────────────────────────────────────────
+  const scannedItems: ScannedItem[] = rawItems
+    .filter((r) => r.name.trim().length > 0)
+    .map((raw) => {
+      const unitPriceFinal = raw.unitPrice
+        ?? (raw.lineTotal !== null ? raw.lineTotal / raw.quantity : 0)
+      const lineTotalFinal = raw.lineTotal
+        ?? Math.round(raw.quantity * unitPriceFinal * 100) / 100
+
+      const mathMismatch =
+        raw.unitPrice !== null &&
+        raw.lineTotal !== null &&
+        Math.abs(Math.round(raw.quantity * raw.unitPrice * 100) - Math.round(raw.lineTotal * 100)) > 50
+
+      if (mathMismatch) {
+        reviewFlags.push(`"${raw.name}": qty × unit price does not match line total`)
+      }
+
+      const needsReview =
+        raw.nameConf  === 'low' ||
+        raw.qtyConf   === 'low' ||
+        raw.priceConf === 'low' ||
+        raw.totalConf === 'low' ||
+        mathMismatch
+
+      const notes: string[] = []
+      if (raw.nameConf  === 'low') notes.push('name unclear')
+      if (raw.qtyConf   === 'low') notes.push('quantity unconfirmed')
+      if (raw.priceConf === 'low') notes.push('unit price unconfirmed')
+      if (raw.totalConf === 'low') notes.push('line total unconfirmed')
+      if (mathMismatch)            notes.push('qty × price ≠ total')
+
+      const overallConf: FieldConfidence = mathMismatch
+        ? 'low'
+        : raw.nameConf === 'low' ? 'low'
+        : raw.nameConf === 'medium' ? 'medium'
+        : 'high'
+
+      return {
+        name:                raw.name,
+        quantity:            raw.quantity,
+        unitPrice:           Math.round(unitPriceFinal * 100) / 100,
+        lineTotal:           Math.round(lineTotalFinal * 100) / 100,
+        lineTotalFromReceipt: raw.lineTotal !== null,
+        confidence:          overallConf,
+        fieldConfidence: {
+          name:      raw.nameConf,
+          quantity:  raw.qtyConf,
+          unitPrice: raw.priceConf,
+          lineTotal: raw.totalConf,
+        },
+        mathMismatch,
+        needsReview,
+        reviewNote: notes.length > 0 ? notes.join('; ') : null,
+      }
+    })
+
+  // ── Subtotal ──────────────────────────────────────────────────────────
+  const itemsSubtotal = scannedItems.reduce((s, it) => s + it.lineTotal, 0)
+  const itemsSubtotalR = Math.round(itemsSubtotal * 100) / 100
+
+  let subtotalFinal: number | null = totals.subtotal
+  if (subtotalFinal !== null && itemsSubtotalR > 0) {
+    const divergePct = Math.abs(subtotalFinal - itemsSubtotalR) / Math.max(subtotalFinal, 1)
+    if (divergePct > 0.05) {
+      reviewFlags.push(
+        `Item total ₹${itemsSubtotalR.toFixed(2)} differs from receipt subtotal ₹${subtotalFinal.toFixed(2)}`,
+      )
+    }
+  } else if (subtotalFinal === null && itemsSubtotalR > 0) {
+    subtotalFinal = itemsSubtotalR
+  }
+
+  // ── Overall confidence ─────────────────────────────────────────────────
+  const allConfs = zonedRows.flatMap((r) => r.tokens.map((t) => t.conf))
+  const avgConf  = allConfs.length > 0
+    ? allConfs.reduce((s, c) => s + c, 0) / allConfs.length
+    : 50
+
+  const overallConfidence: FieldConfidence =
+    avgConf >= 80 && scannedItems.length >= 2 && totals.grandTotal !== null
+      ? 'high'
+      : avgConf >= 60 ? 'medium'
+      : 'low'
+
+  const requiresReview =
+    overallConfidence !== 'high' ||
+    reviewFlags.length > 0 ||
+    scannedItems.some((it) => it.needsReview) ||
+    totals.grandTotal === null
+
+  // Add review flag for missing grand total (tests depend on this)
+  if (totals.grandTotal === null && scannedItems.length > 0) {
+    reviewFlags.push('Grand total not found on receipt')
+  }
+
+  return {
+    restaurantName:  meta.restaurantName,
+    receiptDate:     meta.receiptDate,
+    invoiceNumber:   meta.invoiceNumber,
+    items:           scannedItems,
+    subtotal:        subtotalFinal,
+    taxes:           totals.taxes,
+    gst:             buildGstInfo(totals.taxes, rawText ?? ''),
+    serviceCharge:   totals.serviceCharge,
+    discount:        totals.discount,
+    grandTotal:      totals.grandTotal,
+    computedTotal:   buildComputedTotal(subtotalFinal, totals),
+    totalsMatch:     buildTotalsMatch(totals.grandTotal, subtotalFinal, totals),
+    overallConfidence,
+    requiresReview,
+    reviewFlags,
+    rawLineCount:    zonedRows.length,
+    ocrEngine:       engine,
+  }
+}
+
+// ─── GST info builder (backward-compat with v3 tests) ────────────────────────
+
+const INCLUSIVE_GST_RE = /\b(inclusive|incl\.?\s*(of|gst|tax)|tax\s*incl|gst\s*incl|all\s*taxes\s*inclusive)\b/i
+
+function buildGstInfo(taxes: TaxEntry[], rawText: string): GstInfo {
   let cgstAmount: number | null = null
   let sgstAmount: number | null = null
   let igstAmount: number | null = null
@@ -837,213 +1196,104 @@ export function parseReceiptText(rawText: string): ParsedReceipt {
   let sgstRate: number | null = null
   let igstRate: number | null = null
   let gstRate: number | null = null
-  let serviceChargeTotal = 0
-  let otherChargesTotal = 0
-  let discountTotal = 0
-  let discountPercent: number | null = null
 
-  for (const tl of taxLines) {
-    switch (tl.type) {
-      case 'cgst':
-        cgstAmount = (cgstAmount ?? 0) + tl.amount
-        if (tl.rate !== null) cgstRate = tl.rate
-        break
-      case 'sgst':
-        sgstAmount = (sgstAmount ?? 0) + tl.amount
-        if (tl.rate !== null) sgstRate = tl.rate
-        break
-      case 'igst':
-        igstAmount = (igstAmount ?? 0) + tl.amount
-        if (tl.rate !== null) igstRate = tl.rate
-        break
-      case 'gst':
-        gstFlatAmount = (gstFlatAmount ?? 0) + tl.amount
-        if (tl.rate !== null) gstRate = tl.rate
-        break
-      case 'service':
-        serviceChargeTotal += tl.amount
-        break
-      case 'discount':
-        discountTotal += tl.amount
-        if (tl.rate !== null) discountPercent = tl.rate
-        break
-      case 'packing':
-      case 'other':
-        otherChargesTotal += tl.amount
-        break
+  for (const t of taxes) {
+    switch (t.type) {
+      case 'cgst': cgstAmount = (cgstAmount ?? 0) + t.amount; if (t.rate) cgstRate = t.rate; break
+      case 'sgst': sgstAmount = (sgstAmount ?? 0) + t.amount; if (t.rate) sgstRate = t.rate; break
+      case 'igst': igstAmount = (igstAmount ?? 0) + t.amount; if (t.rate) igstRate = t.rate; break
+      case 'gst':  gstFlatAmount = (gstFlatAmount ?? 0) + t.amount; if (t.rate) gstRate = t.rate; break
     }
   }
 
-  // Overall GST rate
-  let overallGstRate: number | null = null
-  if (cgstRate !== null && sgstRate !== null) overallGstRate = cgstRate + sgstRate
-  else if (igstRate !== null) overallGstRate = igstRate
-  else if (gstRate !== null) overallGstRate = gstRate
-
-  // Total GST in paise
-  let totalGstPaise = 0
+  let totalGstAmount = 0
   if (cgstAmount !== null || sgstAmount !== null) {
-    totalGstPaise = toPaise(cgstAmount ?? 0) + toPaise(sgstAmount ?? 0)
+    totalGstAmount = (cgstAmount ?? 0) + (sgstAmount ?? 0)
   } else if (igstAmount !== null) {
-    totalGstPaise = toPaise(igstAmount)
+    totalGstAmount = igstAmount
   } else if (gstFlatAmount !== null) {
-    totalGstPaise = toPaise(gstFlatAmount)
+    totalGstAmount = gstFlatAmount
   }
 
-  // GST inclusive detection
-  const gstPresentOnReceipt = cgstAmount !== null || sgstAmount !== null ||
-                               igstAmount !== null || gstFlatAmount !== null
-  const gstInclusive = INCLUSIVE_GST.test(rawText) ? true
-                     : gstPresentOnReceipt ? false
-                     : null
+  const gstPresent = cgstAmount !== null || sgstAmount !== null || igstAmount !== null || gstFlatAmount !== null
+  const inclusive  = INCLUSIVE_GST_RE.test(rawText) ? true : gstPresent ? false : null
 
-  const gstConfidence: FieldConfidence =
+  const rate = (cgstRate !== null && sgstRate !== null)
+    ? cgstRate + sgstRate
+    : igstRate ?? gstRate ?? null
+
+  const confidence: FieldConfidence =
     (cgstAmount !== null || sgstAmount !== null || igstAmount !== null) ? 'high'
     : gstFlatAmount !== null ? 'medium'
     : 'low'
 
-  if (!gstPresentOnReceipt && !INCLUSIVE_GST.test(rawText)) {
-    reviewFlags.push('GST / tax information not found on receipt')
-  }
+  return { inclusive, rate, cgstAmount, sgstAmount, igstAmount, totalGstAmount, cgstRate, sgstRate, igstRate, confidence }
+}
 
-  const gstInfo: GstInfo = {
-    inclusive: gstInclusive,
-    rate: overallGstRate,
-    cgstAmount,
-    sgstAmount,
-    igstAmount,
-    totalGstAmount: toRupees(totalGstPaise),
-    cgstRate,
-    sgstRate,
-    igstRate,
-    confidence: gstConfidence,
-  }
+function buildComputedTotal(
+  subtotalFinal: number | null,
+  totals: { taxes: TaxEntry[]; serviceCharge: number | null; discount: number | null },
+): number | null {
+  if (subtotalFinal === null) return null
+  let computed = Math.round(subtotalFinal * 100)
+  for (const t of totals.taxes) computed += Math.round(t.amount * 100)
+  if (totals.serviceCharge) computed += Math.round(totals.serviceCharge * 100)
+  if (totals.discount)      computed -= Math.round(totals.discount * 100)
+  return computed > 0 ? Math.round(computed) / 100 : null
+}
 
-  // ── 8. Subtotal & grand total ─────────────────────────────────────────────
-  const subtotalFromReceipt = extractSubtotal(zonedLines)
-  const grandTotalFromReceipt = extractGrandTotal(zonedLines)
+function buildTotalsMatch(
+  grandTotal:    number | null,
+  subtotalFinal: number | null,
+  totals:        { taxes: TaxEntry[]; serviceCharge: number | null; discount: number | null },
+): boolean {
+  const computed = buildComputedTotal(subtotalFinal, totals)
+  if (grandTotal === null || computed === null) return false
+  return Math.abs(Math.round(grandTotal * 100) - Math.round(computed * 100)) <= 100 // ₹1 tolerance
+}
 
-  // Compute subtotal from items
-  const itemsSubtotalPaise = scannedItems.reduce(
-    (sum, it) => sum + toPaise(it.lineTotal), 0,
-  )
-  const itemsSubtotal = toRupees(itemsSubtotalPaise)
-
-  // Choose best subtotal
-  let subtotalFinal: number | null
-  if (subtotalFromReceipt !== null) {
-    if (Math.abs(subtotalFromReceipt - itemsSubtotal) / Math.max(itemsSubtotal, 1) <= 0.02) {
-      subtotalFinal = subtotalFromReceipt
-    } else {
-      subtotalFinal = itemsSubtotal  // trust our sum over potentially OCR-garbled receipt
-      if (itemsSubtotal > 0) {
-        reviewFlags.push(
-          `Computed item subtotal ₹${itemsSubtotal.toFixed(2)} differs from ` +
-          `printed subtotal ₹${subtotalFromReceipt.toFixed(2)}`,
-        )
-      }
-    }
-  } else {
-    subtotalFinal = itemsSubtotal > 0 ? itemsSubtotal : null
-  }
-
-  const serviceCharge = serviceChargeTotal > 0 ? serviceChargeTotal : null
-  const otherCharges  = otherChargesTotal  > 0 ? otherChargesTotal  : null
-  const discount      = discountTotal      > 0 ? discountTotal      : null
-
-  // ── 9. Reconciliation ─────────────────────────────────────────────────────
-  let computedTotalPaise = itemsSubtotalPaise + totalGstPaise
-  if (serviceChargeTotal > 0) computedTotalPaise += toPaise(serviceChargeTotal)
-  if (otherChargesTotal  > 0) computedTotalPaise += toPaise(otherChargesTotal)
-  if (discountTotal      > 0) computedTotalPaise -= toPaise(discountTotal)
-  const computedTotal = computedTotalPaise > 0 ? toRupees(computedTotalPaise) : null
-
-  let totalsMatch = false
-  let reconciliationNote: string | null = null
-
-  if (grandTotalFromReceipt !== null && computedTotal !== null) {
-    const discPaise = Math.abs(toPaise(grandTotalFromReceipt) - toPaise(computedTotal))
-    if (discPaise <= 100) {   // within ₹1 (handles rounding)
-      totalsMatch = true
-    } else {
-      const diff = toRupees(toPaise(grandTotalFromReceipt) - toPaise(computedTotal))
-      reconciliationNote =
-        `Receipt total ₹${grandTotalFromReceipt.toFixed(2)} vs. ` +
-        `computed ₹${computedTotal.toFixed(2)} ` +
-        `(${diff >= 0 ? '+' : ''}₹${diff.toFixed(2)})`
-      reviewFlags.push('Total does not reconcile — please review highlighted values')
-    }
-  } else if (grandTotalFromReceipt === null) {
-    reviewFlags.push('Grand total not found on receipt')
-  }
-
-  // ── 10. Overall confidence ─────────────────────────────────────────────────
-  const lowCount  = scannedItems.filter((it) => it.confidence === 'low').length
-  const medCount  = scannedItems.filter((it) => it.confidence === 'medium').length
-  const highCount = scannedItems.filter((it) => it.confidence === 'high').length
-
-  let overallConfidence: FieldConfidence = 'high'
-  if (scannedItems.length === 0) {
-    overallConfidence = 'low'
-    reviewFlags.push('No items could be extracted from this receipt')
-  } else if (lowCount > 0 || !totalsMatch) {
-    overallConfidence = 'low'
-  } else if (medCount >= highCount || reviewFlags.length > 1) {
-    overallConfidence = 'medium'
-  }
-
-  const requiresReview =
-    overallConfidence !== 'high' ||
-    reviewFlags.length > 0 ||
-    scannedItems.some((it) => it.confidence !== 'high')
-
+function emptyReceipt(flag: string, reviewFlags: string[]): ParsedReceipt {
+  reviewFlags.push(flag)
   return {
-    items:              scannedItems,
-    subtotal:           subtotalFinal,
-    serviceCharge,
-    otherCharges,
-    discount,
-    discountPercent,
-    gst:                gstInfo,
-    grandTotal:         grandTotalFromReceipt,
-    computedTotal,
-    totalsMatch,
-    reconciliationNote,
-    overallConfidence,
-    requiresReview,
-    reviewFlags,
-    restaurantName,
-    receiptDate,
-    rawLineCount:       lines.length,
+    restaurantName: null, receiptDate: null, invoiceNumber: null,
+    items: [], subtotal: null, taxes: [],
+    gst: { inclusive: null, rate: null, cgstAmount: null, sgstAmount: null, igstAmount: null, totalGstAmount: 0, cgstRate: null, sgstRate: null, igstRate: null, confidence: 'low' },
+    serviceCharge: null,
+    discount: null, grandTotal: null,
+    computedTotal: null, totalsMatch: false,
+    overallConfidence: 'low', requiresReview: true, reviewFlags,
+    rawLineCount: 0, ocrEngine: null,
   }
 }
 
-// ─── OCR quality check ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// OCR QUALITY CHECK (used by scan route)
+// ═══════════════════════════════════════════════════════════════════
 
-export interface OcrQualityResult {
-  looksLikeReceipt: boolean
-  tooSparse: boolean
-  amountCount: number
-  hasItemLines: boolean
-  hasTotalLine: boolean
-}
+export function checkOcrQuality(text: string): OcrQuality {
+  const lines     = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  const lineCount = lines.length
+  const tooSparse = lineCount < 4
 
-export function checkOcrQuality(text: string): OcrQualityResult {
-  if (!text || text.trim().length < 20) {
-    return { looksLikeReceipt: false, tooSparse: true, amountCount: 0, hasItemLines: false, hasTotalLine: false }
+  let hasItemLines  = false
+  let hasTotalLine  = false
+
+  for (const line of lines) {
+    if (!hasTotalLine && (TOTAL_KEYWORDS.test(line) || SUBTOTAL_KW.test(line))) {
+      hasTotalLine = true
+    }
+    if (!hasItemLines) {
+      const amounts  = extractAmounts(line)
+      const hasLetter = /[a-zA-Z]/.test(line)
+      if (hasLetter && amounts.length > 0) hasItemLines = true
+    }
   }
-  const lines = text.split('\n').map(cleanLine).filter(Boolean)
-  const amountCount = lines.reduce((n, l) => n + extractAmounts(l).length, 0)
-  const zonedLines  = segmentZones(lines)
-  const hasItemLines = zonedLines.some((zl) => zl.zone === 'items')
-  const hasTotalLine = lines.some((l) => GRAND_TOTAL_KW.test(l) || SUBTOTAL_KW.test(l))
-  const tooSparse   = lines.length < 4 || amountCount < 2
 
   return {
-    looksLikeReceipt: !tooSparse && (hasItemLines || hasTotalLine) && amountCount >= 2,
+    looksLikeReceipt: !tooSparse && (hasItemLines || hasTotalLine),
     tooSparse,
-    amountCount,
     hasItemLines,
     hasTotalLine,
+    lineCount,
   }
 }

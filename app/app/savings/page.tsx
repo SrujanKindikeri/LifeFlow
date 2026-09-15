@@ -4,7 +4,10 @@ import { Suspense } from 'react'
 import { SavingsClient } from '@/components/savings/SavingsClient'
 
 export default async function SavingsPage() {
-  try { await requireAuth() } catch { redirect('/login') }
+  try { await requireAuth() } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
+  }
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-5xl mx-auto">
       <Suspense><SavingsClient /></Suspense>

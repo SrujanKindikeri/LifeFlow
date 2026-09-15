@@ -95,10 +95,16 @@ export async function getSession(): Promise<IronSession<SessionData>> {
  * The lifeFlowId is read from the User document in MongoDB — it is NEVER
  * taken from the request body, query string, or any client-supplied value.
  *
- * Throws Error('Unauthorized') if the session is not authenticated.
+ * Throws Error('Unauthorized') if the session cookie is missing or invalid.
+ * Throws Error('UserNotFound') if the session is valid but the user no longer
+ *   exists in the database.
+ * Re-throws any other error (e.g. MongoDB connection failure) as-is so that
+ *   callers can distinguish infrastructure failures from auth failures and
+ *   surface the real error rather than silently destroying a valid session.
  */
 export async function requireAuth(): Promise<AuthUser> {
   const session = await getSession()
+
   if (!session.isLoggedIn || !session.userId) {
     throw new Error('Unauthorized')
   }
@@ -106,11 +112,54 @@ export async function requireAuth(): Promise<AuthUser> {
   // Lazy import to avoid circular dependency at module load time
   const { default: User } = await import('@/models/User')
 
+  // Lazy import mongoose for ObjectId validation
+  const { default: mongoose } = await import('mongoose')
+
+  // Guard: session.userId must be a valid 24-char hex MongoDB ObjectId.
+  // If it is not (e.g. corrupted or wrong ID type), treat as stale — the
+  // caller (clear-session route or page) will handle cookie expiry.
+  if (!mongoose.Types.ObjectId.isValid(session.userId)) {
+    throw new Error('UserNotFound')
+  }
+
+  // NOTE: connectDB() and User.findById() are intentionally NOT wrapped in a
+  // try/catch here. If MongoDB is unreachable the error propagates to the
+  // caller so it can be distinguished from a genuine auth failure and logged
+  // with its real message. Swallowing DB errors here caused the symptom of
+  // "session missing or invalid" appearing for Atlas connection problems.
   await connectDB()
   const user = await User.findById(session.userId).select('publicId name email').lean()
+
   if (!user) {
-    // Session refers to a deleted account — treat as unauthorized
-    throw new Error('Unauthorized')
+    // Session refers to a deleted or non-existent account (stale cookie).
+    //
+    // IMPORTANT: do NOT call session.destroy() here. requireAuth() is called
+    // from Server Component render functions (page.tsx), and Next.js forbids
+    // cookies().set() / cookies().delete() during the render phase — the call
+    // silently succeeds without emitting a Set-Cookie header, so the browser
+    // cookie is never actually cleared. The redirect loop then persists forever.
+    //
+    // Instead, pages must redirect to /api/auth/clear-session, a Route Handler
+    // that runs in a context where Set-Cookie headers ARE sent to the browser.
+    //
+    // Safe dev diagnostic: log DB name + user count to surface a wrong-database
+    // connection (count=0 means wrong DB, not a deleted user).
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        const totalUsers = await User.countDocuments()
+        const uid  = session.userId
+        const hint = uid.length >= 8 ? `${uid.slice(0, 4)}…${uid.slice(-4)}` : '(short)'
+        console.warn('[AUTH] stale session — userId not found in DB', {
+          database_name:          mongoose.connection.db?.databaseName ?? '(unknown)',
+          users_collection_count: totalUsers,
+          userId_hint:            hint,
+        })
+      } catch {
+        // Non-fatal — count failure must not block the auth flow
+      }
+    }
+
+    throw new Error('UserNotFound')
   }
 
   return {

@@ -5,8 +5,9 @@ import { SecurityClient } from '@/components/settings/SecurityClient'
 export default async function SecuritySettingsPage() {
   try {
     await requireAuth()
-  } catch {
-    redirect('/login')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
   }
 
   return (

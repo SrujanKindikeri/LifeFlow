@@ -49,6 +49,12 @@ export interface IUser extends Document {
   /** UTC expiry — token is invalid at or after this date */
   emailVerificationExpiresAt: Date | null
 
+  // ── Password reset ────────────────────────────────────────────────────────
+  /** SHA-256 hash of the raw reset token; never store the raw token */
+  passwordResetTokenHash: string | null
+  /** UTC expiry — reset token is invalid at or after this date */
+  passwordResetExpiresAt: Date | null
+
   // ── TOTP / Google Authenticator ───────────────────────────────────────────
   /** Whether TOTP 2FA is active for this account */
   twoFactorEnabled: boolean
@@ -138,6 +144,18 @@ const UserSchema = new Schema<IUser>(
       sparse: true,
     },
     emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ── Password reset ──────────────────────────────────────────────────────
+    passwordResetTokenHash: {
+      type: String,
+      default: null,
+      index: true,
+      sparse: true,
+    },
+    passwordResetExpiresAt: {
       type: Date,
       default: null,
     },

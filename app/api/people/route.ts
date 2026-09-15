@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import Person from '@/models/Person'
+import User from '@/models/User'
 import MoneyRecord from '@/models/MoneyRecord'
 import MoneyPayment from '@/models/MoneyPayment'
 import GroupBill from '@/models/GroupBill'
@@ -10,13 +11,23 @@ import { z } from 'zod'
 import type { IMoneyRecord } from '@/models/MoneyRecord'
 import type { IMoneyPayment } from '@/models/MoneyPayment'
 
-const personSchema = z.object({
+// ─── Validation schemas ───────────────────────────────────────────────────────
+
+const manualPersonSchema = z.object({
+  source:     z.literal('manual'),
   name:       z.string().min(1, 'Name is required').max(100),
   phone:      z.string().max(20).optional(),
-  email:      z.string().email().max(200).optional().or(z.literal('')),
-  lifeFlowId: z.string().max(20).optional(),
+  email:      z.string().email('Invalid email').max(200).optional().or(z.literal('')),
   notes:      z.string().max(500).optional(),
 })
+
+const lifeflowPersonSchema = z.object({
+  source:           z.literal('lifeflow'),
+  /** The contact's LifeFlow ID as entered by the user (e.g. LF-XXXXXXXX). */
+  linkedLifeFlowId: z.string().regex(/^LF-[A-Z2-9]{8}$/, 'Invalid LifeFlow ID format'),
+})
+
+const personSchema = z.discriminatedUnion('source', [manualPersonSchema, lifeflowPersonSchema])
 
 async function enrichPerson(
   person: InstanceType<typeof Person>,
@@ -93,6 +104,7 @@ async function enrichPerson(
     phone:             person.phone,
     email:             person.email,
     linkedLifeFlowId:  person.linkedLifeFlowId,
+    source:            person.source ?? 'manual',
     notes:             person.notes,
     createdAt:         person.createdAt.toISOString(),
     updatedAt:         person.updatedAt.toISOString(),
@@ -129,12 +141,13 @@ export async function GET(req: NextRequest) {
     if (!withFinancials) {
       return NextResponse.json({
         people: people.map((p) => ({
-          _id:             p._id.toString(),
-          name:            p.name,
-          phone:           p.phone,
-          email:           p.email,
+          _id:              p._id.toString(),
+          name:             p.name,
+          phone:            p.phone,
+          email:            p.email,
           linkedLifeFlowId: p.linkedLifeFlowId,
-          notes:           p.notes,
+          source:           p.source ?? 'manual',
+          notes:            p.notes,
         })),
       })
     }
@@ -165,30 +178,89 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    // Map incoming lifeFlowId (the contact's account) to linkedLifeFlowId
-    // so it doesn't collide with the ownership lifeFlowId field.
-    const { lifeFlowId: contactLifeFlowId, ...personData } = parsed.data
+    // ── LifeFlow ID path ────────────────────────────────────────────────────
+    if (parsed.data.source === 'lifeflow') {
+      const { linkedLifeFlowId } = parsed.data
+
+      // Lookup the target user by their publicId — indexed, not a collection scan.
+      // Select only the fields needed; never return passwords or secrets.
+      const targetUser = await User.findOne({ publicId: linkedLifeFlowId })
+        .select('_id publicId name email')
+        .lean()
+
+      if (!targetUser) {
+        return NextResponse.json({ error: 'LifeFlow ID not found.' }, { status: 404 })
+      }
+
+      // Prevent adding yourself
+      if (targetUser._id.toString() === userId) {
+        return NextResponse.json({ error: 'You cannot add yourself to your People.' }, { status: 400 })
+      }
+
+      // Duplicate check: same LifeFlow user already in this owner's directory.
+      // The unique sparse index on (userId, linkedUserId) also enforces this at
+      // the DB layer, but we give a friendlier error message here.
+      const existing = await Person.findOne({ userId, linkedUserId: targetUser._id }).lean()
+      if (existing) {
+        return NextResponse.json({ error: 'This person is already in your People.' }, { status: 409 })
+      }
+
+      const person = await Person.create({
+        userId,
+        lifeFlowId,           // owner's LF ID
+        name:             targetUser.name,
+        email:            targetUser.email,
+        linkedLifeFlowId: targetUser.publicId,
+        linkedUserId:     targetUser._id,
+        source:           'lifeflow',
+      })
+
+      return NextResponse.json({
+        person: {
+          _id:              person._id.toString(),
+          name:             person.name,
+          email:            person.email,
+          linkedLifeFlowId: person.linkedLifeFlowId,
+          source:           person.source,
+          createdAt:        person.createdAt.toISOString(),
+        },
+      }, { status: 201 })
+    }
+
+    // ── Manual path ─────────────────────────────────────────────────────────
     const person = await Person.create({
       userId,
-      lifeFlowId,
-      ...personData,
-      ...(contactLifeFlowId ? { linkedLifeFlowId: contactLifeFlowId } : {}),
+      lifeFlowId, // owner's LF ID
+      source: 'manual',
+      name:  parsed.data.name,
+      phone: parsed.data.phone,
+      email: parsed.data.email,
+      notes: parsed.data.notes,
     })
 
     return NextResponse.json({
       person: {
-        _id:             person._id.toString(),
-        name:            person.name,
-        phone:           person.phone,
-        email:           person.email,
+        _id:              person._id.toString(),
+        name:             person.name,
+        phone:            person.phone,
+        email:            person.email,
         linkedLifeFlowId: person.linkedLifeFlowId,
-        notes:           person.notes,
-        createdAt:       person.createdAt.toISOString(),
+        source:           person.source,
+        notes:            person.notes,
+        createdAt:        person.createdAt.toISOString(),
       },
     }, { status: 201 })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    // MongoDB unique index violation (race condition fallback)
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error as NodeJS.ErrnoException).code === '11000'
+    ) {
+      return NextResponse.json({ error: 'This person is already in your People.' }, { status: 409 })
     }
     console.error('[people POST]', error)
     return NextResponse.json({ error: 'Failed to create person' }, { status: 500 })

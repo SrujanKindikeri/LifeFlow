@@ -179,7 +179,7 @@ export async function DELETE() {
 
     // Clear session
     const session = await getSession()
-    session.destroy()
+    await session.destroy()
 
     return NextResponse.json({ message: 'Account deleted' })
   } catch (error) {

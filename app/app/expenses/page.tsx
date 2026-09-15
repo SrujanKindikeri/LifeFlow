@@ -6,8 +6,9 @@ import { ExpensesPageClient } from '@/components/expenses/ExpensesPageClient'
 export default async function ExpensesPage() {
   try {
     await requireAuth()
-  } catch {
-    redirect('/login')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
   }
 
   return (

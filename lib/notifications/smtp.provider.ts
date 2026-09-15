@@ -17,8 +17,7 @@
  */
 
 import nodemailer from 'nodemailer'
-import type { Transporter } from 'nodemailer'
-import type SMTPTransport from 'nodemailer/lib/smtp-transport'
+import type { Transporter, SentMessageInfo, TransportOptions } from 'nodemailer'
 import type { NotificationProvider, EmailMessage, EmailResult } from './index'
 import logger from '@/lib/logger'
 
@@ -75,7 +74,10 @@ export class SmtpProvider implements NotificationProvider {
     const cfg = getSmtpConfig()
 
     try {
-      const transportOptions: SMTPTransport.Options = {
+      const transportOptions: TransportOptions & {
+        host: string; port: number; secure: boolean; requireTLS: boolean;
+        auth: { user: string; pass: string }
+      } = {
         host:           cfg.host,
         port:           cfg.port,
         secure:         cfg.secure,
@@ -85,10 +87,10 @@ export class SmtpProvider implements NotificationProvider {
         auth:           cfg.smtpAuth,
       }
 
-      const transporter: Transporter<SMTPTransport.SentMessageInfo> =
+      const transporter: Transporter<SentMessageInfo> =
         nodemailer.createTransport(transportOptions)
 
-      const info: SMTPTransport.SentMessageInfo = await transporter.sendMail({
+      const info: SentMessageInfo = await transporter.sendMail({
         from:    message.from ?? cfg.from,
         to:      message.to,
         subject: message.subject,

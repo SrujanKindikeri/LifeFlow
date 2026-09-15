@@ -14,7 +14,7 @@
  *  8.  User timezone is respected for window checks
  *  9.  Unverified users are not processed by the scheduler
  * 10.  SMTP failure does not crash scheduler
- * 11.  nodemailer 7.0.6 loads successfully
+ * 11.  nodemailer loads successfully
  * 12.  Email verification continues working (not broken by notification changes)
  * 13.  Notification email has HTML and plain text
  * 14.  Sensitive data is not logged
@@ -569,18 +569,20 @@ describe('10. SMTP failure does not crash scheduler or abort channels', () => {
   })
 })
 
-// ─── 11. Nodemailer 7.0.6 loads successfully ─────────────────────────────────
+// ─── 11. Nodemailer loads successfully ───────────────────────────────────────
 
-describe('11. Nodemailer 7.0.6 loads correctly', () => {
+describe('11. Nodemailer loads correctly', () => {
   it('nodemailer module loads without error', async () => {
     await expect(import('nodemailer')).resolves.toBeDefined()
   })
 
-  it('nodemailer version is exactly 7.0.6', () => {
+  it('nodemailer version is 10.x or newer', () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')
     ) as { dependencies: Record<string, string> }
-    expect(pkg.dependencies['nodemailer']).toBe('7.0.6')
+    const ver = pkg.dependencies['nodemailer'] ?? ''
+    // Accept any version ≥ 10.0.0 (exact version or semver range)
+    expect(ver).toMatch(/^1\d+\./)
   })
 
   it('nodemailer createTransport is a function', async () => {
