@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
     // API to report failure after the password has already been changed.
     try {
       const session = await getSession()
-      session.destroy()
+      await session.destroy()
       logger.info('[reset-password] Session invalidated after password reset', {
         userId: user._id.toString(),
       })

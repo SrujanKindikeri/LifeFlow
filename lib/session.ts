@@ -2,6 +2,7 @@ import { getIronSession, IronSession, SessionOptions } from 'iron-session'
 import { cookies } from 'next/headers'
 import { getServerEnv } from '@/lib/env'
 import { connectDB } from '@/lib/db'
+import logger from '@/lib/logger'
 
 export interface SessionData {
   userId: string
@@ -149,7 +150,7 @@ export async function requireAuth(): Promise<AuthUser> {
         const totalUsers = await User.countDocuments()
         const uid  = session.userId
         const hint = uid.length >= 8 ? `${uid.slice(0, 4)}…${uid.slice(-4)}` : '(short)'
-        console.warn('[AUTH] stale session — userId not found in DB', {
+        logger.warn('[AUTH] stale session — userId not found in DB', {
           database_name:          mongoose.connection.db?.databaseName ?? '(unknown)',
           users_collection_count: totalUsers,
           userId_hint:            hint,

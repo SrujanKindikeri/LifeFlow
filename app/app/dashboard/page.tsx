@@ -2,6 +2,7 @@ import { requireAuth } from '@/lib/session'
 import { redirect } from 'next/navigation'
 import { getDashboardData } from '@/lib/dashboard'
 import { DashboardClient } from './DashboardClient'
+import logger from '@/lib/logger'
 
 export default async function DashboardPage() {
   let session
@@ -38,7 +39,7 @@ export default async function DashboardPage() {
     // Infrastructure failure (MongoDB unreachable, network error, etc.).
     // Do NOT clear the session — the user IS authenticated, the DB is just down.
     // Re-throw so Next.js error.tsx renders instead of kicking the user out.
-    console.error('[dashboard] infrastructure error:', message)
+    logger.error('[dashboard] infrastructure error', { errorMessage: message })
     throw new Error(message)
   }
 
@@ -57,7 +58,7 @@ export default async function DashboardPage() {
     //  3. The cached dead promise in db.ts is already reset, so the next
     //     request will retry the connection from scratch.
     const message = err instanceof Error ? err.message : String(err)
-    console.error('[dashboard] data fetch failed:', message)
+    logger.error('[dashboard] data fetch failed', { errorMessage: message })
     throw new Error(message)
   }
 
