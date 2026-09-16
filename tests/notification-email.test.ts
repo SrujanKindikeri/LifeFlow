@@ -133,14 +133,13 @@ describe('1. Recipient always resolved from database', () => {
 // ─── 2. Client cannot specify arbitrary recipient ──────────────────────────────
 
 describe('2. Client cannot specify arbitrary recipient', () => {
-  it('test-email route source never accepts "to" from client body', () => {
-    const routeSrc = fs.readFileSync(
-      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+  it('notificationScheduler source never accepts "to" from client body', () => {
+    const schedulerSrc = fs.readFileSync(
+      path.join(process.cwd(), 'lib/notificationScheduler.ts'),
       'utf8'
     )
-    // The route must read the recipient from the DB, not from req.body
-    expect(routeSrc).toContain('user.email')
-    expect(routeSrc).not.toMatch(/req\.body\.to|body\.to|body\["to"\]/)
+    // Must never reference a client request object
+    expect(schedulerSrc).not.toContain('req.body')
   })
 
   it('notificationScheduler source always uses user.email for recipient', () => {
@@ -489,13 +488,12 @@ describe('9. Unverified users are excluded from scheduler', () => {
     expect(matched).toHaveLength(1)
   })
 
-  it('test-email route requires emailVerified=true', () => {
-    const routeSrc = fs.readFileSync(
-      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+  it('scheduler only processes emailVerified=true users', () => {
+    const schedulerSrc = fs.readFileSync(
+      path.join(process.cwd(), 'lib/notificationScheduler.ts'),
       'utf8'
     )
-    expect(routeSrc).toContain('emailVerified')
-    expect(routeSrc).toContain('EMAIL_NOT_VERIFIED')
+    expect(schedulerSrc).toContain('emailVerified: true')
   })
 })
 
@@ -788,18 +786,6 @@ describe('14. Sensitive data is not logged', () => {
     }
   })
 
-  it('test-email route does not log user email in error handler', () => {
-    const routeSrc = fs.readFileSync(
-      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
-      'utf8'
-    )
-    const errorLogLines = routeSrc
-      .split('\n')
-      .filter((l) => l.includes('logger.error'))
-    for (const line of errorLogLines) {
-      expect(line).not.toContain('user.email')
-    }
-  })
 })
 
 // ─── 15. shouldSendEmail — master switch ──────────────────────────────────────
@@ -901,43 +887,27 @@ describe('18. Legacy users without emailNotifications get safe defaults', () => 
   })
 })
 
-// ─── 19. test-email endpoint resolves recipient from DB ───────────────────────
+// ─── 19. Automatic email flow — no manual trigger ────────────────────────────
 
-describe('19. test-email route recipient security', () => {
-  it('route source reads recipient from DB user record, not request body', () => {
-    const routeSrc = fs.readFileSync(
-      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
-      'utf8'
+describe('19. Automatic email flow — no manual send endpoint', () => {
+  it('test-email route no longer exists', () => {
+    const routePath = path.join(
+      process.cwd(),
+      'app/api/notifications/test-email/route.ts'
     )
-    // Recipient comes from DB lookup
-    expect(routeSrc).toContain('User.findById(userId)')
-    expect(routeSrc).toContain('to:      user.email')
-    // Must not accept client-supplied address
-    expect(routeSrc).not.toMatch(/body\.to|req\.body\.to|parsedBody\.to/)
+    expect(fs.existsSync(routePath)).toBe(false)
   })
 
-  it('route requires requireAuth() before any email send', () => {
-    const routeSrc = fs.readFileSync(
-      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+  it('scheduler is the only source of outbound notification emails', () => {
+    const schedulerSrc = fs.readFileSync(
+      path.join(process.cwd(), 'lib/notificationScheduler.ts'),
       'utf8'
     )
-    // requireAuth must appear before User.findById
-    const authIdx = routeSrc.indexOf('requireAuth()')
-    const dbIdx   = routeSrc.indexOf('User.findById')
-    expect(authIdx).toBeGreaterThan(-1)
-    expect(dbIdx).toBeGreaterThan(-1)
-    expect(authIdx).toBeLessThan(dbIdx)
-  })
-
-  it('route has rate limiting before DB access', () => {
-    const routeSrc = fs.readFileSync(
-      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
-      'utf8'
-    )
-    expect(routeSrc).toContain('checkRateLimit(')
-    const rlIdx = routeSrc.indexOf('checkRateLimit(')
-    const dbIdx = routeSrc.indexOf('User.findById')
-    expect(rlIdx).toBeLessThan(dbIdx)
+    // Scheduler must use getNotificationService for email delivery
+    expect(schedulerSrc).toContain('getNotificationService()')
+    // Recipient always from user.email — never from a request
+    expect(schedulerSrc).toContain('userEmail:    user.email')
+    expect(schedulerSrc).not.toContain('req.body')
   })
 })
 
@@ -953,6 +923,7 @@ describe('20. User model emailNotifications field', () => {
     expect(found?.emailNotifications?.habitReminders).toBe(true)
     expect(found?.emailNotifications?.spendingAlerts).toBe(true)
     expect(found?.emailNotifications?.dailySummary).toBe(true)
+    expect(found?.emailNotifications?.weeklySummary).toBe(true)
   })
 
   it('can update emailNotifications.enabled independently', async () => {

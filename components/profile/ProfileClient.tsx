@@ -320,6 +320,7 @@ export function ProfileClient() {
     habitReminders: true,
     spendingAlerts: true,
     dailySummary:   true,
+    weeklySummary:  true,
   }
 
   // ── Render guards ─────────────────────────────────────────────────────────
@@ -489,10 +490,11 @@ export function ProfileClient() {
                   Email categories
                 </p>
                 {([
-                  { key: 'taskReminders',  label: 'Task reminders',  desc: "Tomorrow's tasks & end-of-day incomplete reminder" },
-                  { key: 'habitReminders', label: 'Habit reminders', desc: "Tomorrow's habits reminder"                        },
-                  { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Budget threshold alerts'                         },
-                  { key: 'dailySummary',   label: 'Daily summary',   desc: 'Morning summary email'                            },
+                  { key: 'taskReminders',  label: 'Task reminders',  desc: 'Upcoming tasks · 30-minute due reminders · end-of-day incomplete reminders' },
+                  { key: 'habitReminders', label: 'Habit reminders', desc: 'Upcoming and incomplete habit reminders'            },
+                  { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Budget threshold and important spending alerts'   },
+                  { key: 'dailySummary',   label: 'Daily summary',   desc: 'Daily summary of tasks, habits, expenses and activity' },
+                  { key: 'weeklySummary',  label: 'Weekly summary',  desc: 'Weekly summary of tasks, habits, expenses and activity' },
                 ] as { key: keyof Omit<UserType['emailNotifications'], 'enabled'>; label: string; desc: string }[]).map(({ key, label, desc }) => (
                   <div key={key} className="flex items-center justify-between gap-4 py-0.5">
                     <div>

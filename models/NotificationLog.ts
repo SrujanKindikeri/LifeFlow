@@ -20,7 +20,9 @@
  * Examples:
  *   "6630a1b2c3d4e5f6a7b8c9d0:TASK_TOMORROW:2026-09-13"
  *   "6630a1b2c3d4e5f6a7b8c9d0:TASK_INCOMPLETE_TODAY:2026-09-12"
+ *   "6630a1b2c3d4e5f6a7b8c9d0:TASK_DUE_SOON:2026-09-16:<taskObjectId>"
  *   "6630a1b2c3d4e5f6a7b8c9d0:DAILY_SUMMARY:2026-09-12"
+ *   "6630a1b2c3d4e5f6a7b8c9d0:WEEKLY_SUMMARY:2026-W37"
  *   "6630a1b2c3d4e5f6a7b8c9d0:SPENDING_ALERT:food:2026-09"
  *
  * USAGE
@@ -46,6 +48,7 @@ export type ScheduledNotificationType =
   | 'HABIT_REMINDER'
   | 'SPENDING_ALERT'
   | 'DAILY_SUMMARY'
+  | 'WEEKLY_SUMMARY'
 
 export interface INotificationLog extends Document {
   _id: mongoose.Types.ObjectId
@@ -75,6 +78,7 @@ const NotificationLogSchema = new Schema<INotificationLog>(
         'HABIT_REMINDER',
         'SPENDING_ALERT',
         'DAILY_SUMMARY',
+        'WEEKLY_SUMMARY',
       ],
       required: true,
     },

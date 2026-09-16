@@ -25,6 +25,7 @@ export interface User {
     habitReminders: boolean
     spendingAlerts: boolean
     dailySummary: boolean
+    weeklySummary: boolean
   }
   createdAt: string
   updatedAt: string

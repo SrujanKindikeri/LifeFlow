@@ -31,14 +31,16 @@ export interface IUser extends Document {
   emailNotifications: {
     /** Master switch — set to false to suppress all notification emails. */
     enabled: boolean
-    /** Email for task reminders (tomorrow tasks + incomplete today). */
+    /** Email for task reminders (7 PM incomplete check + tomorrow preview at 10 PM). */
     taskReminders: boolean
-    /** Email for habit reminders (tomorrow habits + daily habit reminder). */
+    /** Email for habit reminders (upcoming and incomplete habit reminders). */
     habitReminders: boolean
-    /** Email for spending/budget alerts. */
+    /** Email for spending/budget alerts (threshold reached / exceeded). */
     spendingAlerts: boolean
-    /** Email for the daily summary. */
+    /** Email for the daily summary at 11:55 PM. */
     dailySummary: boolean
+    /** Email for the weekly summary every Sunday at 10 PM. */
+    weeklySummary: boolean
   }
 
   // ── Email verification ────────────────────────────────────────────────────
@@ -124,11 +126,12 @@ const UserSchema = new Schema<IUser>(
     // some categories and push for others.  The master `enabled` switch must
     // be true before any category flag is evaluated.
     emailNotifications: {
-      enabled:       { type: Boolean, default: false },
-      taskReminders: { type: Boolean, default: true  },
-      habitReminders:{ type: Boolean, default: true  },
-      spendingAlerts:{ type: Boolean, default: true  },
-      dailySummary:  { type: Boolean, default: true  },
+      enabled:        { type: Boolean, default: false },
+      taskReminders:  { type: Boolean, default: true  },
+      habitReminders: { type: Boolean, default: true  },
+      spendingAlerts: { type: Boolean, default: true  },
+      dailySummary:   { type: Boolean, default: true  },
+      weeklySummary:  { type: Boolean, default: true  },
     },
 
     // ── Email verification ──────────────────────────────────────────────────

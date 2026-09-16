@@ -1363,3 +1363,628 @@ export function buildPasswordResetEmail(opts: PasswordResetEmailOptions): {
 
   return { subject, html, text }
 }
+
+// ─── Tomorrow preview (10 PM) ─────────────────────────────────────────────────
+//
+// Sent at 10 PM in the user's local timezone.
+// Shows tomorrow's tasks, habits, and any other scheduled items.
+// Not sent if there is nothing planned for tomorrow.
+
+export interface TomorrowPreviewEmailOptions {
+  toName: string
+  tomorrowLabel: string    // e.g. "Thursday, 17 Sep"
+  taskCount: number
+  taskTitles: string[]     // up to 5
+  habitCount: number
+  habitNames: string[]     // up to 5
+  appUrl: string
+}
+
+export function buildTomorrowPreviewEmail(opts: TomorrowPreviewEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, tomorrowLabel, taskCount, taskTitles, habitCount, habitNames, appUrl } = opts
+  const firstName  = toName.split(' ')[0] ?? toName
+  const subject    = `Tomorrow's plan is ready — ${BRAND_NAME}`
+
+  const taskSection = taskCount > 0 ? `
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;font-weight:600;color:#0f172a;
+              text-transform:uppercase;letter-spacing:0.6px;">
+      Tasks (${taskCount})
+    </p>
+    ${buildItemList(taskTitles)}
+    ${taskCount > taskTitles.length
+      ? `<p style="margin:-16px 0 20px;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Arial,sans-serif;font-size:13px;color:#94a3b8;">
+           &hellip;and ${taskCount - taskTitles.length} more.
+         </p>`
+      : ''}
+  ` : ''
+
+  const habitSection = habitCount > 0 ? `
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;font-weight:600;color:#0f172a;
+              text-transform:uppercase;letter-spacing:0.6px;">
+      Habits (${habitCount})
+    </p>
+    ${buildItemList(habitNames)}
+  ` : ''
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Tomorrow's plan is ready
+    </h2>
+    <p style="margin:0 0 24px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(tomorrowLabel)}
+    </p>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, here&rsquo;s what&rsquo;s planned for tomorrow:
+    </p>
+    ${taskSection}
+    ${habitSection}
+    ${buildNotifCta(`${appUrl}/app/dashboard`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const taskLines = taskCount > 0 ? [
+    `TASKS (${taskCount})`,
+    ...taskTitles.map((t) => `  • ${t}`),
+    ...(taskCount > taskTitles.length ? [`  … and ${taskCount - taskTitles.length} more.`] : []),
+    ``,
+  ] : []
+
+  const habitLines = habitCount > 0 ? [
+    `HABITS (${habitCount})`,
+    ...habitNames.map((n) => `  • ${n}`),
+    ``,
+  ] : []
+
+  const text = [
+    `Tomorrow's plan is ready`,
+    `${tomorrowLabel}`,
+    ``,
+    `Hi ${firstName}, here's what's planned for tomorrow:`,
+    ``,
+    ...taskLines,
+    ...habitLines,
+    `Open LifeFlow: ${appUrl}/app/dashboard`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Habit reminder email ─────────────────────────────────────────────────────
+//
+// Sent when incomplete habits are detected.
+// Only sent when emailNotifications.habitReminders === true.
+
+export interface HabitReminderEmailOptions {
+  toName: string
+  todayLabel: string
+  incompleteCount: number
+  habitNames: string[]   // up to 5 incomplete habit names
+  totalCount: number
+  appUrl: string
+}
+
+export function buildHabitReminderEmail(opts: HabitReminderEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, todayLabel, incompleteCount, habitNames, totalCount, appUrl } = opts
+  const firstName  = toName.split(' ')[0] ?? toName
+  const habitWord  = incompleteCount === 1 ? 'habit' : 'habits'
+  const subject    = `${incompleteCount} ${habitWord} still to complete — ${BRAND_NAME}`
+
+  const completedCount = totalCount - incompleteCount
+  const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Keep your streak going
+    </h2>
+    <p style="margin:0 0 24px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(todayLabel)}
+    </p>
+    <p style="margin:0 0 8px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, you have ${incompleteCount} ${habitWord} still
+      to complete today. ${completedCount > 0 ? `You&rsquo;re ${pct}% of the way there.` : 'You can do it!'}
+    </p>
+    ${buildItemList(habitNames)}
+    ${buildNotifCta(`${appUrl}/app/habits`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    `Keep your streak going — ${incompleteCount} ${habitWord} to complete`,
+    `${todayLabel}`,
+    ``,
+    `Hi ${firstName}, you have ${incompleteCount} ${habitWord} still to complete today.`,
+    ...(completedCount > 0 ? [`You're ${pct}% of the way there.`] : ['You can do it!']),
+    ``,
+    ...habitNames.map((n) => `  • ${n}`),
+    ``,
+    `Open LifeFlow: ${appUrl}/app/habits`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Weekly summary (Sunday 10 PM) ────────────────────────────────────────────
+//
+// Sent every Sunday at 10 PM in the user's local timezone.
+// Covers the past 7 days (Mon–Sun).
+
+export interface WeeklySummaryEmailOptions {
+  toName: string
+  weekLabel: string          // e.g. "10–16 Sep 2026"
+  // Tasks
+  tasksCompleted: number
+  tasksTotal: number
+  // Habits
+  habitsCompleted: number
+  habitsTotal: number        // total possible habit-days in the week
+  // Expenses
+  expenseCount: number
+  topExpenseCategory?: string  // e.g. "Food & Dining"
+  // Activity
+  activeDays: number         // days with at least one task/habit completed
+  appUrl: string
+}
+
+export function buildWeeklySummaryEmail(opts: WeeklySummaryEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const {
+    toName,
+    weekLabel,
+    tasksCompleted,
+    tasksTotal,
+    habitsCompleted,
+    habitsTotal,
+    expenseCount,
+    topExpenseCategory,
+    activeDays,
+    appUrl,
+  } = opts
+  const firstName     = toName.split(' ')[0] ?? toName
+  const taskPct       = tasksTotal > 0 ? Math.round((tasksCompleted / tasksTotal) * 100) : 0
+  const habitPct      = habitsTotal > 0 ? Math.round((habitsCompleted / habitsTotal) * 100) : 0
+  const subject       = `Your LifeFlow weekly summary — ${weekLabel}`
+
+  function statRow(label: string, value: string): string {
+    return `
+      <tr>
+        <td style="padding:9px 0;border-bottom:1px solid #f1f5f9;
+                   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                'Segoe UI',Arial,sans-serif;
+                   font-size:14px;color:#64748b;">${escapeHtml(label)}</td>
+        <td style="padding:9px 0;border-bottom:1px solid #f1f5f9;text-align:right;
+                   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                'Segoe UI',Arial,sans-serif;
+                   font-size:14px;font-weight:600;color:#0f172a;">${escapeHtml(value)}</td>
+      </tr>`
+  }
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Your weekly summary
+    </h2>
+    <p style="margin:0 0 24px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(weekLabel)}
+    </p>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)}, here&rsquo;s how your week looked:
+    </p>
+
+    <!-- Tasks section -->
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:11px;font-weight:600;color:#94a3b8;
+              text-transform:uppercase;letter-spacing:0.8px;">
+      Tasks
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 20px;">
+      ${statRow('Completed',        `${tasksCompleted} / ${tasksTotal}`)}
+      ${statRow('Completion rate',  `${taskPct}%`)}
+    </table>
+
+    <!-- Habits section -->
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:11px;font-weight:600;color:#94a3b8;
+              text-transform:uppercase;letter-spacing:0.8px;">
+      Habits
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 20px;">
+      ${statRow('Completed',        `${habitsCompleted} / ${habitsTotal}`)}
+      ${statRow('Completion rate',  `${habitPct}%`)}
+    </table>
+
+    <!-- Spending section -->
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:11px;font-weight:600;color:#94a3b8;
+              text-transform:uppercase;letter-spacing:0.8px;">
+      Spending
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 20px;">
+      ${statRow('Transactions this week', `${expenseCount}`)}
+      ${topExpenseCategory ? statRow('Top category', topExpenseCategory) : ''}
+    </table>
+
+    <!-- Activity -->
+    <p style="margin:0 0 4px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:11px;font-weight:600;color:#94a3b8;
+              text-transform:uppercase;letter-spacing:0.8px;">
+      Activity
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 24px;">
+      ${statRow('Active days', `${activeDays} / 7`)}
+    </table>
+
+    ${buildNotifCta(`${appUrl}/app/dashboard`)}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text = [
+    `Your LifeFlow weekly summary — ${weekLabel}`,
+    ``,
+    `Hi ${firstName}, here's how your week looked:`,
+    ``,
+    `TASKS`,
+    `  Completed:        ${tasksCompleted} / ${tasksTotal} (${taskPct}%)`,
+    ``,
+    `HABITS`,
+    `  Completed:        ${habitsCompleted} / ${habitsTotal} (${habitPct}%)`,
+    ``,
+    `SPENDING`,
+    `  Transactions:     ${expenseCount}`,
+    ...(topExpenseCategory ? [`  Top category:     ${topExpenseCategory}`] : []),
+    ``,
+    `ACTIVITY`,
+    `  Active days:      ${activeDays} / 7`,
+    ``,
+    `Open LifeFlow: ${appUrl}/app/dashboard`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Task due-soon reminder (30 minutes before) ───────────────────────────────
+
+export interface TaskReminderEmailOptions {
+  /** Recipient's display name */
+  toName: string
+  /** Task title */
+  taskTitle: string
+  /** Human-readable due label — e.g. "Today at 8:00 PM" or "Wednesday at 3:30 PM" */
+  dueLabel: string
+  /** Recurrence description — e.g. "Daily" or "Weekly" — omit for one-time tasks */
+  recurrenceLabel?: string
+  /** Task priority — 'low' | 'medium' | 'high' */
+  priority?: 'low' | 'medium' | 'high'
+  /** Project or category name — optional */
+  projectName?: string
+  /** Deep link URL */
+  appUrl: string
+}
+
+/**
+ * Build the "Task due in 30 minutes" reminder email.
+ *
+ * Sent automatically by the notification scheduler exactly 30 minutes before a
+ * task's due time.  The recipient is always the user's registered LifeFlow email.
+ *
+ * Only sent when:
+ *   • emailNotifications.enabled === true
+ *   • emailNotifications.taskReminders === true
+ *   • The task is NOT yet completed at the time of the reminder check
+ */
+export function buildTaskReminderEmail(opts: TaskReminderEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, taskTitle, dueLabel, recurrenceLabel, priority, projectName, appUrl } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const subject   = `Task reminder: ${taskTitle} — ${BRAND_NAME}`
+
+  // Priority badge — shown as a subtle pill only when priority is set
+  const priorityColors: Record<string, { bg: string; text: string; label: string }> = {
+    high:   { bg: '#fee2e2', text: '#dc2626', label: 'High priority' },
+    medium: { bg: '#fef3c7', text: '#d97706', label: 'Medium priority' },
+    low:    { bg: '#f0fdf4', text: '#16a34a', label: 'Low priority'  },
+  }
+  const badge = priority ? priorityColors[priority] : null
+  const priorityPill = badge
+    ? `<span style="display:inline-block;
+                    background-color:${badge.bg};
+                    color:${badge.text};
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:10.5px;font-weight:600;
+                    padding:3px 10px;border-radius:100px;
+                    letter-spacing:0.3px;vertical-align:middle;
+                    margin-left:8px;">
+        ${escapeHtml(badge.label)}
+      </span>`
+    : ''
+
+  const html = wrapHtml(`
+
+    <!-- ══ Clock icon ════════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 28px;">
+      <tr>
+        <td align="center">
+          <svg width="64" height="64" viewBox="0 0 64 64" fill="none"
+               xmlns="http://www.w3.org/2000/svg"
+               role="img" aria-label="Task reminder"
+               style="display:block;margin:0 auto;">
+            <!-- Outer glow -->
+            <circle cx="32" cy="32" r="32" fill="#eff6ff"/>
+            <!-- Inner -->
+            <circle cx="32" cy="32" r="24" fill="#dbeafe"/>
+            <!-- Clock face -->
+            <circle cx="32" cy="32" r="16" fill="#ffffff" stroke="${BRAND_COLOR}" stroke-width="1.8"/>
+            <!-- Hour hand  → pointing up-left (10 o'clock) -->
+            <line x1="32" y1="32" x2="24" y2="24"
+                  stroke="${BRAND_COLOR}" stroke-width="2.2"
+                  stroke-linecap="round"/>
+            <!-- Minute hand → pointing right (30 min) -->
+            <line x1="32" y1="32" x2="42" y2="32"
+                  stroke="${BRAND_COLOR}" stroke-width="2.2"
+                  stroke-linecap="round"/>
+            <!-- Centre dot -->
+            <circle cx="32" cy="32" r="2" fill="${BRAND_COLOR}"/>
+          </svg>
+        </td>
+      </tr>
+    </table>
+
+    <!-- ══ Heading ═══════════════════════════════════════════════════════ -->
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;
+               text-align:center;">
+      Your task is due in 30&nbsp;minutes
+    </h2>
+    <p style="margin:0 0 28px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;text-align:center;">
+      Hi ${escapeHtml(firstName)}, time to wrap up &mdash; this is due shortly.
+    </p>
+
+    <!-- ══ Task card ══════════════════════════════════════════════════════ -->
+    <!--
+      A bordered card presenting the key task details.  Rounded corners, light
+      blue left accent border, soft shadow.  No images or external resources.
+    -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%"
+           style="margin:0 0 28px;
+                  border:1px solid #dce3ef;
+                  border-left:4px solid ${BRAND_COLOR};
+                  border-radius:12px;
+                  background-color:#f8faff;
+                  box-shadow:0 1px 4px rgba(15,23,42,0.06);">
+      <tr>
+        <td style="padding:20px 24px 18px;">
+
+          <!-- Task title + priority pill -->
+          <p style="margin:0 0 10px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:17px;font-weight:700;color:#0f172a;
+                    letter-spacing:-0.2px;line-height:1.35;">
+            ${escapeHtml(taskTitle)}${priorityPill}
+          </p>
+
+          <!-- Meta rows -->
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+                 width="100%">
+
+            <!-- Due row -->
+            <tr>
+              <td style="padding:4px 0;vertical-align:top;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="top" style="padding-right:8px;">
+                      <!-- Clock mini icon -->
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+                           xmlns="http://www.w3.org/2000/svg"
+                           style="display:block;margin-top:1px;">
+                        <circle cx="7" cy="7" r="6" stroke="#64748b" stroke-width="1.3"/>
+                        <line x1="7" y1="7" x2="7" y2="4"
+                              stroke="#64748b" stroke-width="1.3" stroke-linecap="round"/>
+                        <line x1="7" y1="7" x2="10" y2="7"
+                              stroke="#64748b" stroke-width="1.3" stroke-linecap="round"/>
+                      </svg>
+                    </td>
+                    <td>
+                      <span style="font-family:-apple-system,BlinkMacSystemFont,
+                                               'SF Pro Text','Segoe UI',Arial,sans-serif;
+                                   font-size:13px;color:#334155;line-height:1.5;">
+                        <strong style="color:#1e293b;">Due</strong>&nbsp;&nbsp;
+                        ${escapeHtml(dueLabel)}
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            ${recurrenceLabel ? `
+            <!-- Recurrence row -->
+            <tr>
+              <td style="padding:4px 0;vertical-align:top;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="top" style="padding-right:8px;">
+                      <!-- Repeat icon -->
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+                           xmlns="http://www.w3.org/2000/svg"
+                           style="display:block;margin-top:1px;">
+                        <path d="M2 5h9M8 2l3 3-3 3" stroke="#64748b" stroke-width="1.3"
+                              stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 9H3M6 6l-3 3 3 3" stroke="#64748b" stroke-width="1.3"
+                              stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </td>
+                    <td>
+                      <span style="font-family:-apple-system,BlinkMacSystemFont,
+                                               'SF Pro Text','Segoe UI',Arial,sans-serif;
+                                   font-size:13px;color:#334155;line-height:1.5;">
+                        <strong style="color:#1e293b;">Recurrence</strong>&nbsp;&nbsp;
+                        ${escapeHtml(recurrenceLabel)}
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>` : ''}
+
+            ${projectName ? `
+            <!-- Project row -->
+            <tr>
+              <td style="padding:4px 0;vertical-align:top;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="top" style="padding-right:8px;">
+                      <!-- Folder icon -->
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+                           xmlns="http://www.w3.org/2000/svg"
+                           style="display:block;margin-top:1px;">
+                        <path d="M1 4a1 1 0 011-1h3l1.5 1.5H12a1 1 0 011 1V11a1 1 0 01-1 1H2a1 1 0 01-1-1V4z"
+                              stroke="#64748b" stroke-width="1.3" stroke-linejoin="round"/>
+                      </svg>
+                    </td>
+                    <td>
+                      <span style="font-family:-apple-system,BlinkMacSystemFont,
+                                               'SF Pro Text','Segoe UI',Arial,sans-serif;
+                                   font-size:13px;color:#334155;line-height:1.5;">
+                        <strong style="color:#1e293b;">Project</strong>&nbsp;&nbsp;
+                        ${escapeHtml(projectName)}
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>` : ''}
+
+            <!-- Status row -->
+            <tr>
+              <td style="padding:4px 0;vertical-align:top;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="top" style="padding-right:8px;">
+                      <!-- Circle icon -->
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+                           xmlns="http://www.w3.org/2000/svg"
+                           style="display:block;margin-top:1px;">
+                        <circle cx="7" cy="7" r="6" stroke="#f59e0b" stroke-width="1.3"/>
+                        <circle cx="7" cy="7" r="3" fill="#f59e0b"/>
+                      </svg>
+                    </td>
+                    <td>
+                      <span style="font-family:-apple-system,BlinkMacSystemFont,
+                                               'SF Pro Text','Segoe UI',Arial,sans-serif;
+                                   font-size:13px;color:#334155;line-height:1.5;">
+                        <strong style="color:#1e293b;">Status</strong>&nbsp;&nbsp;
+                        <span style="color:#d97706;">Not completed</span>
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <!-- ══ CTA ═══════════════════════════════════════════════════════════ -->
+    ${buildNotifCta(`${appUrl}/app/tasks`, 'Open LifeFlow')}
+    ${notifFooter(appUrl)}
+  `)
+
+  // Recurrence + project lines for plain-text
+  const extraLines: string[] = []
+  if (recurrenceLabel) extraLines.push(`Recurrence:   ${recurrenceLabel}`)
+  if (projectName)     extraLines.push(`Project:      ${projectName}`)
+  if (priority)        extraLines.push(`Priority:     ${priority.charAt(0).toUpperCase() + priority.slice(1)}`)
+
+  const text = [
+    `Task reminder: ${taskTitle}`,
+    ``,
+    `Hi ${firstName}, your task is due in 30 minutes.`,
+    ``,
+    `TASK`,
+    `  ${taskTitle}`,
+    ``,
+    `Due:          ${dueLabel}`,
+    ...extraLines,
+    `Status:       Not completed`,
+    ``,
+    `Open LifeFlow: ${appUrl}/app/tasks`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
