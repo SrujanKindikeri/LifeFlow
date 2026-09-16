@@ -2018,19 +2018,33 @@ export function buildTestNotificationEmail(opts: TestNotificationEmailOptions): 
 
   const html = wrapHtml(`
     <!-- ══ Check icon ════════════════════════════════════════════════════ -->
-    <div style="text-align:center;margin:0 0 20px;">
-      <div style="display:inline-flex;align-items:center;justify-content:center;
-                  width:60px;height:60px;border-radius:50%;
-                  background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
-                  box-shadow:0 4px 14px rgba(37,99,235,0.35);">
-        <!-- SVG check mark — no external resource -->
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none"
-             xmlns="http://www.w3.org/2000/svg">
-          <path d="M5 13l4 4L19 7" stroke="#ffffff" stroke-width="2.5"
-                stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-    </div>
+    <!--
+      Gmail strips display:inline-flex from <div> elements, which caused the
+      SVG checkmark to disappear and leave only a plain blue circle.  Fix:
+      use a single self-contained SVG that draws its own circle + checkmark so
+      it renders as one atomic unit regardless of whether outer CSS survives.
+      The table wrapper provides Gmail-safe horizontal centering.
+    -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           align="center" width="100%" style="margin:0 0 20px;">
+      <tr>
+        <td align="center">
+          <svg width="60" height="60" viewBox="0 0 60 60"
+               xmlns="http://www.w3.org/2000/svg"
+               role="img" aria-label="Success checkmark">
+            <!-- Blue circle background -->
+            <circle cx="30" cy="30" r="30" fill="#2563eb"/>
+            <!-- White checkmark: M 15,31  L 25,41  L 45,19 -->
+            <polyline points="15,31 25,41 45,19"
+                      fill="none"
+                      stroke="#ffffff"
+                      stroke-width="4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"/>
+          </svg>
+        </td>
+      </tr>
+    </table>
 
     <!-- ══ Heading ═══════════════════════════════════════════════════════ -->
     <h2 style="margin:0 0 6px;
