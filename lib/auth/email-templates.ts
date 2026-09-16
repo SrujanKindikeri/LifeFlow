@@ -1988,3 +1988,135 @@ export function buildTaskReminderEmail(opts: TaskReminderEmailOptions): {
 
   return { subject, html, text }
 }
+
+// ─── Test notification (activation flow) ─────────────────────────────────────
+
+export interface TestNotificationEmailOptions {
+  toName:  string
+  appUrl:  string
+}
+
+/**
+ * One-time test email sent to confirm notification delivery before activating
+ * the regular scheduled notification flow.
+ *
+ * Design goals:
+ *  - Matches the LifeFlow branded shell used by all other notification emails.
+ *  - Single clear message: "Notifications are working."
+ *  - No external resources, no tracking, no marketing language.
+ *  - Table-based layout for Outlook/Gmail/Apple Mail compatibility.
+ */
+export function buildTestNotificationEmail(opts: TestNotificationEmailOptions): {
+  subject: string
+  html:    string
+  text:    string
+} {
+  const { toName, appUrl } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+
+  const subject = `LifeFlow notifications are active ✓`
+
+  const html = wrapHtml(`
+    <!-- ══ Check icon ════════════════════════════════════════════════════ -->
+    <div style="text-align:center;margin:0 0 20px;">
+      <div style="display:inline-flex;align-items:center;justify-content:center;
+                  width:60px;height:60px;border-radius:50%;
+                  background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
+                  box-shadow:0 4px 14px rgba(37,99,235,0.35);">
+        <!-- SVG check mark — no external resource -->
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none"
+             xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 13l4 4L19 7" stroke="#ffffff" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══ Heading ═══════════════════════════════════════════════════════ -->
+    <h2 style="margin:0 0 6px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;
+               text-align:center;">
+      Notifications are active
+    </h2>
+    <p style="margin:0 0 28px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;text-align:center;">
+      Hi ${escapeHtml(firstName)}, your LifeFlow email notifications are confirmed and ready.
+    </p>
+
+    <!-- ══ Info card ═════════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%"
+           style="margin:0 0 28px;
+                  border:1px solid #dce3ef;
+                  border-left:4px solid #2563eb;
+                  border-radius:12px;
+                  background-color:#f8faff;
+                  box-shadow:0 1px 4px rgba(15,23,42,0.06);">
+      <tr>
+        <td style="padding:18px 20px;">
+          <p style="margin:0 0 10px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:13px;font-weight:600;color:#1e293b;">
+            What happens next
+          </p>
+          <ul style="margin:0;padding-left:18px;
+                     font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                  'Segoe UI',Arial,sans-serif;
+                     font-size:13px;line-height:1.8;color:#475569;">
+            <li>Task reminders — 30 minutes before each due time</li>
+            <li>Today&rsquo;s unfinished tasks — 7&nbsp;PM in your timezone</li>
+            <li>Tomorrow&rsquo;s preview — 10&nbsp;PM in your timezone</li>
+            <li>Daily summary — 11:55&nbsp;PM in your timezone</li>
+            <li>Weekly summary — every Sunday at 10&nbsp;PM</li>
+          </ul>
+        </td>
+      </tr>
+    </table>
+
+    <!-- ══ CTA button ════════════════════════════════════════════════════ -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           align="center" style="margin:0 auto 8px;">
+      <tr>
+        <td align="center" style="border-radius:10px;
+                                   background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
+                                   box-shadow:0 4px 14px rgba(37,99,235,0.35);">
+          <a href="${appUrl}/app/profile"
+             style="display:inline-block;padding:13px 32px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:14px;font-weight:600;color:#ffffff;
+                    text-decoration:none;letter-spacing:-0.1px;
+                    white-space:nowrap;">
+            Open LifeFlow &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+  `)
+
+  const text = [
+    `LifeFlow — Notifications active`,
+    ``,
+    `Hi ${firstName},`,
+    ``,
+    `Your LifeFlow email notifications are confirmed and active.`,
+    ``,
+    `You will now automatically receive:`,
+    `  • Task reminders — 30 minutes before each due time`,
+    `  • Today's unfinished tasks — 7 PM in your timezone`,
+    `  • Tomorrow's preview — 10 PM in your timezone`,
+    `  • Daily summary — 11:55 PM in your timezone`,
+    `  • Weekly summary — every Sunday at 10 PM`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+    ``,
+    `— The LifeFlow Team`,
+  ].join('\n')
+
+  return { subject, html, text }
+}

@@ -27,6 +27,14 @@ export interface User {
     dailySummary: boolean
     weeklySummary: boolean
   }
+  /**
+   * True once the user has successfully received a test notification email.
+   * The scheduler only sends regular Gmail notifications to users where this
+   * is true AND emailNotifications.enabled is true.
+   */
+  notificationsTested: boolean
+  /** UTC ISO string when notificationsTested was set to true, or null. */
+  notificationsTestedAt: string | null
   createdAt: string
   updatedAt: string
 }

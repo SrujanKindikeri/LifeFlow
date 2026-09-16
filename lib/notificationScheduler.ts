@@ -309,6 +309,12 @@ interface UserRecord {
   timezone:                string
   notificationPreferences: NotifPrefs
   emailNotifications:      EmailNotifPrefs
+  /**
+   * Only users with notificationsTested=true receive regular Gmail notifications.
+   * This is set to true after the user completes the one-time test email flow.
+   * Legacy documents default to false (safe: no emails until the user tests).
+   */
+  notificationsTested:     boolean
 }
 
 /** Results for a single user's notification run. */
@@ -1600,10 +1606,14 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
   const now    = new Date()
 
-  // Only process verified users who have at least one notification preference enabled.
+  // Only process users who:
+  //   1. Have verified their email address (emailVerified: true)
+  //   2. Have completed the one-time notification test (notificationsTested: true)
+  //   3. Have at least one notification preference enabled
   // Using lean() for efficiency — we don't need Mongoose document methods.
   const users = await User.find({
-    emailVerified: true,
+    emailVerified:        true,
+    notificationsTested:  true,
     $or: [
       { 'notificationPreferences.taskReminders':  true },
       { 'notificationPreferences.habitReminders': true },
@@ -1613,7 +1623,7 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
       { 'emailNotifications.enabled': true },
     ],
   })
-    .select('publicId name email timezone notificationPreferences emailNotifications')
+    .select('publicId name email timezone notificationPreferences emailNotifications notificationsTested')
     .lean<UserRecord[]>()
 
   logger.info('[notifScheduler] Starting run', {
@@ -1627,6 +1637,9 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
       // exist yet on legacy documents (before the schema migration).
       const safeUser: UserRecord = {
         ...user,
+        // notificationsTested: already filtered to true by the query, but
+        // provide explicit default so TypeScript is happy with lean docs.
+        notificationsTested: user.notificationsTested ?? false,
         emailNotifications: user.emailNotifications ?? {
           enabled:        false,
           taskReminders:  true,

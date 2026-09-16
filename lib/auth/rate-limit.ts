@@ -274,3 +274,39 @@ export function checkPasswordResetAttemptLimit(tokenHash: string): RateLimitResu
     windowMs: 15 * 60 * 1000,
   })
 }
+
+/**
+ * Rate limit for POST /api/notifications/test-email.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-user cooldown — 1 request per 60 seconds (prevents double-click hammering)
+ *   2. Per-user daily cap — 3 requests per 24 hours
+ *   3. Per-IP hourly cap — 5 requests per hour (secondary abuse defence)
+ *
+ * Even after the button disappears from the UI (notificationsTested=true),
+ * the endpoint enforces these limits so direct API calls cannot spam SMTP.
+ */
+export function checkNotificationTestLimit(ip: string, userId: string): RateLimitResult {
+  // ── 1. Per-user 60-second cooldown ────────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `notif-test:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 60 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-user daily cap ─────────────────────────────────────────────────
+  const daily = checkRateLimit({
+    key:      `notif-test:daily:${userId}`,
+    limit:    3,
+    windowMs: 24 * 60 * 60 * 1000,
+  })
+  if (!daily.allowed) return daily
+
+  // ── 3. Per-IP hourly cap ──────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `notif-test:ip:${ip}`,
+    limit:    5,
+    windowMs: 60 * 60 * 1000,
+  })
+}

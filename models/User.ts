@@ -43,6 +43,21 @@ export interface IUser extends Document {
     weeklySummary: boolean
   }
 
+  // ── Notification activation ───────────────────────────────────────────────
+  /**
+   * True once the user has successfully received a test notification email.
+   * The scheduler only delivers regular Gmail notifications to users where
+   * this is true AND emailNotifications.enabled is true.
+   * Existing users default to false — they must verify once before regular
+   * scheduled emails begin.
+   */
+  notificationsTested: boolean
+  /**
+   * UTC timestamp when notificationsTested was set to true.
+   * Null until the first successful test send.
+   */
+  notificationsTestedAt: Date | null
+
   // ── Email verification ────────────────────────────────────────────────────
   /** true once the user has clicked a valid verification link */
   emailVerified: boolean
@@ -132,6 +147,21 @@ const UserSchema = new Schema<IUser>(
       spendingAlerts: { type: Boolean, default: true  },
       dailySummary:   { type: Boolean, default: true  },
       weeklySummary:  { type: Boolean, default: true  },
+    },
+
+    // ── Notification activation ──────────────────────────────────────────────
+    // Set to true after a successful test notification email.
+    // The scheduler only delivers regular Gmail notifications to users where
+    // notificationsTested is true AND emailNotifications.enabled is true.
+    // Existing users safely default to false — they must verify once.
+    notificationsTested: {
+      type:    Boolean,
+      default: false,
+      index:   true,
+    },
+    notificationsTestedAt: {
+      type:    Date,
+      default: null,
     },
 
     // ── Email verification ──────────────────────────────────────────────────

@@ -22,7 +22,7 @@
  * 16.  shouldSendEmail enforces per-category flag
  * 17.  shouldSendEmail rejects invalid email addresses
  * 18.  Legacy users without emailNotifications field get safe defaults
- * 19.  Test-email endpoint resolves recipient from DB (not client)
+ * 19.  Test-email endpoint resolves recipient from DB; activation flow persists notificationsTested
  * 20.  User model saves and retrieves emailNotifications correctly
  */
 
@@ -574,13 +574,13 @@ describe('11. Nodemailer loads correctly', () => {
     await expect(import('nodemailer')).resolves.toBeDefined()
   })
 
-  it('nodemailer version is 10.x or newer', () => {
+  it('nodemailer version is 7.0.6', () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')
     ) as { dependencies: Record<string, string> }
     const ver = pkg.dependencies['nodemailer'] ?? ''
-    // Accept any version ≥ 10.0.0 (exact version or semver range)
-    expect(ver).toMatch(/^1\d+\./)
+    // Exact pinned version required for Docker compatibility
+    expect(ver).toBe('7.0.6')
   })
 
   it('nodemailer createTransport is a function', async () => {
@@ -887,25 +887,165 @@ describe('18. Legacy users without emailNotifications get safe defaults', () => 
   })
 })
 
-// ─── 19. Automatic email flow — no manual trigger ────────────────────────────
+// ─── 19. Notification activation flow ────────────────────────────────────────
 
-describe('19. Automatic email flow — no manual send endpoint', () => {
-  it('test-email route no longer exists', () => {
+describe('19. Notification activation flow', () => {
+  it('test-email route exists', () => {
     const routePath = path.join(
       process.cwd(),
       'app/api/notifications/test-email/route.ts'
     )
-    expect(fs.existsSync(routePath)).toBe(false)
+    expect(fs.existsSync(routePath)).toBe(true)
   })
 
-  it('scheduler is the only source of outbound notification emails', () => {
+  it('test-email route does not accept an email address from the request body', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    // Recipient must come exclusively from the DB — never from request body/query
+    expect(routeSrc).not.toContain('req.body')
+    expect(routeSrc).not.toContain('body.email')
+    expect(routeSrc).not.toContain('body.to')
+  })
+
+  it('test-email route resolves recipient from User document', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    expect(routeSrc).toContain('user.email')
+    expect(routeSrc).toContain('User.findById')
+  })
+
+  it('test-email route requires authentication', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    expect(routeSrc).toContain('requireAuth')
+  })
+
+  it('test-email route is idempotent — already-tested users skip the send', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    expect(routeSrc).toContain('notificationsTested')
+    expect(routeSrc).toContain('alreadyActive')
+  })
+
+  it('test-email route persists notificationsTested=true on success', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    expect(routeSrc).toContain('notificationsTested:   true')
+    expect(routeSrc).toContain('notificationsTestedAt: now')
+  })
+
+  it('test-email route does NOT persist activation on SMTP failure', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    // The 502 return must come BEFORE the $set that persists activation
+    const failureReturn = routeSrc.indexOf('status: 502 }')
+    const activationSet = routeSrc.indexOf('notificationsTested:   true')
+    expect(failureReturn).toBeGreaterThan(0)
+    expect(activationSet).toBeGreaterThan(failureReturn)
+  })
+
+  it('test-email route uses rate limiting', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    expect(routeSrc).toContain('checkNotificationTestLimit')
+  })
+
+  it('test-email route does not log SMTP credentials', () => {
+    const routeSrc = fs.readFileSync(
+      path.join(process.cwd(), 'app/api/notifications/test-email/route.ts'),
+      'utf8'
+    )
+    const loggerLines = routeSrc.split('\n').filter((l) => l.includes('logger.'))
+    for (const line of loggerLines) {
+      expect(line).not.toContain('SMTP_PASSWORD')
+      expect(line).not.toContain('SMTP_PASS')
+      expect(line).not.toContain('user.email')
+      expect(line).not.toContain('SESSION_SECRET')
+    }
+  })
+
+  it('User model has notificationsTested field defaulting to false', async () => {
+    const user = await createVerifiedUser()
+    expect(user.notificationsTested).toBe(false)
+    expect(user.notificationsTestedAt).toBeNull()
+  })
+
+  it('notificationsTested can be set to true and retrieved', async () => {
+    const user = await createVerifiedUser()
+    const now  = new Date()
+    await User.findByIdAndUpdate(user._id, {
+      $set: { notificationsTested: true, notificationsTestedAt: now },
+    })
+    const updated = await User.findById(user._id).lean()
+    expect(updated?.notificationsTested).toBe(true)
+    expect(updated?.notificationsTestedAt).toBeDefined()
+  })
+
+  it('scheduler only processes users with notificationsTested=true', () => {
     const schedulerSrc = fs.readFileSync(
       path.join(process.cwd(), 'lib/notificationScheduler.ts'),
       'utf8'
     )
-    // Scheduler must use getNotificationService for email delivery
+    expect(schedulerSrc).toContain('notificationsTested:  true')
+  })
+
+  it('unverified-test user is excluded from scheduler query', async () => {
+    // emailVerified=true but notificationsTested=false (default)
+    const user = await createVerifiedUser()
+    expect(user.notificationsTested).toBe(false)
+
+    const matched = await User.find({
+      emailVerified:        true,
+      notificationsTested:  true,
+      $or: [
+        { 'notificationPreferences.taskReminders':  true },
+        { 'notificationPreferences.habitReminders': true },
+        { 'notificationPreferences.spendingAlerts': true },
+        { 'notificationPreferences.dailySummary':   true },
+      ],
+    }).lean()
+    expect(matched).toHaveLength(0)
+  })
+
+  it('tested user IS included in scheduler query', async () => {
+    const user = await createVerifiedUser()
+    await User.findByIdAndUpdate(user._id, {
+      $set: { notificationsTested: true },
+    })
+
+    const matched = await User.find({
+      emailVerified:        true,
+      notificationsTested:  true,
+      $or: [
+        { 'notificationPreferences.taskReminders':  true },
+        { 'notificationPreferences.habitReminders': true },
+        { 'notificationPreferences.spendingAlerts': true },
+        { 'notificationPreferences.dailySummary':   true },
+      ],
+    }).lean()
+    expect(matched).toHaveLength(1)
+  })
+
+  it('scheduler is the primary source of outbound notification emails', () => {
+    const schedulerSrc = fs.readFileSync(
+      path.join(process.cwd(), 'lib/notificationScheduler.ts'),
+      'utf8'
+    )
     expect(schedulerSrc).toContain('getNotificationService()')
-    // Recipient always from user.email — never from a request
     expect(schedulerSrc).toContain('userEmail:    user.email')
     expect(schedulerSrc).not.toContain('req.body')
   })

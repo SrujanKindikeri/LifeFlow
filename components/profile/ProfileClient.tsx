@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown } from 'lucide-react'
+import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2 } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
@@ -100,6 +100,10 @@ export function ProfileClient() {
   // ── Push notification state ───────────────────────────────────────────────
   const [pushStatus,  setPushStatus]  = useState<PushStatus>('checking')
   const [pushLoading, setPushLoading] = useState(false)
+
+  // ── Test notification state ───────────────────────────────────────────────
+  const [testingEmail,    setTestingEmail]    = useState(false)
+  const [testEmailError,  setTestEmailError]  = useState<string | null>(null)
 
   const fetchUser = useCallback(async () => {
     try {
@@ -313,6 +317,50 @@ export function ProfileClient() {
     } catch { toastError('Failed to save preferences') }
   }
 
+  /**
+   * Send the one-time test notification.
+   * Recipient is resolved server-side from the authenticated user record —
+   * no email address is ever sent from the browser.
+   */
+  async function sendTestNotification() {
+    setTestingEmail(true)
+    setTestEmailError(null)
+    try {
+      const res = await fetch('/api/notifications/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await res.json() as {
+        ok?: boolean
+        alreadyActive?: boolean
+        testedAt?: string
+        error?: string
+      }
+
+      if (!res.ok) {
+        setTestEmailError(data.error ?? 'Failed to send test notification. Please try again.')
+        return
+      }
+
+      // On success (or already active), refresh user state so the button hides
+      const meRes = await fetch('/api/auth/me')
+      if (meRes.ok) {
+        const meData = await meRes.json()
+        setUser(meData.user)
+      }
+
+      if (data.alreadyActive) {
+        success('Email notifications are already active.')
+      } else {
+        success('Test email sent! Check your inbox. Email notifications are now active.')
+      }
+    } catch {
+      setTestEmailError('Network error. Please try again.')
+    } finally {
+      setTestingEmail(false)
+    }
+  }
+
   /** Default email notification preferences for users without the field yet. */
   const defaultEmailNotifs: UserType['emailNotifications'] = {
     enabled:        false,
@@ -466,52 +514,108 @@ export function ProfileClient() {
 
           {/* ── Email notifications ── */}
           <div className="border-t pt-3 mt-1 flex flex-col gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
-            <div className="flex items-center justify-between gap-4 py-1">
-              <div>
-                <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>Email notifications</p>
-                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  Emails sent to <span className="font-mono">{user.email}</span>
-                </p>
-              </div>
-              <Toggle
-                checked={user.emailNotifications?.enabled ?? false}
-                onChange={(v) => {
-                  const updated = { ...(user.emailNotifications ?? defaultEmailNotifs), enabled: v }
-                  setUser((u) => u ? { ...u, emailNotifications: updated } : u)
-                  saveNotifPrefs({ emailNotifications: updated })
-                }}
-              />
-            </div>
 
-            {/* Category toggles — only shown when email is enabled */}
-            {(user.emailNotifications?.enabled ?? false) && (
-              <div className="flex flex-col gap-2 pl-3 border-l-2" style={{ borderColor: 'var(--border-subtle)' }}>
-                <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--text-faint)' }}>
-                  Email categories
-                </p>
-                {([
-                  { key: 'taskReminders',  label: 'Task reminders',  desc: 'Upcoming tasks · 30-minute due reminders · end-of-day incomplete reminders' },
-                  { key: 'habitReminders', label: 'Habit reminders', desc: 'Upcoming and incomplete habit reminders'            },
-                  { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Budget threshold and important spending alerts'   },
-                  { key: 'dailySummary',   label: 'Daily summary',   desc: 'Daily summary of tasks, habits, expenses and activity' },
-                  { key: 'weeklySummary',  label: 'Weekly summary',  desc: 'Weekly summary of tasks, habits, expenses and activity' },
-                ] as { key: keyof Omit<UserType['emailNotifications'], 'enabled'>; label: string; desc: string }[]).map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-center justify-between gap-4 py-0.5">
-                    <div>
-                      <p className="text-[12.5px]" style={{ color: 'var(--text-primary)' }}>{label}</p>
-                      <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{desc}</p>
-                    </div>
-                    <Toggle
-                      checked={(user.emailNotifications?.[key] ?? true)}
-                      onChange={(v) => {
-                        const updated = { ...(user.emailNotifications ?? defaultEmailNotifs), [key]: v }
-                        setUser((u) => u ? { ...u, emailNotifications: updated } : u)
-                        saveNotifPrefs({ emailNotifications: updated })
-                      }}
-                    />
+            {/* ── BEFORE TEST: show description + button ── */}
+            {!(user.notificationsTested ?? false) && (
+              <>
+                <div className="flex items-start justify-between gap-4 py-1">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
+                      Email notifications
+                    </p>
+                    <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                      Verify your notification delivery once. After successful verification,
+                      LifeFlow will automatically send your scheduled notifications to your
+                      registered email.
+                    </p>
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {/* Error message */}
+                {testEmailError && (
+                  <p className="text-[11px] text-red-500 px-1">{testEmailError}</p>
+                )}
+
+                <GlassButton
+                  variant="primary"
+                  size="sm"
+                  onClick={sendTestNotification}
+                  loading={testingEmail}
+                  disabled={testingEmail}
+                  className="self-start"
+                >
+                  {testingEmail
+                    ? <><Loader2 size={12} className="animate-spin" /> Sending…</>
+                    : <><Bell size={12} /> Send Test Notification</>
+                  }
+                </GlassButton>
+              </>
+            )}
+
+            {/* ── AFTER TEST: show active status ── */}
+            {(user.notificationsTested ?? false) && (
+              <>
+                <div className="flex items-center gap-2 py-1">
+                  <CheckCircle2 size={15} className="text-emerald-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-[13px] font-medium text-emerald-600">
+                      Email notifications active
+                    </p>
+                    <p className="text-[11px] mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                      LifeFlow will automatically send reminders and summaries to your registered email.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Master on/off toggle — still let the user disable all emails */}
+                <div className="flex items-center justify-between gap-4 py-0.5 pl-1">
+                  <div>
+                    <p className="text-[12.5px]" style={{ color: 'var(--text-primary)' }}>Enabled</p>
+                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      Emails sent to <span className="font-mono">{user.email}</span>
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={user.emailNotifications?.enabled ?? true}
+                    onChange={(v) => {
+                      const updated = { ...(user.emailNotifications ?? defaultEmailNotifs), enabled: v }
+                      setUser((u) => u ? { ...u, emailNotifications: updated } : u)
+                      saveNotifPrefs({ emailNotifications: updated })
+                    }}
+                  />
+                </div>
+
+                {/* Category toggles — only shown when email is enabled */}
+                {(user.emailNotifications?.enabled ?? true) && (
+                  <div className="flex flex-col gap-2 pl-3 border-l-2" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--text-faint)' }}>
+                      Email categories
+                    </p>
+                    {([
+                      { key: 'taskReminders',  label: 'Task reminders',  desc: 'Upcoming tasks · 30-minute due reminders · end-of-day incomplete reminders' },
+                      { key: 'habitReminders', label: 'Habit reminders', desc: 'Upcoming and incomplete habit reminders'            },
+                      { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Budget threshold and important spending alerts'   },
+                      { key: 'dailySummary',   label: 'Daily summary',   desc: 'Daily summary of tasks, habits, expenses and activity' },
+                      { key: 'weeklySummary',  label: 'Weekly summary',  desc: 'Weekly summary of tasks, habits, expenses and activity' },
+                    ] as { key: keyof Omit<UserType['emailNotifications'], 'enabled'>; label: string; desc: string }[]).map(({ key, label, desc }) => (
+                      <div key={key} className="flex items-center justify-between gap-4 py-0.5">
+                        <div>
+                          <p className="text-[12.5px]" style={{ color: 'var(--text-primary)' }}>{label}</p>
+                          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+                        </div>
+                        <Toggle
+                          checked={(user.emailNotifications?.[key] ?? true)}
+                          onChange={(v) => {
+                            const updated = { ...(user.emailNotifications ?? defaultEmailNotifs), [key]: v }
+                            setUser((u) => u ? { ...u, emailNotifications: updated } : u)
+                            saveNotifPrefs({ emailNotifications: updated })
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
