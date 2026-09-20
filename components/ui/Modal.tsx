@@ -57,7 +57,7 @@ export function Modal({
           <motion.div
             ref={overlayRef}
             className="absolute inset-0"
-            style={{ background: 'rgba(0,0,0,0.25)', backdropFilter: 'blur(4px)' }}
+            style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(4px)' }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -65,24 +65,18 @@ export function Modal({
             onClick={onClose}
           />
 
-          {/* Sheet / dialog */}
+          {/* Sheet / dialog — glass-floating + depth + catch-light for premium feel */}
           <motion.div
             role="dialog"
             aria-modal="true"
             aria-label={title}
             className={cn(
-              'relative w-full max-h-[90dvh] overflow-y-auto',
+              'glass-floating glass-catchlight relative w-full max-h-[90dvh] overflow-y-auto',
               'rounded-t-[28px] sm:rounded-2xl',
               widthMap[size],
               className
             )}
-            style={{
-              background: 'rgba(255,255,255,0.96)',
-              backdropFilter: 'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)',
-            }}
+            style={{ boxShadow: 'var(--glass-shadow-xl), inset 0 1px 0 var(--glass-catchlight)' }}
             initial={{ opacity: 0, y: 32 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0,   y: 24 }}
@@ -91,7 +85,7 @@ export function Modal({
             {/* Drag handle (mobile) */}
             {dragHandle && (
               <div className="flex justify-center pt-3 sm:hidden">
-                <div className="w-9 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.12)' }} />
+                <div className="modal-drag-handle w-9 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
               </div>
             )}
 
@@ -106,7 +100,7 @@ export function Modal({
                 </h2>
                 <button
                   onClick={onClose}
-                  className="p-1.5 rounded-xl transition-colors focus-ring hover:bg-black/[0.05]"
+                  className="nav-hover p-1.5 rounded-xl transition-colors focus-ring"
                   style={{ color: 'var(--text-muted)' }}
                   aria-label="Close"
                 >
@@ -156,7 +150,7 @@ export function ConfirmDialog({
         <div className="flex gap-2.5 justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm rounded-xl glass transition-colors hover:bg-black/[0.04]"
+            className="nav-hover px-4 py-2 text-sm rounded-xl glass transition-colors"
             style={{ color: 'var(--text-secondary)' }}
           >
             Cancel

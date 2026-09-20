@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { SmartInbox } from '@/components/inbox/SmartInbox'
-import { useUnreadCount } from '@/hooks/useUnreadCount'
+import { useNotificationTone } from '@/hooks/useNotificationTone'
 
 const pageTitles: Record<string, string> = {
   '/app/dashboard':       'Dashboard',
@@ -40,7 +40,8 @@ export function AppHeader({ unreadCount: initialCount = 0 }: AppHeaderProps) {
   const [inboxOpen, setInboxOpen] = useState(false)
   // Live unread count — polls /api/notifications every 60 s.
   // Falls back to the server-passed initialCount until the first fetch resolves.
-  const liveCount   = useUnreadCount()
+  // Also plays the Turn Tone chime when the count increases (new notification).
+  const liveCount   = useNotificationTone()
   const unreadCount = liveCount > 0 ? liveCount : initialCount
 
   return (
@@ -49,14 +50,11 @@ export function AppHeader({ unreadCount: initialCount = 0 }: AppHeaderProps) {
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="lg:hidden sticky top-0 z-20 safe-top"
+        className="glass-panel lg:hidden sticky top-0 z-20 safe-top"
         style={{
           height: 'var(--topbar-height, 56px)',
-          background: 'rgba(255,255,255,0.88)',
-          backdropFilter: 'blur(24px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-          borderBottom: '1px solid rgba(0,0,0,0.07)',
-          boxShadow: '0 1px 8px rgba(0,0,0,0.05)',
+          borderBottom: '1px solid var(--glass-panel-border)',
+          boxShadow: 'var(--glass-panel-shadow)',
         }}
       >
         <div className="flex items-center justify-between h-full px-4">
@@ -84,11 +82,9 @@ export function AppHeader({ unreadCount: initialCount = 0 }: AppHeaderProps) {
             {/* Smart Inbox trigger */}
             <button
               onClick={() => setInboxOpen(true)}
-              className="p-2 rounded-xl transition-colors focus-ring"
+              className="nav-hover p-2 rounded-xl transition-colors focus-ring"
               style={{ color: 'var(--text-muted)' }}
               aria-label="Smart Inbox"
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.04)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <Search size={19} />
             </button>
@@ -96,11 +92,9 @@ export function AppHeader({ unreadCount: initialCount = 0 }: AppHeaderProps) {
             {/* Notifications */}
             <Link
               href="/app/notifications"
-              className="relative p-2 rounded-xl transition-colors focus-ring"
+              className="nav-hover relative p-2 rounded-xl transition-colors focus-ring"
               style={{ color: 'var(--text-muted)' }}
               aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.04)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <Bell size={19} />
               {unreadCount > 0 && (

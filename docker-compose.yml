@@ -18,6 +18,36 @@
 
 services:
 
+  # ── Notification Worker ──────────────────────────────────────────────────────
+  # Long-lived background process that polls /api/jobs/process-notifications-precise
+  # every ~5 seconds so notifications fire within seconds of their scheduled time.
+  #
+  # This is the ONLY way notifications fire automatically in production.
+  # Without this service, notifications only run when an external HTTP call
+  # hits the scheduler endpoint.
+  #
+  # The worker uses no database connection of its own — it calls the Next.js
+  # app over the internal Docker network, which handles all DB/SMTP work.
+  #
+  # restart: unless-stopped ensures it survives Docker restarts and EC2 reboots.
+  notification-worker:
+    image: node:22-alpine
+    working_dir: /scripts
+    command: ["node", "notification-worker.mjs"]
+    volumes:
+      - ./scripts:/scripts:ro
+    environment:
+      # Internal Docker network URL — worker → app (never expose this externally)
+      APP_URL:            http://app:3000
+      SCHEDULER_SECRET:   ${SCHEDULER_SECRET:-}
+      CRON_SECRET:        ${CRON_SECRET:-}
+      POLL_INTERVAL_MS:   ${POLL_INTERVAL_MS:-5000}
+      WORKER_LOG_LEVEL:   ${WORKER_LOG_LEVEL:-info}
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+
   # ── LifeFlow application ─────────────────────────────────────────────────────
   app:
     build:
@@ -41,6 +71,16 @@ services:
       # Generate: openssl rand -base64 32
       SCHEDULER_SECRET:  ${SCHEDULER_SECRET:-}
       CRON_SECRET:       ${CRON_SECRET:-}
+
+      # ── Notification Worker tuning ────────────────────────────────────────────
+      # Grace window for the precise scheduler endpoint (seconds).
+      # Raise to 330 if POLL_INTERVAL_MS > 60000.  Default: 90.
+      PRECISE_GRACE_SECONDS: ${PRECISE_GRACE_SECONDS:-90}
+
+      # ── Diagnostics (admin health endpoint) ──────────────────────────────────
+      # Required for GET /api/admin/diagnostics and /api/admin/notifications-health
+      # Generate: openssl rand -base64 32
+      DIAGNOSTIC_SECRET: ${DIAGNOSTIC_SECRET:-}
 
       # ── Email / SMTP ──────────────────────────────────────────────────────────
       # Set EMAIL_PROVIDER=smtp and configure the SMTP section for production.
@@ -77,6 +117,11 @@ services:
       NEXT_PUBLIC_CURRENCY: ${NEXT_PUBLIC_CURRENCY:-INR}
 
       # ── Application defaults ──────────────────────────────────────────────────
+      # ── Web Push / VAPID ─────────────────────────────────────────────────────
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY:            ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT:                ${VAPID_SUBJECT:-}
+
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Kolkata}
       LOG_LEVEL:        ${LOG_LEVEL:-info}
       NODE_ENV:         production

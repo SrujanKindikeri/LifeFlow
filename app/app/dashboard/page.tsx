@@ -27,7 +27,7 @@ export default async function DashboardPage() {
     // cookie before redirecting to /login. Do NOT redirect to /login directly —
     // the proxy sees the still-present stale cookie and bounces back to /app/dashboard,
     // creating an infinite loop.
-    if (message === 'UserNotFound') {
+    if (message === 'UserNotFound' || message === 'AccountDeleted') {
       redirect('/api/auth/clear-session')
     }
 

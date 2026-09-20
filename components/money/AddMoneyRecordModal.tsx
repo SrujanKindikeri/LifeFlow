@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Check } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassTextarea } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { useToast } from '@/components/ui/Toast'
 import { useDraft } from '@/hooks/useDraft'
 import { SaveDraftStatus } from '@/components/drafts/SaveDraftStatus'
@@ -93,7 +95,8 @@ export function AddMoneyRecordModal({ isOpen, defaultDirection = 'given', onClos
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const amt = parseFloat(amount)
+    const parsed = parseAmountExpression(amount)
+    const amt = parsed.value
     if (!amt || amt <= 0 || !personName.trim() || !reason.trim()) return
     setSaving(true)
     try {
@@ -144,14 +147,8 @@ export function AddMoneyRecordModal({ isOpen, defaultDirection = 'given', onClos
           />
 
           <motion.div
-            className="relative w-full sm:max-w-md rounded-t-[28px] sm:rounded-2xl max-h-[92dvh] overflow-y-auto"
-            style={{
-              background: 'rgba(255,255,255,0.97)',
-              backdropFilter: 'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.14)',
-            }}
+            className="glass-floating relative w-full sm:max-w-md rounded-t-[28px] sm:rounded-2xl max-h-[92dvh] overflow-y-auto"
+            style={{ boxShadow: 'var(--glass-shadow-xl)' }}
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 32 }}
@@ -159,20 +156,20 @@ export function AddMoneyRecordModal({ isOpen, defaultDirection = 'given', onClos
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-9 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.12)' }} />
+              <div className="w-9 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             {/* Header */}
             <div
               className="flex items-center justify-between px-5 pt-4 sm:pt-5 pb-4"
-              style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+              style={{ borderBottom: '1px solid var(--border)' }}
             >
               <h2 className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {direction === 'given' ? '+ Money Given' : '+ Money Borrowed'}
               </h2>
               <button
                 onClick={handleClose}
-                className="p-1.5 rounded-xl hover:bg-black/[0.05] transition-colors"
+                className="nav-hover p-1.5 rounded-xl transition-colors"
                 style={{ color: 'var(--text-muted)' }}
                 aria-label="Close"
               >
@@ -203,7 +200,7 @@ export function AddMoneyRecordModal({ isOpen, defaultDirection = 'given', onClos
                             }
                           : {
                               background: 'transparent',
-                              borderColor: 'rgba(0,0,0,0.09)',
+                              borderColor: 'var(--border-strong)',
                               color: 'var(--text-muted)',
                             }
                       }
@@ -228,30 +225,13 @@ export function AddMoneyRecordModal({ isOpen, defaultDirection = 'given', onClos
                 autoFocus
               />
 
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-                  Amount
-                </label>
-                <div className="relative">
-                  <span
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    ₹
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    step="0.01"
-                    value={amount}
-                    onChange={(e) => { setAmount(e.target.value); draft.triggerAutosave() }}
-                    placeholder="0.00"
-                    required
-                    className="glass-input w-full rounded-xl text-sm pl-8 pr-3.5 py-2.5"
-                  />
-                </div>
-              </div>
+              <SmartAmountInput
+                label="Amount"
+                value={amount}
+                onChange={(raw) => { setAmount(raw); draft.triggerAutosave() }}
+                currency="INR"
+                required
+              />
 
               <GlassInput
                 label="Reason"
@@ -303,7 +283,7 @@ export function AddMoneyRecordModal({ isOpen, defaultDirection = 'given', onClos
                 variant="primary"
                 fullWidth
                 loading={saving}
-                disabled={!personName.trim() || !amount || parseFloat(amount) <= 0 || !reason.trim()}
+                disabled={!personName.trim() || !amount || (parseAmountExpression(amount).value ?? 0) <= 0 || !reason.trim()}
               >
                 <Check size={14} />
                 {direction === 'given' ? 'Record Money Given' : 'Record Money Borrowed'}

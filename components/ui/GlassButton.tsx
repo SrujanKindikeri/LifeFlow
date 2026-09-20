@@ -16,6 +16,14 @@ interface GlassButtonProps extends Omit<HTMLMotionProps<'button'>, 'children'> {
   iconRight?: React.ReactNode
 }
 
+/*
+  Variant class strings.
+  • primary   — solid accent, strong visual weight, white text
+  • secondary — liquid glass surface, adapts to light/dark via CSS classes
+  • ghost     — no background until hover
+  • danger    — translucent red-tinted glass
+  • success   — translucent green-tinted glass
+*/
 const variants: Record<ButtonVariant, string> = {
   primary: [
     'text-white font-semibold',
@@ -23,22 +31,19 @@ const variants: Record<ButtonVariant, string> = {
   ].join(' '),
 
   secondary: [
-    'glass hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)]',
-    'border border-black/[0.07]',
+    /* btn-glass-secondary applies blur + background + border via globals.css */
+    'btn-glass-secondary',
+    'font-medium',
   ].join(' '),
 
   ghost: [
-    'hover:bg-black/[0.04]',
+    'btn-glass-ghost',
     'border border-transparent',
   ].join(' '),
 
-  danger: [
-    'border',
-  ].join(' '),
+  danger: 'border',
 
-  success: [
-    'border',
-  ].join(' '),
+  success: 'border',
 }
 
 const sizes: Record<ButtonSize, string> = {
@@ -48,7 +53,7 @@ const sizes: Record<ButtonSize, string> = {
   lg: 'px-5   py-2.5 text-[15px] gap-2 rounded-xl',
 }
 
-/* Inline style per variant (avoids Tailwind purge issues with dynamic colours) */
+/* Inline style per variant — colour values that can't be expressed in classes */
 function getInlineStyle(variant: ButtonVariant): React.CSSProperties {
   switch (variant) {
     case 'primary':

@@ -1,101 +1,179 @@
 @import "tailwindcss";
 
+/*
+  Teach Tailwind v4 to recognise [data-theme="dark"] as the "dark" variant.
+  This means Tailwind classes like dark:bg-white/[0.06] will be emitted as
+  [data-theme="dark"] .dark\:… selectors and will therefore respond to the
+  LifeFlow theme attribute rather than the OS media query.
+*/
+@variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* ═══════════════════════════════════════════════════════════════════════════
-   LIFEFLOW — WHITE LIQUID GLASS DESIGN SYSTEM
-   Apple-inspired bright, clean, premium light interface
+   LIFEFLOW — ADVANCED DYNAMIC LIQUID GLASS DESIGN SYSTEM v2
+   Apple-inspired premium, fluid, depth-aware glass interface.
+
+   ARCHITECTURE
+   ─────────────────────────────────────────────────────────────────────────
+   All visual tokens live as CSS custom properties so every component
+   automatically adapts to Light → Dark → Night Shift by just reading
+   the variables — no JS needed at runtime for the visual layer.
+
+   GLASS HIERARCHY (5 levels)
+   ─────────────────────────────────────────────────────────────────────────
+   glass-subtle   → decorative backgrounds, list rows, inner cells
+   glass          → standard content cards
+   glass-elevated → important/focused cards, section heroes
+   glass-floating → modals, sidebars, toasts, popovers (highest blur)
+   glass-panel    → sticky navigation surfaces (sidebar, topbar, bottomnav)
+
+   BACKDROP-FILTER FALLBACK
+   ─────────────────────────────────────────────────────────────────────────
+   All glass classes carry a solid semi-transparent fallback via
+   @supports so older browsers still look polished.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Design Tokens ────────────────────────────────────────────────────────── */
 :root {
   /* ── Backgrounds (light) ── */
-  --bg-base:              #F5F6FA;
-  --bg-secondary:         #ECEEF5;
-  --bg-tertiary:          #E4E6F0;
+  --bg-base:              #F4F5FA;
+  --bg-secondary:         #ECEEF6;
+  --bg-tertiary:          #E3E5EF;
 
-  /* ── Glass surfaces — 4 levels of elevation ──
-     White translucent layers on a light background.
-     Higher elevation = more white opacity + stronger shadow.        */
+  /* ────────────────────────────────────────────────────────────────────────
+     GLASS SURFACES — 4 elevation levels
+     Light mode: white translucent layers. Each level adds:
+       • more white opacity   → more surface visibility
+       • stronger blur        → more depth
+       • crisper border       → stronger edge definition
+       • deeper shadow        → more lift
+     ──────────────────────────────────────────────────────────────────── */
 
-  --glass-subtle-bg:      rgba(255, 255, 255, 0.50);
-  --glass-subtle-border:  rgba(0, 0, 0, 0.055);
-  --glass-subtle-blur:    14px;
+  /* Level 1 — Subtle */
+  --glass-subtle-bg:         rgba(255, 255, 255, 0.52);
+  --glass-subtle-border:     rgba(0, 0, 0, 0.06);
+  --glass-subtle-blur:       12px;
+  --glass-subtle-saturate:   1.55;
+  --glass-subtle-shadow:     0 1px 4px rgba(0,0,0,0.04);
 
-  --glass-regular-bg:     rgba(255, 255, 255, 0.65);
-  --glass-regular-border: rgba(0, 0, 0, 0.07);
-  --glass-regular-blur:   20px;
+  /* Level 2 — Regular */
+  --glass-regular-bg:        rgba(255, 255, 255, 0.68);
+  --glass-regular-border:    rgba(0, 0, 0, 0.075);
+  --glass-regular-blur:      18px;
+  --glass-regular-saturate:  1.65;
+  --glass-regular-shadow:    0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
 
-  --glass-elevated-bg:    rgba(255, 255, 255, 0.78);
-  --glass-elevated-border:rgba(0, 0, 0, 0.08);
-  --glass-elevated-blur:  28px;
+  /* Level 3 — Elevated */
+  --glass-elevated-bg:       rgba(255, 255, 255, 0.80);
+  --glass-elevated-border:   rgba(0, 0, 0, 0.085);
+  --glass-elevated-blur:     26px;
+  --glass-elevated-saturate: 1.75;
+  --glass-elevated-shadow:   0 4px 20px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.05);
 
-  --glass-floating-bg:    rgba(255, 255, 255, 0.88);
-  --glass-floating-border:rgba(0, 0, 0, 0.09);
-  --glass-floating-blur:  36px;
+  /* Level 4 — Floating */
+  --glass-floating-bg:       rgba(255, 255, 255, 0.90);
+  --glass-floating-border:   rgba(0, 0, 0, 0.09);
+  --glass-floating-blur:     34px;
+  --glass-floating-saturate: 1.85;
+  --glass-floating-shadow:   0 8px 40px rgba(0,0,0,0.10), 0 3px 10px rgba(0,0,0,0.06);
 
-  /* ── Inner highlight (top-edge catch-light) ── */
-  --glass-highlight:      rgba(255, 255, 255, 0.95);
+  /* ── Inner catch-light (top-edge specular highlight) ── */
+  /* The catch-light simulates light reflecting off the top edge of the glass.
+     Light mode: bright white.  Dark mode: dim white.                       */
+  --glass-catchlight:        rgba(255, 255, 255, 0.90);
+  --glass-catchlight-stop:   rgba(255, 255, 255, 0.25);
+
+  /* ── Tint overlay (subtle blue tint through glass in light mode) ── */
+  --glass-tint:              rgba(240, 245, 255, 0.18);
+  --glass-tint-strong:       rgba(235, 242, 255, 0.28);
 
   /* ── Shadows — soft, light-mode appropriate ── */
-  --glass-shadow:         0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
-  --glass-shadow-md:      0 4px 20px rgba(0, 0, 0, 0.07), 0 2px 6px rgba(0, 0, 0, 0.04);
-  --glass-shadow-lg:      0 8px 40px rgba(0, 0, 0, 0.10), 0 3px 10px rgba(0, 0, 0, 0.05);
-  --glass-shadow-xl:      0 16px 60px rgba(0, 0, 0, 0.12), 0 6px 20px rgba(0, 0, 0, 0.06);
+  --glass-shadow:            0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --glass-shadow-md:         0 4px 20px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.05);
+  --glass-shadow-lg:         0 8px 40px rgba(0, 0, 0, 0.10), 0 3px 10px rgba(0, 0, 0, 0.06);
+  --glass-shadow-xl:         0 16px 60px rgba(0, 0, 0, 0.13), 0 6px 20px rgba(0, 0, 0, 0.07);
+
+  /* ── Navigation panel surfaces ── */
+  --glass-panel-bg:          rgba(252, 252, 255, 0.88);
+  --glass-panel-border:      rgba(0, 0, 0, 0.07);
+  --glass-panel-shadow:      0 4px 24px rgba(0, 0, 0, 0.07), 0 1px 4px rgba(0, 0, 0, 0.04);
+  --glass-panel-blur:        32px;
+  --glass-panel-saturate:    1.80;
+
+  /* ── Hover lift effect for interactive glass surfaces ── */
+  --glass-hover-shadow:      0 8px 32px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.06);
 
   /* ── Typography ── */
-  --text-primary:         #111318;
-  --text-secondary:       #4A4E5A;
-  --text-muted:           #8A8E9A;
-  --text-faint:           #B8BBC6;
+  --text-primary:            #111318;
+  --text-secondary:          #4A4E5A;
+  --text-muted:              #8A8E9A;
+  --text-faint:              #B8BBC6;
 
   /* ── Accent — Apple-like blue ── */
-  --accent:               #2563EB;
-  --accent-hover:         #1D4ED8;
-  --accent-light:         #3B82F6;
-  --accent-dim:           rgba(37, 99, 235, 0.10);
-  --accent-dim-hover:     rgba(37, 99, 235, 0.16);
-  --accent-glow:          rgba(37, 99, 235, 0.18);
-  --accent-text:          #1E40AF;
+  --accent:                  #2563EB;
+  --accent-hover:            #1D4ED8;
+  --accent-light:            #3B82F6;
+  --accent-dim:              rgba(37, 99, 235, 0.10);
+  --accent-dim-hover:        rgba(37, 99, 235, 0.16);
+  --accent-glow:             rgba(37, 99, 235, 0.18);
+  --accent-text:             #1E40AF;
 
   /* ── Semantic colors ── */
-  --success:              #16A34A;
-  --success-dim:          rgba(22, 163, 74, 0.10);
-  --success-text:         #15803D;
-  --warning:              #D97706;
-  --warning-dim:          rgba(217, 119, 6, 0.10);
-  --warning-text:         #B45309;
-  --danger:               #DC2626;
-  --danger-dim:           rgba(220, 38, 38, 0.10);
-  --danger-text:          #B91C1C;
-  --info:                 #0284C7;
-  --info-dim:             rgba(2, 132, 199, 0.10);
+  --success:                 #16A34A;
+  --success-dim:             rgba(22, 163, 74, 0.10);
+  --success-text:            #15803D;
+  --warning:                 #D97706;
+  --warning-dim:             rgba(217, 119, 6, 0.10);
+  --warning-text:            #B45309;
+  --danger:                  #DC2626;
+  --danger-dim:              rgba(220, 38, 38, 0.10);
+  --danger-text:             #B91C1C;
+  --info:                    #0284C7;
+  --info-dim:                rgba(2, 132, 199, 0.10);
 
-  /* ── Border ── */
-  --border:               rgba(0, 0, 0, 0.07);
-  --border-strong:        rgba(0, 0, 0, 0.12);
-  --border-focus:         rgba(37, 99, 235, 0.50);
+  /* ── Border tokens ── */
+  --border:                  rgba(0, 0, 0, 0.07);
+  --border-subtle:           rgba(0, 0, 0, 0.05);
+  --border-strong:           rgba(0, 0, 0, 0.12);
+  --border-focus:            rgba(37, 99, 235, 0.50);
 
   /* ── Radii ── */
-  --radius-sm:            10px;
-  --radius-md:            14px;
-  --radius-lg:            20px;
-  --radius-xl:            24px;
-  --radius-2xl:           32px;
+  --radius-sm:               10px;
+  --radius-md:               14px;
+  --radius-lg:               20px;
+  --radius-xl:               24px;
+  --radius-2xl:              32px;
 
   /* ── Spacing rhythm ── */
-  --space-section:        24px;
-  --space-card:           20px;
-  --space-inner:          14px;
+  --space-section:           24px;
+  --space-card:              20px;
+  --space-inner:             14px;
 
   /* ── Transitions ── */
-  --transition-fast:      150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-base:      220ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow:      350ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-spring:    400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast:         150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base:         220ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:         350ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring:       400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-glass:        200ms cubic-bezier(0.4, 0, 0.2, 1);
 
   /* ── Layout ── */
-  --sidebar-width:        252px;
-  --topbar-height:        56px;
-  --bottomnav-height:     68px;
+  --sidebar-width:           252px;
+  --topbar-height:           56px;
+  --bottomnav-height:        68px;
+
+  /* ── Nav item hover background ── */
+  --nav-hover-bg:            rgba(0, 0, 0, 0.04);
+
+  /* ── Button surfaces ── */
+  --btn-secondary-bg:        rgba(255, 255, 255, 0.70);
+  --btn-secondary-border:    rgba(0, 0, 0, 0.09);
+  --btn-secondary-hover-bg:  rgba(255, 255, 255, 0.88);
+  --btn-ghost-hover-bg:      rgba(0, 0, 0, 0.05);
+
+  /* ── Money/Finance accent colors ── */
+  --money-collect-bg:        rgba(99, 102, 241, 0.08);
+  --money-collect-border:    rgba(99, 102, 241, 0.18);
+  --money-pay-bg:            rgba(249, 115, 22, 0.08);
+  --money-pay-border:        rgba(249, 115, 22, 0.18);
 }
 
 /* ── Reset ────────────────────────────────────────────────────────────────── */
@@ -118,21 +196,27 @@ html, body {
 }
 
 /* ── Ambient Background ───────────────────────────────────────────────────── */
-/* Soft white/light-gray with subtle ambient tints — barely perceptible */
+/*
+  The app background carries subtle ambient radial colour stops that the
+  glass surfaces reveal through their translucency.  These stops are:
+    • top-left:     soft blue (accent influence)
+    • bottom-right: soft lavender (purple influence)
+    • centre:       bright white nebula (keeps overall look clean)
+  This means glass panels over different areas of the page naturally
+  absorb slightly different tints — producing content-adaptive colour.
+*/
 .app-bg {
   min-height: 100vh;
   background:
-    /* Soft top-left blue tint */
-    radial-gradient(ellipse 60% 50% at 5% 0%,   rgba(59, 130, 246, 0.055) 0%, transparent 60%),
-    /* Soft bottom-right lavender tint */
-    radial-gradient(ellipse 50% 40% at 95% 100%, rgba(139, 92, 246, 0.04)  0%, transparent 60%),
-    /* Very subtle warm center highlight */
-    radial-gradient(ellipse 40% 35% at 50% 50%,  rgba(255, 255, 255, 0.80) 0%, transparent 70%),
+    radial-gradient(ellipse 65% 55% at 4%   0%,   rgba(59, 130, 246, 0.07)  0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 96% 100%, rgba(139,  92, 246, 0.055) 0%, transparent 62%),
+    radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(255, 255, 255, 0.85) 0%, transparent 72%),
+    radial-gradient(ellipse 30% 25% at 80%  20%,  rgba(37,  99, 235, 0.03)  0%, transparent 50%),
     var(--bg-base);
   background-attachment: fixed;
 }
 
-/* Auth page — same clean white with a subtle soft centered glow */
+/* Auth page */
 .auth-bg {
   min-height: 100vh;
   display: flex;
@@ -147,124 +231,366 @@ html, body {
   background-attachment: fixed;
 }
 
-/* ── Glass Material Classes ───────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════════════
+   GLASS MATERIAL CLASSES
+   ════════════════════════════════════════════════════════════════════════════ */
 
-/* Level 1 — Subtle: secondary backgrounds, list containers */
+/*
+  Each glass level is defined with:
+  1. Translucent background (CSS variable, adapts to all themes)
+  2. backdrop-filter: blur + saturate (the core glass effect)
+  3. -webkit-backdrop-filter (Safari / iOS)
+  4. Subtle tint overlay via ::before (adds depth, colour-adaptive)
+  5. Crisp border (varies by elevation)
+  6. Soft shadow (varies by elevation)
+
+  The ::before pseudo-element adds an inner catch-light:
+  a thin diagonal gradient from top-left that simulates light reflecting
+  off the glass surface. This is what gives the "premium" feel.
+
+  FALLBACK (no backdrop-filter support):
+  @supports not (backdrop-filter: blur(1px)) → solid semi-transparent bg
+*/
+
+/* ── Level 1: Subtle ─────────────────────────────────────────────────────── */
 .glass-subtle {
+  position: relative;
   background: var(--glass-subtle-bg);
-  backdrop-filter: blur(var(--glass-subtle-blur)) saturate(1.5);
-  -webkit-backdrop-filter: blur(var(--glass-subtle-blur)) saturate(1.5);
   border: 1px solid var(--glass-subtle-border);
 }
+@supports (backdrop-filter: blur(1px)) {
+  .glass-subtle {
+    backdrop-filter: blur(var(--glass-subtle-blur)) saturate(var(--glass-subtle-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-subtle-blur)) saturate(var(--glass-subtle-saturate));
+  }
+}
+/* Fallback for no backdrop-filter */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-subtle {
+    background: rgba(248, 249, 255, 0.88);
+  }
+}
 
-/* Level 2 — Regular: standard cards and sections */
+/* ── Level 2: Regular ────────────────────────────────────────────────────── */
 .glass {
+  position: relative;
   background: var(--glass-regular-bg);
-  backdrop-filter: blur(var(--glass-regular-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--glass-regular-blur)) saturate(1.6);
   border: 1px solid var(--glass-regular-border);
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--glass-regular-shadow);
+  transition: box-shadow var(--transition-glass);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass {
+    backdrop-filter: blur(var(--glass-regular-blur)) saturate(var(--glass-regular-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-regular-blur)) saturate(var(--glass-regular-saturate));
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: rgba(245, 247, 253, 0.94);
+  }
 }
 
-/* Level 3 — Elevated: important cards, modals, active states */
+/* ── Level 3: Elevated ───────────────────────────────────────────────────── */
 .glass-elevated {
+  position: relative;
   background: var(--glass-elevated-bg);
-  backdrop-filter: blur(var(--glass-elevated-blur)) saturate(1.7);
-  -webkit-backdrop-filter: blur(var(--glass-elevated-blur)) saturate(1.7);
   border: 1px solid var(--glass-elevated-border);
-  box-shadow: var(--glass-shadow-md);
+  box-shadow: var(--glass-elevated-shadow);
+  transition: box-shadow var(--transition-glass);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass-elevated {
+    backdrop-filter: blur(var(--glass-elevated-blur)) saturate(var(--glass-elevated-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-elevated-blur)) saturate(var(--glass-elevated-saturate));
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-elevated {
+    background: rgba(240, 243, 252, 0.96);
+  }
 }
 
-/* Level 4 — Floating: nav, sidebar, modals, toasts */
+/* ── Level 4: Floating ───────────────────────────────────────────────────── */
 .glass-floating {
+  position: relative;
   background: var(--glass-floating-bg);
-  backdrop-filter: blur(var(--glass-floating-blur)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--glass-floating-blur)) saturate(1.8);
   border: 1px solid var(--glass-floating-border);
-  box-shadow: var(--glass-shadow-lg);
+  box-shadow: var(--glass-floating-shadow);
+  transition: box-shadow var(--transition-glass);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass-floating {
+    backdrop-filter: blur(var(--glass-floating-blur)) saturate(var(--glass-floating-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-floating-blur)) saturate(var(--glass-floating-saturate));
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-floating {
+    background: rgba(250, 251, 255, 0.98);
+  }
 }
 
-/* Catch-light — inner top highlight strip */
+/* ── Navigation panel (sidebar, topbar, bottomnav) ───────────────────────── */
+.glass-panel {
+  position: relative;
+  background:    var(--glass-panel-bg);
+  border-color:  var(--glass-panel-border);
+  box-shadow:    var(--glass-panel-shadow);
+  transition: box-shadow var(--transition-glass);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass-panel {
+    backdrop-filter:         blur(var(--glass-panel-blur)) saturate(var(--glass-panel-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-panel-blur)) saturate(var(--glass-panel-saturate));
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-panel {
+    background: rgba(252, 252, 255, 0.98);
+  }
+}
+
+/* ── Backward-compat aliases ─────────────────────────────────────────────── */
+.glass-strong {
+  position: relative;
+  background: var(--glass-elevated-bg);
+  border: 1px solid var(--glass-elevated-border);
+  box-shadow: var(--glass-elevated-shadow);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass-strong {
+    backdrop-filter: blur(var(--glass-elevated-blur)) saturate(var(--glass-elevated-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-elevated-blur)) saturate(var(--glass-elevated-saturate));
+  }
+}
+
+.glass-hero {
+  position: relative;
+  background: var(--glass-floating-bg);
+  border: 1px solid var(--glass-floating-border);
+  box-shadow: var(--glass-shadow-xl);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass-hero {
+    backdrop-filter: blur(var(--glass-floating-blur)) saturate(var(--glass-floating-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-floating-blur)) saturate(var(--glass-floating-saturate));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   GLASS SURFACE ENHANCEMENTS
+   Optional modifier classes that add additional visual layers.
+   Compose freely: <div class="glass glass-catchlight glass-tint">
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/*
+  Catch-light — specular top-left highlight strip.
+  Mimics light bouncing off the top face of a glass sheet.
+  Use on hero cards, modals, elevated surfaces.
+*/
+.glass-catchlight::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    148deg,
+    var(--glass-catchlight)    0%,
+    var(--glass-catchlight-stop) 22%,
+    transparent                55%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+/* Ensure children sit above the catch-light layer */
+.glass-catchlight > * {
+  position: relative;
+  z-index: 1;
+}
+
+/*
+  Backward-compatible alias — existing code uses glass-highlight
+  which used ::after. Redirect to the new catchlight system.
+*/
 .glass-highlight::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background: linear-gradient(
-    160deg,
-    rgba(255,255,255,0.80) 0%,
-    rgba(255,255,255,0.20) 30%,
-    transparent 60%
+    148deg,
+    var(--glass-catchlight)    0%,
+    var(--glass-catchlight-stop) 22%,
+    transparent                55%
   );
   pointer-events: none;
 }
 
-/* Backwards-compat aliases */
-.glass-strong {
-  background: var(--glass-elevated-bg);
-  backdrop-filter: blur(var(--glass-elevated-blur)) saturate(1.7);
-  -webkit-backdrop-filter: blur(var(--glass-elevated-blur)) saturate(1.7);
-  border: 1px solid var(--glass-elevated-border);
-  box-shadow: var(--glass-shadow-md);
+/*
+  Tint — subtle hue shift through glass (simulates coloured content beneath).
+  Applied via a very light colour overlay on top of the glass background.
+*/
+.glass-tinted::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--glass-tint);
+  pointer-events: none;
 }
 
-.glass-hero {
-  background: var(--glass-floating-bg);
-  backdrop-filter: blur(var(--glass-floating-blur)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--glass-floating-blur)) saturate(1.8);
-  border: 1px solid var(--glass-floating-border);
-  box-shadow: var(--glass-shadow-xl);
+/*
+  Depth border — adds an inset shadow to simulate a recessed edge.
+  Useful on hero cards and panels.
+*/
+.glass-depth {
+  box-shadow:
+    var(--glass-shadow-md),
+    inset 0 1px 0 var(--glass-catchlight),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
 }
 
-/* ── Input System ─────────────────────────────────────────────────────────── */
+/*
+  Inner ring — a secondary inner border for maximum premium feel.
+  Use sparingly on modals or focus states.
+*/
+.glass-ring {
+  box-shadow:
+    var(--glass-shadow-lg),
+    inset 0 0 0 1px rgba(255,255,255,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.90);
+}
+
+/* ── Navigation items ────────────────────────────────────────────────────── */
+.nav-hover:hover {
+  background: var(--nav-hover-bg);
+}
+.nav-hover-danger:hover {
+  background: var(--danger-dim);
+}
+
+/* ── Nav active pill — accent-tinted glass ──────────────────────────────── */
+.nav-active-pill {
+  background: var(--accent-dim);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.60);
+}
+
+/* ── Segmented control active tab ──────────────────────────────────────── */
+.glass-segment-active {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   GLASS INPUT SYSTEM
+   ════════════════════════════════════════════════════════════════════════════ */
+
 .glass-input {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(0, 0, 0, 0.09);
   color: var(--text-primary);
   outline: none;
   transition:
-    border-color var(--transition-fast),
-    background   var(--transition-fast),
-    box-shadow   var(--transition-fast);
+    border-color  var(--transition-fast),
+    background    var(--transition-fast),
+    box-shadow    var(--transition-fast);
 }
-
+@supports (backdrop-filter: blur(1px)) {
+  .glass-input {
+    backdrop-filter: blur(10px) saturate(1.4);
+    -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  }
+}
 .glass-input:hover {
   border-color: rgba(0, 0, 0, 0.14);
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.90);
 }
-
 .glass-input:focus {
   border-color: var(--border-focus);
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10), 0 0 0 1px rgba(37, 99, 235, 0.35);
 }
-
 .glass-input::placeholder {
   color: var(--text-faint);
 }
-
 .glass-input:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-
-/* Native select dark-mode option fix — options use native OS rendering on light bg */
+/* Native select option fix */
 .glass-input option {
   background: #ffffff;
   color: var(--text-primary);
 }
 
-/* ── Typography ───────────────────────────────────────────────────────────── */
-/* Accent gradient — blue, used for logo and highlights */
+/* ════════════════════════════════════════════════════════════════════════════
+   GLASS BUTTON SYSTEM
+   Secondary and ghost button surfaces use the glass system.
+   Primary/danger/success continue to use solid accent colours.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Secondary button glass surface */
+.btn-glass-secondary {
+  background: var(--btn-secondary-bg);
+  border: 1px solid var(--btn-secondary-border);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.80);
+  transition:
+    background   var(--transition-glass),
+    box-shadow   var(--transition-glass),
+    border-color var(--transition-glass);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .btn-glass-secondary {
+    backdrop-filter: blur(12px) saturate(1.5);
+    -webkit-backdrop-filter: blur(12px) saturate(1.5);
+  }
+}
+.btn-glass-secondary:hover {
+  background: var(--btn-secondary-hover-bg);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.90);
+}
+.btn-glass-secondary:active {
+  background: rgba(255,255,255,0.65);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.60);
+}
+
+/* Ghost button */
+.btn-glass-ghost:hover {
+  background: var(--btn-ghost-hover-bg);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MONEY / FINANCE ACCENT SURFACES
+   Reusable glass surfaces with semantic finance colour tints.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.glass-money-collect {
+  background: var(--money-collect-bg);
+  border: 1px solid var(--money-collect-border);
+  transition: background var(--transition-glass), border-color var(--transition-glass);
+}
+.glass-money-pay {
+  background: var(--money-pay-bg);
+  border: 1px solid var(--money-pay-border);
+  transition: background var(--transition-glass), border-color var(--transition-glass);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TYPOGRAPHY
+   ════════════════════════════════════════════════════════════════════════════ */
+
 .text-gradient {
   background: linear-gradient(135deg, #2563EB 0%, #3B82F6 50%, #1D4ED8 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-
 .gradient-text {
   background: linear-gradient(135deg, #2563EB 0%, #3B82F6 50%, #1D4ED8 100%);
   -webkit-background-clip: text;
@@ -316,12 +642,17 @@ html, body {
   0%, 80%, 100% { transform: translateY(0); }
   40%           { transform: translateY(-5px); }
 }
+@keyframes glass-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.72; }
+}
 
 .animate-fade-in        { animation: fadeIn 0.35s ease forwards; }
 .animate-fade-in-scale  { animation: fadeInScale 0.25s ease forwards; }
 .animate-slide-up       { animation: slideUp 0.35s ease forwards; }
 .animate-slide-in-right { animation: slideInRight 0.3s ease forwards; }
 .animate-spin-slow      { animation: spin 1.2s linear infinite; }
+.animate-glass-pulse    { animation: glass-pulse 2s ease-in-out infinite; }
 
 /* ── Skeleton Loader ──────────────────────────────────────────────────────── */
 .skeleton {
@@ -359,36 +690,9 @@ html, body {
 .cat-health        { color: #16A34A; }
 .cat-other         { color: #6B7280; }
 
-/* ── Reduced Motion ───────────────────────────────────────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* ── Segmented Control Active ─────────────────────────────────────────────── */
-.glass-segment-active {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-}
-
-/* ── Nav active pill ──────────────────────────────────────────────────────── */
-.nav-active-pill {
-  background: var(--accent-dim);
-  border: 1px solid rgba(37, 99, 235, 0.16);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
 /* ── Progress ring ────────────────────────────────────────────────────────── */
-.progress-ring-track {
-  stroke: rgba(0, 0, 0, 0.07);
-}
-.progress-ring-fill {
-  stroke: url(#progressGrad);
-}
+.progress-ring-track { stroke: rgba(0, 0, 0, 0.07); }
+.progress-ring-fill  { stroke: url(#progressGrad); }
 
 /* ── Divider ──────────────────────────────────────────────────────────────── */
 .divider {
@@ -399,20 +703,14 @@ html, body {
 
 /* ══════════════════════════════════════════════════════════════════════════════
    LIGHT THEME — Utility colour helpers
-   Use these instead of text-white / text-white/XX on white glass backgrounds.
    ══════════════════════════════════════════════════════════════════════════════ */
-
-/* Text */
 .text-primary    { color: var(--text-primary)   !important; }
 .text-secondary  { color: var(--text-secondary) !important; }
 .text-muted      { color: var(--text-muted)     !important; }
 .text-faint      { color: var(--text-faint)     !important; }
+.border-glass       { border-color: var(--border)        !important; }
+.border-glass-strong{ border-color: var(--border-strong) !important; }
 
-/* Borders — light glass cards use dark/transparent borders, not white ones */
-.border-glass    { border-color: var(--border)        !important; }
-.border-glass-strong { border-color: var(--border-strong) !important; }
-
-/* Inline form elements — guarantee dark text regardless of inheritance */
 input, textarea, select {
   color: var(--text-primary);
   caret-color: var(--text-primary);
@@ -422,8 +720,6 @@ textarea::placeholder {
   color: var(--text-faint);
   opacity: 1;
 }
-
-/* Bare transparent inputs used inside editors / note titles */
 input.bg-transparent,
 textarea.bg-transparent {
   color: var(--text-primary);
@@ -433,7 +729,7 @@ textarea.bg-transparent::placeholder {
   color: var(--text-faint);
 }
 
-/* Recharts — override dark tick labels when rendered on light glass */
+/* Recharts — on light glass */
 .recharts-cartesian-axis-tick text,
 .recharts-legend-item-text {
   fill: var(--text-muted) !important;
@@ -444,4 +740,349 @@ textarea.bg-transparent::placeholder {
 .recharts-tooltip-wrapper .glass-strong,
 .recharts-tooltip-wrapper .glass-elevated {
   color: var(--text-primary);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DARK THEME
+   Applied when <html data-theme="dark"> is set by ThemeProvider.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] {
+  /* Backgrounds */
+  --bg-base:                 #0D0E13;
+  --bg-secondary:            #121319;
+  --bg-tertiary:             #191A22;
+
+  /* ─── Glass surfaces — dark translucent layers ───────────────────────────
+     Dark glass: each level uses a progressively lighter white alpha so
+     each elevation tier is visually distinct against the dark background.
+     The tint variable shifts to a cool indigo influence in dark mode.    */
+
+  --glass-subtle-bg:         rgba(255, 255, 255, 0.035);
+  --glass-subtle-border:     rgba(255, 255, 255, 0.07);
+  --glass-subtle-blur:       12px;
+  --glass-subtle-saturate:   1.40;
+  --glass-subtle-shadow:     0 1px 3px rgba(0,0,0,0.30);
+
+  --glass-regular-bg:        rgba(255, 255, 255, 0.055);
+  --glass-regular-border:    rgba(255, 255, 255, 0.095);
+  --glass-regular-blur:      18px;
+  --glass-regular-saturate:  1.50;
+  --glass-regular-shadow:    0 2px 12px rgba(0,0,0,0.40), 0 1px 3px rgba(0,0,0,0.28);
+
+  --glass-elevated-bg:       rgba(255, 255, 255, 0.075);
+  --glass-elevated-border:   rgba(255, 255, 255, 0.115);
+  --glass-elevated-blur:     26px;
+  --glass-elevated-saturate: 1.60;
+  --glass-elevated-shadow:   0 4px 20px rgba(0,0,0,0.50), 0 2px 6px rgba(0,0,0,0.32);
+
+  --glass-floating-bg:       rgba(255, 255, 255, 0.095);
+  --glass-floating-border:   rgba(255, 255, 255, 0.135);
+  --glass-floating-blur:     34px;
+  --glass-floating-saturate: 1.70;
+  --glass-floating-shadow:   0 8px 40px rgba(0,0,0,0.60), 0 3px 10px rgba(0,0,0,0.38);
+
+  /* Catch-light — dimmer on dark glass */
+  --glass-catchlight:        rgba(255, 255, 255, 0.10);
+  --glass-catchlight-stop:   rgba(255, 255, 255, 0.04);
+
+  /* Tint — subtle cool-blue tint through dark glass */
+  --glass-tint:              rgba(59, 80, 130, 0.10);
+  --glass-tint-strong:       rgba(59, 80, 130, 0.16);
+
+  /* Shadows */
+  --glass-shadow:            0 2px 12px rgba(0,0,0,0.42), 0 1px 3px rgba(0,0,0,0.28);
+  --glass-shadow-md:         0 4px 20px rgba(0,0,0,0.50), 0 2px 6px rgba(0,0,0,0.32);
+  --glass-shadow-lg:         0 8px 40px rgba(0,0,0,0.58), 0 3px 10px rgba(0,0,0,0.38);
+  --glass-shadow-xl:         0 16px 60px rgba(0,0,0,0.68), 0 6px 20px rgba(0,0,0,0.44);
+  --glass-hover-shadow:      0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35);
+
+  /* Typography */
+  --text-primary:            #E8EAF0;
+  --text-secondary:          #A8ABBE;
+  --text-muted:              #6B6F82;
+  --text-faint:              #4A4D60;
+
+  /* Accent */
+  --accent:                  #3B82F6;
+  --accent-hover:            #60A5FA;
+  --accent-light:            #93C5FD;
+  --accent-dim:              rgba(59, 130, 246, 0.15);
+  --accent-dim-hover:        rgba(59, 130, 246, 0.22);
+  --accent-glow:             rgba(59, 130, 246, 0.25);
+  --accent-text:             #93C5FD;
+
+  /* Semantic */
+  --success:                 #22C55E;
+  --success-dim:             rgba(34, 197, 94, 0.15);
+  --success-text:            #4ADE80;
+  --warning:                 #F59E0B;
+  --warning-dim:             rgba(245, 158, 11, 0.15);
+  --warning-text:            #FCD34D;
+  --danger:                  #EF4444;
+  --danger-dim:              rgba(239, 68, 68, 0.15);
+  --danger-text:             #FCA5A5;
+  --info:                    #38BDF8;
+  --info-dim:                rgba(56, 189, 248, 0.15);
+
+  /* Borders */
+  --border:                  rgba(255, 255, 255, 0.08);
+  --border-subtle:           rgba(255, 255, 255, 0.05);
+  --border-strong:           rgba(255, 255, 255, 0.14);
+  --border-focus:            rgba(59, 130, 246, 0.60);
+
+  /* Navigation panel */
+  --glass-panel-bg:          rgba(18, 19, 28, 0.94);
+  --glass-panel-border:      rgba(255, 255, 255, 0.08);
+  --glass-panel-shadow:      0 4px 24px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.32);
+  --glass-panel-blur:        32px;
+  --glass-panel-saturate:    1.65;
+
+  /* Nav hover */
+  --nav-hover-bg:            rgba(255, 255, 255, 0.05);
+
+  /* Button surfaces */
+  --btn-secondary-bg:        rgba(255, 255, 255, 0.07);
+  --btn-secondary-border:    rgba(255, 255, 255, 0.11);
+  --btn-secondary-hover-bg:  rgba(255, 255, 255, 0.11);
+  --btn-ghost-hover-bg:      rgba(255, 255, 255, 0.06);
+
+  /* Money accent */
+  --money-collect-bg:        rgba(99, 102, 241, 0.12);
+  --money-collect-border:    rgba(99, 102, 241, 0.22);
+  --money-pay-bg:            rgba(249, 115, 22, 0.12);
+  --money-pay-border:        rgba(249, 115, 22, 0.22);
+}
+
+/* Dark body background */
+[data-theme="dark"] body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+}
+
+/* Dark ambient background */
+[data-theme="dark"] .app-bg {
+  background:
+    radial-gradient(ellipse 65% 55% at 4%   0%,   rgba(59, 130, 246, 0.09) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 96% 100%, rgba(139,  92, 246, 0.07) 0%, transparent 62%),
+    radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(20,  22,  40, 0.70) 0%, transparent 72%),
+    radial-gradient(ellipse 30% 25% at 80%  20%,  rgba(37,  99, 235, 0.04) 0%, transparent 50%),
+    var(--bg-base);
+  background-attachment: fixed;
+}
+
+/* Dark auth background */
+[data-theme="dark"] .auth-bg {
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 35%, rgba(59, 130, 246, 0.10) 0%, transparent 65%),
+    radial-gradient(ellipse 45% 40% at 15% 80%, rgba(139,  92, 246, 0.07) 0%, transparent 55%),
+    radial-gradient(ellipse 45% 40% at 85% 10%, rgba(37,   99, 235, 0.06) 0%, transparent 55%),
+    var(--bg-base);
+  background-attachment: fixed;
+}
+
+/* Dark glass input */
+[data-theme="dark"] .glass-input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--text-primary);
+}
+[data-theme="dark"] .glass-input:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.09);
+}
+[data-theme="dark"] .glass-input:focus {
+  border-color: var(--border-focus);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), 0 0 0 1px rgba(59, 130, 246, 0.45);
+}
+[data-theme="dark"] .glass-input::placeholder {
+  color: var(--text-faint);
+}
+[data-theme="dark"] .glass-input option {
+  background: #191A22;
+  color: var(--text-primary);
+}
+
+/* Dark btn-glass-secondary */
+[data-theme="dark"] .btn-glass-secondary {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.07);
+}
+[data-theme="dark"] .btn-glass-secondary:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.10);
+}
+[data-theme="dark"] .btn-glass-secondary:active {
+  background: rgba(255,255,255,0.05);
+}
+
+/* Dark skeleton shimmer */
+[data-theme="dark"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Dark scrollbar */
+[data-theme="dark"] ::-webkit-scrollbar-thumb      { background: rgba(255,255,255,0.12); }
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+/* Dark segmented control */
+[data-theme="dark"] .glass-segment-active {
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+/* Dark nav active pill */
+[data-theme="dark"] .nav-active-pill {
+  background: var(--accent-dim);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Dark nav hover danger */
+[data-theme="dark"] .nav-hover-danger:hover {
+  background: var(--danger-dim);
+}
+
+/* Dark modal drag handle */
+[data-theme="dark"] .modal-drag-handle {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Dark progress ring */
+[data-theme="dark"] .progress-ring-track {
+  stroke: rgba(255, 255, 255, 0.08);
+}
+
+/* Dark divider */
+[data-theme="dark"] .divider {
+  background: var(--border);
+}
+
+/* Dark kbd */
+[data-theme="dark"] kbd {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Dark inline form elements */
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  color: var(--text-primary);
+  caret-color: var(--text-primary);
+}
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
+}
+[data-theme="dark"] input.bg-transparent,
+[data-theme="dark"] textarea.bg-transparent {
+  color: var(--text-primary);
+}
+[data-theme="dark"] input.bg-transparent::placeholder,
+[data-theme="dark"] textarea.bg-transparent::placeholder {
+  color: var(--text-faint);
+}
+
+/* Dark Recharts */
+[data-theme="dark"] .recharts-cartesian-axis-tick text,
+[data-theme="dark"] .recharts-legend-item-text {
+  fill: var(--text-muted) !important;
+}
+[data-theme="dark"] .recharts-cartesian-grid line {
+  stroke: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Dark priority/category */
+[data-theme="dark"] .priority-high   { color: var(--danger);  }
+[data-theme="dark"] .priority-medium { color: var(--warning); }
+[data-theme="dark"] .priority-low    { color: var(--success); }
+[data-theme="dark"] .cat-food          { color: #FB923C; }
+[data-theme="dark"] .cat-transport     { color: #60A5FA; }
+[data-theme="dark"] .cat-shopping      { color: #F472B6; }
+[data-theme="dark"] .cat-bills         { color: #F87171; }
+[data-theme="dark"] .cat-entertainment { color: #A78BFA; }
+[data-theme="dark"] .cat-education     { color: #38BDF8; }
+[data-theme="dark"] .cat-health        { color: #4ADE80; }
+[data-theme="dark"] .cat-other         { color: #9CA3AF; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   NIGHT SHIFT OVERLAY
+   Applied when <html data-night-shift="true"> is set by ThemeProvider.
+   Warm shift — works on top of either light or dark theme.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+[data-night-shift="true"] {
+  --glass-subtle-bg:         rgba(255, 248, 238, 0.50);
+  --glass-regular-bg:        rgba(255, 248, 238, 0.62);
+  --glass-elevated-bg:       rgba(255, 248, 238, 0.76);
+  --glass-floating-bg:       rgba(255, 248, 238, 0.87);
+  --glass-panel-bg:          rgba(255, 250, 242, 0.90);
+  --glass-catchlight:        rgba(255, 252, 240, 0.88);
+  --glass-tint:              rgba(255, 220, 160, 0.08);
+  --accent-glow:             rgba(37, 99, 235, 0.10);
+}
+
+[data-theme="dark"][data-night-shift="true"] {
+  --glass-subtle-bg:         rgba(55, 38, 18, 0.22);
+  --glass-regular-bg:        rgba(55, 38, 18, 0.30);
+  --glass-elevated-bg:       rgba(55, 38, 18, 0.38);
+  --glass-floating-bg:       rgba(55, 38, 18, 0.46);
+  --glass-panel-bg:          rgba(30, 22, 12, 0.95);
+  --glass-catchlight:        rgba(255, 220, 140, 0.07);
+  --glass-tint:              rgba(80, 50, 20, 0.12);
+  --accent-glow:             rgba(59, 130, 246, 0.12);
+}
+
+/* Light night shift ambient */
+:not([data-theme="dark"])[data-night-shift="true"] .app-bg {
+  background:
+    radial-gradient(ellipse 65% 55% at 4%   0%,   rgba(200, 100, 30, 0.05) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 96% 100%, rgba(180,  80, 20, 0.04) 0%, transparent 62%),
+    radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(255, 245, 228, 0.65) 0%, transparent 72%),
+    var(--bg-base);
+  background-attachment: fixed;
+}
+
+/* Dark night shift ambient */
+[data-theme="dark"][data-night-shift="true"] .app-bg {
+  background:
+    radial-gradient(ellipse 65% 55% at 4%   0%,   rgba(80,  42, 10, 0.10) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 96% 100%, rgba(60,  30,  5, 0.08) 0%, transparent 62%),
+    radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(28,  18,  5, 0.50) 0%, transparent 72%),
+    var(--bg-base);
+  background-attachment: fixed;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ════════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration:       0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:      0.01ms !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MOBILE OPTIMISATION
+   On small screens, reduce blur depth to maintain performance.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+  :root {
+    --glass-regular-blur:    14px;
+    --glass-elevated-blur:   20px;
+    --glass-floating-blur:   26px;
+    --glass-panel-blur:      24px;
+  }
 }

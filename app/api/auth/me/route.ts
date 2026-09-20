@@ -2,8 +2,45 @@ import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { getSession, requireAuth } from '@/lib/session'
 import { connectDB } from '@/lib/db'
-import { profileUpdateSchema, changePasswordSchema } from '@/lib/validations'
+import { profileUpdateSchema, changePasswordSchema, appearancePreferencesSchema } from '@/lib/validations'
 import User from '@/models/User'
+import type { IUser } from '@/models/User'
+import type { AppearancePreferences } from '@/types'
+
+// ── Serialise a user doc into the safe client shape ───────────────────────────
+
+const DEFAULT_APPEARANCE: AppearancePreferences = {
+  theme:             'light',
+  nightShiftEnabled: false,
+  nightShiftStart:   '22:00',
+  nightShiftEnd:     '07:00',
+  turnToneEnabled:   true,
+  turnToneVolume:    0.5,
+}
+
+// Accept either a lean plain object or a full Mongoose Document — both satisfy
+// Partial<IUser> which is all we need for serialisation.
+function serializeUser(user: Partial<IUser> & { _id: { toString(): string }; createdAt: Date; updatedAt: Date }) {
+  return {
+    _id:                          user._id.toString(),
+    publicId:                     user.publicId,
+    name:                         user.name,
+    email:                        user.email,
+    avatar:                       user.avatar,
+    currency:                     user.currency,
+    timezone:                     user.timezone,
+    notificationPreferences:      user.notificationPreferences,
+    emailNotifications:           user.emailNotifications,
+    notificationsTested:          user.notificationsTested ?? false,
+    notificationsTestedAt:        user.notificationsTestedAt?.toISOString() ?? null,
+    appearancePreferences:        user.appearancePreferences ?? DEFAULT_APPEARANCE,
+    accountStatus:                user.accountStatus ?? 'active',
+    deletedAt:                    user.deletedAt?.toISOString() ?? null,
+    scheduledPermanentDeletionAt: user.scheduledPermanentDeletionAt?.toISOString() ?? null,
+    createdAt:                    user.createdAt.toISOString(),
+    updatedAt:                    user.updatedAt.toISOString(),
+  }
+}
 
 // GET /api/auth/me — return the current user
 export async function GET() {
@@ -14,28 +51,17 @@ export async function GET() {
     }
 
     await connectDB()
-    const user = await User.findById(session.userId).select('-passwordHash').lean()
-    if (!user) {
+    const userDoc = await User.findById(session.userId).select('-passwordHash').lean<IUser>()
+    if (!userDoc) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    return NextResponse.json({
-      user: {
-        _id: user._id.toString(),
-        publicId: user.publicId,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar,
-        currency: user.currency,
-        timezone: user.timezone,
-        notificationPreferences: user.notificationPreferences,
-        emailNotifications: user.emailNotifications,
-        notificationsTested: user.notificationsTested ?? false,
-        notificationsTestedAt: user.notificationsTestedAt?.toISOString() ?? null,
-        createdAt: user.createdAt.toISOString(),
-        updatedAt: user.updatedAt.toISOString(),
-      },
-    })
+    // Soft-deleted accounts must not be served through this endpoint
+    if ((userDoc.accountStatus ?? 'active') !== 'active') {
+      return NextResponse.json({ error: 'Account is not active' }, { status: 403 })
+    }
+
+    return NextResponse.json({ user: serializeUser(userDoc) })
   } catch (error) {
     console.error('[me GET]', error)
     return NextResponse.json({ error: 'Failed to get user' }, { status: 500 })
@@ -91,23 +117,24 @@ export async function PATCH(req: NextRequest) {
       ).select('-passwordHash')
       if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-      return NextResponse.json({
-        user: {
-          _id: user._id.toString(),
-          publicId: user.publicId,
-          name: user.name,
-          email: user.email,
-          avatar: user.avatar,
-          currency: user.currency,
-          timezone: user.timezone,
-          notificationPreferences: user.notificationPreferences,
-          emailNotifications: user.emailNotifications,
-          notificationsTested: user.notificationsTested ?? false,
-          notificationsTestedAt: user.notificationsTestedAt?.toISOString() ?? null,
-          createdAt: user.createdAt.toISOString(),
-          updatedAt: user.updatedAt.toISOString(),
-        },
-      })
+      return NextResponse.json({ user: serializeUser(user) })
+    }
+
+    // ── Update appearance preferences ──
+    if (body.action === 'updateAppearance') {
+      const parsed = appearancePreferencesSchema.safeParse(body.appearancePreferences)
+      if (!parsed.success) {
+        return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
+      }
+
+      const user = await User.findByIdAndUpdate(
+        userId,
+        { $set: { appearancePreferences: parsed.data } },
+        { new: true, upsert: false }
+      ).select('-passwordHash')
+      if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+
+      return NextResponse.json({ user: serializeUser(user) })
     }
 
     // ── Profile update (name, currency, timezone) ──
@@ -131,23 +158,7 @@ export async function PATCH(req: NextRequest) {
       await session.save()
     }
 
-    return NextResponse.json({
-      user: {
-        _id: user._id.toString(),
-        publicId: user.publicId,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar,
-        currency: user.currency,
-        timezone: user.timezone,
-        notificationPreferences: user.notificationPreferences,
-        emailNotifications: user.emailNotifications,
-        notificationsTested: user.notificationsTested ?? false,
-        notificationsTestedAt: user.notificationsTestedAt?.toISOString() ?? null,
-        createdAt: user.createdAt.toISOString(),
-        updatedAt: user.updatedAt.toISOString(),
-      },
-    })
+    return NextResponse.json({ user: serializeUser(user) })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -157,42 +168,13 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// DELETE /api/auth/me — delete account
-export async function DELETE() {
-  try {
-    const { userId } = await requireAuth()
-    await connectDB()
-
-    // Import all models to cascade-delete user data
-    const { default: Task } = await import('@/models/Task')
-    const { default: Note } = await import('@/models/Note')
-    const { default: Habit } = await import('@/models/Habit')
-    const { default: HabitLog } = await import('@/models/HabitLog')
-    const { default: Expense } = await import('@/models/Expense')
-    const { default: GroupBill } = await import('@/models/GroupBill')
-    const { default: Notification } = await import('@/models/Notification')
-
-    await Promise.all([
-      Task.deleteMany({ userId }),
-      Note.deleteMany({ userId }),
-      Habit.deleteMany({ userId }),
-      HabitLog.deleteMany({ userId }),
-      Expense.deleteMany({ userId }),
-      GroupBill.deleteMany({ userId }),
-      Notification.deleteMany({ userId }),
-      User.findByIdAndDelete(userId),
-    ])
-
-    // Clear session
-    const session = await getSession()
-    await session.destroy()
-
-    return NextResponse.json({ message: 'Account deleted' })
-  } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    console.error('[me DELETE]', error)
-    return NextResponse.json({ error: 'Failed to delete account' }, { status: 500 })
-  }
+// DELETE /api/auth/me — soft-delete account (30-day recovery window)
+// This endpoint is kept for backward compatibility with any existing client
+// code that calls DELETE /api/auth/me.  It delegates to the same logic as
+// POST /api/auth/delete-account.
+export async function DELETE(req: NextRequest) {
+  // Forward to the delete-account handler by re-using its route module.
+  // We import lazily so there is no circular dependency at module load time.
+  const { POST: deleteAccountHandler } = await import('@/app/api/auth/delete-account/route')
+  return deleteAccountHandler(req)
 }

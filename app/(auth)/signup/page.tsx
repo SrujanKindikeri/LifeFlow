@@ -58,14 +58,8 @@ function SignupForm() {
     >
       {/* Card */}
       <div
-        className="relative rounded-[28px] overflow-hidden"
-        style={{
-          background: 'rgba(255,255,255,0.88)',
-          backdropFilter: 'blur(36px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-          border: '1px solid rgba(0,0,0,0.08)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)',
-        }}
+        className="glass-floating glass-catchlight relative rounded-[28px] overflow-hidden"
+        style={{ boxShadow: 'var(--glass-shadow-lg)' }}
       >
         {/* Top inner highlight */}
         <div

@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, CheckSquare, StickyNote, Wallet, Edit3, X } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassTextarea } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 
@@ -119,7 +121,12 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
     if (!input.trim()) return
     const result = parseInput(input)
     setParsed(result)
-    setFields(result.fields)
+    // Store amountExpr as a string version of the detected amount
+    const amountNum = result.fields.amount
+    setFields({
+      ...result.fields,
+      amountExpr: amountNum != null ? String(amountNum) : '',
+    })
   }
 
   function changeType(type: ParsedItem['type']) {
@@ -134,6 +141,8 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   async function confirm() {
     if (!parsed) return
     setSaving(true)
+    // Resolve the expression to a numeric amount
+    const resolvedAmount = parseAmountExpression(String(fields.amountExpr ?? fields.amount ?? '')).value ?? fields.amount
     try {
       const today = new Date().toISOString().split('T')[0]
 
@@ -154,7 +163,7 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
       } else if (parsed.type === 'expense') {
         const res = await fetch('/api/expenses', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: fields.amount, category: fields.category ?? 'other', description: fields.description ?? parsed.raw, date: fields.date ?? today }),
+          body: JSON.stringify({ amount: resolvedAmount, category: fields.category ?? 'other', description: fields.description ?? parsed.raw, date: fields.date ?? today }),
         })
         if (!res.ok) throw new Error('Failed to create expense')
         success('Expense added')
@@ -164,7 +173,7 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
           body: JSON.stringify({
             person: { name: fields.person ?? 'Unknown' },
             direction: parsed.type === 'money_given' ? 'given' : 'borrowed',
-            amount: fields.amount,
+            amount: resolvedAmount,
             reason: parsed.raw,
             givenDate: fields.date ?? today,
           }),
@@ -259,7 +268,12 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 {parsed.type === 'expense' && (
                   <>
                     <div className="grid grid-cols-2 gap-3">
-                      <GlassInput label="Amount (₹)" type="number" value={String(fields.amount ?? '')} onChange={(e) => setField('amount', Number(e.target.value))} />
+                      <SmartAmountInput
+                        label="Amount (₹)"
+                        value={String(fields.amountExpr ?? '')}
+                        onChange={(raw) => setField('amountExpr', raw)}
+                        currency="INR"
+                      />
                       <GlassInput label="Date" type="date" value={String(fields.date ?? '')} onChange={(e) => setField('date', e.target.value)} />
                     </div>
                     <GlassInput label="Description" value={String(fields.description ?? '')} onChange={(e) => setField('description', e.target.value)} />
@@ -269,7 +283,12 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                   <>
                     <div className="grid grid-cols-2 gap-3">
                       <GlassInput label="Person" value={String(fields.person ?? '')} onChange={(e) => setField('person', e.target.value)} />
-                      <GlassInput label="Amount (₹)" type="number" value={String(fields.amount ?? '')} onChange={(e) => setField('amount', Number(e.target.value))} />
+                      <SmartAmountInput
+                        label="Amount (₹)"
+                        value={String(fields.amountExpr ?? '')}
+                        onChange={(raw) => setField('amountExpr', raw)}
+                        currency="INR"
+                      />
                     </div>
                     <GlassInput label="Date" type="date" value={String(fields.date ?? new Date().toISOString().split('T')[0])} onChange={(e) => setField('date', e.target.value)} />
                     <p className="text-xs" style={{ color: '#b45309' }}>

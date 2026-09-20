@@ -3,7 +3,7 @@
  *
  * PURPOSE
  * ───────
- * The notification scheduler runs periodically (e.g. hourly via cron).
+ * The notification scheduler runs periodically (e.g. minutely or hourly via cron).
  * Without a deduplication mechanism the same reminder (e.g. "tomorrow's tasks")
  * would be re-sent on every scheduler run.
  *
@@ -15,7 +15,7 @@
  * ──────────────────────
  * The `key` field is a deterministic string composed of:
  *
- *   <userId>:<notificationType>:<dateString>
+ *   <userId>:<notificationType>:<dateString>[:<extraDiscriminator>]
  *
  * Examples:
  *   "6630a1b2c3d4e5f6a7b8c9d0:TASK_TOMORROW:2026-09-13"
@@ -24,15 +24,28 @@
  *   "6630a1b2c3d4e5f6a7b8c9d0:DAILY_SUMMARY:2026-09-12"
  *   "6630a1b2c3d4e5f6a7b8c9d0:WEEKLY_SUMMARY:2026-W37"
  *   "6630a1b2c3d4e5f6a7b8c9d0:SPENDING_ALERT:food:2026-09"
+ *   "6630a1b2c3d4e5f6a7b8c9d0:MORNING_BRIEF:2026-09-17"
+ *
+ * STATUS LIFECYCLE
+ * ────────────────
+ * Each log entry tracks the full send lifecycle:
+ *
+ *   pending      → claimed by scheduler, not yet sent
+ *   processing   → actively being sent (stale after >5 min = crashed worker)
+ *   sent_to_smtp → successfully handed to the SMTP/email transport
+ *   failed       → send attempt failed; see `errorMessage`
  *
  * USAGE
  * ─────
  * Before sending a notification:
- *   const sent = await NotificationLog.exists({ key })
- *   if (sent) return   // already dispatched — skip
+ *   const alreadySent = await checkAndRecord(userId, type, forDate)
+ *   if (alreadySent) return   // already dispatched — skip
  *
- * After dispatching:
- *   await NotificationLog.create({ key, userId })
+ * On success:
+ *   await markNotificationSent(key)
+ *
+ * On failure:
+ *   await markNotificationFailed(key, errorMessage)
  *
  * The unique index on `key` makes concurrent scheduler runs safe — the second
  * insert throws E11000 (duplicate key) which the caller catches and ignores.
@@ -49,6 +62,13 @@ export type ScheduledNotificationType =
   | 'SPENDING_ALERT'
   | 'DAILY_SUMMARY'
   | 'WEEKLY_SUMMARY'
+  | 'MORNING_BRIEF'
+
+export type NotificationDeliveryStatus =
+  | 'pending'
+  | 'processing'
+  | 'sent_to_smtp'
+  | 'failed'
 
 export interface INotificationLog extends Document {
   _id: mongoose.Types.ObjectId
@@ -61,7 +81,56 @@ export interface INotificationLog extends Document {
   type: ScheduledNotificationType
   /** ISO date string of the "logical date" this notification is for. */
   forDate: string
+
+  /**
+   * UTC timestamp when this notification was scheduled to be delivered.
+   * Derived from: user's local date + local time + user's IANA timezone.
+   * Never computed from the EC2 server's local timezone.
+   * e.g. 2026-09-17T01:30:00.000Z for a 7:00 AM IST notification.
+   */
+  scheduledAt: Date
+
+  /**
+   * UTC timestamp when the notification was actually handed to the transport
+   * (SMTP, push, etc.).  Null until delivery completes.
+   */
+  sentAt: Date | null
+
+  /**
+   * Delivery lifecycle status.
+   * pending      → claimed by scheduler, not yet sent
+   * processing   → actively being sent
+   * sent_to_smtp → successfully handed to SMTP/push transport
+   * failed       → transport returned an error
+   */
+  status: NotificationDeliveryStatus
+
+  /** Short human-readable preview of the notification content (max 200 chars). */
+  contentPreview: string
+
+  /**
+   * The email subject line that was sent to the user.
+   * Stored at send time so the History view can show exactly what was sent,
+   * even if the user's data changes later.
+   * Null for non-email or pre-history notifications.
+   */
+  emailSubject: string | null
+
+  /**
+   * A safe snapshot of the email body — plain text, stripped of HTML tags,
+   * truncated to 2000 chars.  Used to display "View email content" in the
+   * notification history detail view without re-generating from current data.
+   *
+   * NEVER contains SMTP credentials, tokens, or server secrets.
+   * HTML is stripped before storage; only plain text is saved.
+   */
+  emailBodySnapshot: string | null
+
+  /** Error message if status === 'failed'. Sanitised — never contains secrets. */
+  errorMessage: string | null
+
   createdAt: Date
+  updatedAt: Date
 }
 
 const NotificationLogSchema = new Schema<INotificationLog>(
@@ -79,26 +148,68 @@ const NotificationLogSchema = new Schema<INotificationLog>(
         'SPENDING_ALERT',
         'DAILY_SUMMARY',
         'WEEKLY_SUMMARY',
+        'MORNING_BRIEF',
       ],
       required: true,
     },
     forDate: { type: String, required: true },
+
+    scheduledAt: {
+      type:    Date,
+      default: () => new Date(),   // defaults to now; callers should supply precise UTC
+      index:   true,   // enables efficient "find due notifications" queries
+    },
+    sentAt: {
+      type:    Date,
+      default: null,
+    },
+    status: {
+      type:    String,
+      enum:    ['pending', 'processing', 'sent_to_smtp', 'failed'],
+      default: 'pending',
+      index:   true,    // filter by status in history queries
+    },
+    contentPreview: {
+      type:      String,
+      default:   '',
+      maxlength: 200,
+    },
+    emailSubject: {
+      type:      String,
+      default:   null,
+      maxlength: 500,
+    },
+    emailBodySnapshot: {
+      type:      String,
+      default:   null,
+      maxlength: 2000,
+    },
+    errorMessage: {
+      type:    String,
+      default: null,
+    },
   },
   {
     timestamps: true,
-    // Only store createdAt — we never update these records.
-    // (updatedAt is excluded by this partial timestamps config)
   }
 )
 
 // Global unique key — duplicate inserts throw E11000, which callers catch.
 NotificationLogSchema.index({ key: 1 }, { unique: true })
 
-// TTL index — MongoDB auto-removes documents older than 7 days.
-// This keeps the collection lean without a separate cleanup job.
+// Compound index for history queries by user, ordered by scheduled time.
+NotificationLogSchema.index({ userId: 1, scheduledAt: -1 })
+
+// Compound index for "find due notifications" queries:
+//   find({ scheduledAt: { $lte: now }, status: 'pending' })
+NotificationLogSchema.index({ status: 1, scheduledAt: 1 })
+
+// TTL index — MongoDB auto-removes documents older than 30 days.
+// Longer retention than before (was 7 * 24 * 60 * 60 = 7 days) so notification
+// history stays visible for a full calendar month.
 NotificationLogSchema.index(
   { createdAt: 1 },
-  { expireAfterSeconds: 7 * 24 * 60 * 60 }
+  { expireAfterSeconds: 30 * 24 * 60 * 60 }
 )
 
 const NotificationLog: Model<INotificationLog> =

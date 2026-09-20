@@ -16,6 +16,21 @@ export interface IMoneyPerson {
   linkedLifeFlowId?: string
 }
 
+/**
+ * An additional amount added to an existing money record after creation.
+ * Stored as an embedded array on MoneyRecord for history tracking.
+ * originalAmountMinor is NEVER changed; totals are derived by summing
+ * originalAmountMinor + sum(additionalAmounts[].amountMinor).
+ */
+export interface IMoneyAdditionalAmount {
+  _id: mongoose.Types.ObjectId
+  amountMinor: number   // paise
+  reason: string        // what the additional money was for
+  date: string          // YYYY-MM-DD
+  note?: string
+  createdAt: Date
+}
+
 export interface IMoneyRecord extends Document {
   _id: mongoose.Types.ObjectId
   userId: mongoose.Types.ObjectId
@@ -25,9 +40,15 @@ export interface IMoneyRecord extends Document {
   person: IMoneyPerson
   direction: MoneyDirection
 
-  /** Original amount in minor currency units (paise for INR). Never changes. */
+  /** Original amount in minor currency units (paise for INR). Never changes after creation. */
   originalAmountMinor: number
   currency: string
+
+  /**
+   * History of additional amounts added to this record after creation.
+   * Total owed = originalAmountMinor + sum(additionalAmounts[].amountMinor).
+   */
+  additionalAmounts: IMoneyAdditionalAmount[]
 
   reason: string
   category?: string
@@ -35,7 +56,7 @@ export interface IMoneyRecord extends Document {
   dueDate?: string    // YYYY-MM-DD — optional repayment deadline
   note?: string
 
-  /** Computed & cached on every payment mutation. Source of truth is payments. */
+  /** Computed & cached on every payment/amount mutation. Source of truth is payments. */
   status: MoneyStatus
 
   createdAt: Date
@@ -57,6 +78,22 @@ const MoneyPersonSchema = new Schema<IMoneyPerson>(
   { _id: false }
 )
 
+const MoneyAdditionalAmountSchema = new Schema<IMoneyAdditionalAmount>(
+  {
+    amountMinor: {
+      type: Number,
+      required: true,
+      min: 1,
+      validate: { validator: Number.isInteger, message: 'Must be integer paise' },
+    },
+    reason:    { type: String, required: true, trim: true, maxlength: 500 },
+    date:      { type: String, required: true },
+    note:      { type: String, trim: true, maxlength: 1000 },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+)
+
 const MoneyRecordSchema = new Schema<IMoneyRecord>(
   {
     userId:              { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -66,6 +103,8 @@ const MoneyRecordSchema = new Schema<IMoneyRecord>(
     direction:           { type: String, enum: ['given', 'borrowed'], required: true },
     originalAmountMinor: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'Must be integer paise' } },
     currency:            { type: String, default: 'INR', maxlength: 5 },
+    /** History of amounts added after initial creation. Immutable after insertion. */
+    additionalAmounts:   { type: [MoneyAdditionalAmountSchema], default: [] },
     reason:              { type: String, required: true, trim: true, maxlength: 500 },
     category:            { type: String, trim: true, maxlength: 100 },
     givenDate:           { type: String, required: true },

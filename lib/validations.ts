@@ -131,6 +131,28 @@ export const profileUpdateSchema = z.object({
   timezone: z.string().max(50).default('Asia/Kolkata'),
 })
 
+// ─── Appearance preferences ───────────────────────────────────────────────────
+
+export const appearancePreferencesSchema = z.object({
+  theme: z.enum(['light', 'dark', 'system']).default('light'),
+  nightShiftEnabled: z.boolean().default(false),
+  /** "HH:MM" 24-hour format */
+  nightShiftStart: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, 'Time must be in HH:MM format')
+    .default('22:00'),
+  /** "HH:MM" 24-hour format */
+  nightShiftEnd: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, 'Time must be in HH:MM format')
+    .default('07:00'),
+  turnToneEnabled: z.boolean().default(true),
+  /** Volume 0.0 – 1.0 */
+  turnToneVolume: z.number().min(0).max(1).default(0.5),
+})
+
+export type AppearancePreferencesInput = z.infer<typeof appearancePreferencesSchema>
+
 export const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1, 'Current password is required'),
@@ -258,8 +280,26 @@ export const moneyPaymentUpdateSchema = z.object({
 
 export const moneyRecordUpdateSchema = moneyRecordSchema.partial()
 
-export type MoneyRecordInput   = z.infer<typeof moneyRecordSchema>
-export type MoneyPaymentInput  = z.infer<typeof moneyPaymentSchema>
+/**
+ * Validates the body of POST /api/money-records/[id]/add-amount.
+ * `amount` is in rupees (display unit) — converted to paise server-side.
+ */
+export const moneyAddAmountSchema = z.object({
+  /** Amount in rupees (display unit). Converted to paise server-side. */
+  amount:  z.number().positive('Amount must be positive').max(10_000_000, 'Amount too large'),
+  reason:  z.string().min(1, 'Reason is required').max(500),
+  date:    z.string().min(1, 'Date is required'),
+  note:    z.string().max(1000).optional(),
+  /**
+   * Idempotency key from the client (generated per submit attempt).
+   * Prevents double-adds on network retry or accidental double-click.
+   */
+  idempotencyKey: z.string().max(128).optional(),
+})
+
+export type MoneyRecordInput      = z.infer<typeof moneyRecordSchema>
+export type MoneyPaymentInput     = z.infer<typeof moneyPaymentSchema>
+export type MoneyAddAmountInput   = z.infer<typeof moneyAddAmountSchema>
 
 // ─── Legacy type exports ──────────────────────────────────────────────────────
 

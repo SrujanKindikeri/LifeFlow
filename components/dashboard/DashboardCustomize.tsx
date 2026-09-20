@@ -99,14 +99,8 @@ export function DashboardCustomize({ isOpen, onClose, initialSections, onSaved }
             role="dialog"
             aria-modal="true"
             aria-label="Customize Dashboard"
-            className="relative w-full max-w-sm max-h-[88dvh] flex flex-col rounded-t-[28px] sm:rounded-2xl overflow-hidden"
-            style={{
-              background: 'rgba(255,255,255,0.97)',
-              backdropFilter: 'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.12)',
-            }}
+            className="glass-floating relative w-full max-w-sm max-h-[88dvh] flex flex-col rounded-t-[28px] sm:rounded-2xl overflow-hidden"
+            style={{ boxShadow: 'var(--glass-shadow-xl)' }}
             initial={{ opacity: 0, y: 32 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 24 }}
@@ -114,13 +108,13 @@ export function DashboardCustomize({ isOpen, onClose, initialSections, onSaved }
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-9 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.12)' }} />
+              <div className="w-9 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             {/* Header */}
             <div
               className="flex items-center justify-between px-5 pt-4 sm:pt-5 pb-4 shrink-0"
-              style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+              style={{ borderBottom: '1px solid var(--border)' }}
             >
               <div className="flex items-center gap-2">
                 <Settings2 size={15} style={{ color: 'var(--text-muted)' }} />
@@ -131,7 +125,7 @@ export function DashboardCustomize({ isOpen, onClose, initialSections, onSaved }
               <div className="flex items-center gap-2">
                 <button
                   onClick={reset}
-                  className="p-1.5 rounded-xl text-[11px] flex items-center gap-1 hover:bg-black/[0.05] transition-colors"
+                  className="nav-hover p-1.5 rounded-xl text-[11px] flex items-center gap-1 transition-colors"
                   style={{ color: 'var(--text-muted)' }}
                   aria-label="Reset to defaults"
                   title="Reset to defaults"
@@ -140,7 +134,7 @@ export function DashboardCustomize({ isOpen, onClose, initialSections, onSaved }
                 </button>
                 <button
                   onClick={onClose}
-                  className="p-1.5 rounded-xl hover:bg-black/[0.05] transition-colors"
+                  className="nav-hover p-1.5 rounded-xl transition-colors"
                   style={{ color: 'var(--text-muted)' }}
                   aria-label="Close"
                 >

@@ -59,12 +59,12 @@ async function enrichPerson(
     for (const r of moneyRecords) {
       const rec = r as unknown as IMoneyRecord
       const pmts = paymentMap.get(r._id.toString()) ?? []
-      const bal = calcBalance(rec.originalAmountMinor, pmts.map((p) => p.amountMinor))
+      const bal = calcBalance(rec.originalAmountMinor, rec.additionalAmounts ?? [], pmts.map((p) => p.amountMinor))
       if (rec.direction === 'given') {
-        moneyGivenMinor += rec.originalAmountMinor
+        moneyGivenMinor += bal.totalMinor
         moneyGivenPaidMinor += bal.paidMinor
       } else {
-        moneyBorrowedMinor += rec.originalAmountMinor
+        moneyBorrowedMinor += bal.totalMinor
         moneyBorrowedPaidMinor += bal.paidMinor
       }
     }

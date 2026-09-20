@@ -869,7 +869,7 @@ export async function getDashboardData(
     for (const r of moneyRecordsRaw) {
       const rec = r as unknown as IMoneyRecord
       const payments = paymentMap.get(r._id.toString()) ?? []
-      const balance = calcBalance(rec.originalAmountMinor, payments.map((p) => p.amountMinor))
+      const balance = calcBalance(rec.originalAmountMinor, rec.additionalAmounts ?? [], payments.map((p) => p.amountMinor))
 
       const name = rec.person.name
       if (!personMap.has(name)) personMap.set(name, { name, owesYouMinor: 0, youOweMinor: 0 })

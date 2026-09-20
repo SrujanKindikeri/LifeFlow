@@ -239,11 +239,11 @@ export function GroupBillCalendar({
               'sm:absolute sm:bottom-auto sm:left-auto sm:right-auto sm:rounded-2xl sm:w-[340px]',
             )}
             style={{
-              background: 'rgba(255,255,255,0.96)',
+              background: 'var(--glass-floating-bg)',
               backdropFilter: 'blur(40px) saturate(1.9)',
               WebkitBackdropFilter: 'blur(40px) saturate(1.9)',
-              border: '1px solid rgba(0,0,0,0.07)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)',
+              border: '1px solid var(--glass-floating-border)',
+              boxShadow: 'var(--glass-shadow-lg)',
             }}
             initial={{ opacity: 0, y: 24, scale: 0.97 }}
             animate={{ opacity: 1, y: 0,  scale: 1    }}
@@ -252,7 +252,7 @@ export function GroupBillCalendar({
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-0 sm:hidden">
-              <div className="w-9 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.11)' }} />
+              <div className="w-9 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             <div className="p-4 pb-5 sm:p-5">
@@ -261,7 +261,7 @@ export function GroupBillCalendar({
                 <button
                   onClick={prevMonth}
                   aria-label="Previous month"
-                  className="p-1.5 rounded-xl transition-colors hover:bg-black/[0.05] focus-ring"
+                  className="p-1.5 rounded-xl transition-colors nav-hover focus-ring"
                   style={{ color: 'var(--text-secondary)' }}
                 >
                   <ChevronLeft size={16} />
@@ -280,7 +280,7 @@ export function GroupBillCalendar({
                   <button
                     onClick={goToToday}
                     aria-label="Go to today"
-                    className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors hover:bg-black/[0.05] focus-ring"
+                    className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors nav-hover focus-ring"
                     style={{ color: 'var(--accent)' }}
                   >
                     Today
@@ -288,7 +288,7 @@ export function GroupBillCalendar({
                   <button
                     onClick={nextMonth}
                     aria-label="Next month"
-                    className="p-1.5 rounded-xl transition-colors hover:bg-black/[0.05] focus-ring"
+                    className="p-1.5 rounded-xl transition-colors nav-hover focus-ring"
                     style={{ color: 'var(--text-secondary)' }}
                   >
                     <ChevronRight size={16} />
@@ -296,7 +296,7 @@ export function GroupBillCalendar({
                   <button
                     onClick={onClose}
                     aria-label="Close calendar"
-                    className="hidden sm:flex p-1.5 rounded-xl transition-colors hover:bg-black/[0.05] focus-ring ml-1"
+                    className="hidden sm:flex p-1.5 rounded-xl transition-colors nav-hover focus-ring ml-1"
                     style={{ color: 'var(--text-muted)' }}
                   >
                     <X size={14} />
@@ -420,7 +420,7 @@ function GroupDayCell({
         'relative flex flex-col items-center justify-start pt-1.5 pb-1',
         'rounded-xl cursor-pointer transition-colors duration-100',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40',
-        !isSelected && 'hover:bg-black/[0.04]',
+        !isSelected && 'nav-hover',
       )}
       style={isSelected ? {
         background: 'rgba(37,99,235,0.10)',

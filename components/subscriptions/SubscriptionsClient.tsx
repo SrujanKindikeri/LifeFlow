@@ -7,6 +7,8 @@ import { CreditCard, Plus, Pencil, Trash2, RefreshCw, CheckCircle2, Clock } from
 import { GlassCard } from '@/components/ui/GlassCard'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassTextarea, GlassSelect } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/utils'
@@ -97,7 +99,7 @@ function SubForm({
   const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
     serviceName:       initial?.serviceName       ?? '',
-    amount:            initial?.amount            ?? 0,
+    amountExpr:        initial?.amount != null ? String(initial.amount) : '',
     currency:          initial?.currency          ?? 'INR',
     billingCycle:      initial?.billingCycle      ?? 'monthly',
     nextBillingDate:   initial?.nextBillingDate   ?? today,
@@ -123,7 +125,7 @@ function SubForm({
           const data = d.draft.data as Partial<typeof form>
           const loaded = {
             serviceName:       data.serviceName       ?? '',
-            amount:            Number(data.amount      ?? 0),
+            amountExpr:        data.amountExpr        ?? '',
             currency:          data.currency          ?? 'INR',
             billingCycle:      data.billingCycle      ?? 'monthly',
             nextBillingDate:   data.nextBillingDate   ?? today,
@@ -141,6 +143,11 @@ function SubForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  function handleSave() {
+    const parsed = parseAmountExpression(form.amountExpr)
+    const amount = parsed.value ?? 0
+    onSave({ ...form, amount })
+  }
   return (
     <div className="flex flex-col gap-4">
       <GlassInput
@@ -152,13 +159,11 @@ function SubForm({
       />
 
       <div className="grid grid-cols-2 gap-3">
-        <GlassInput
-          label="Amount (₹)"
-          type="number"
-          min={0.01}
-          step={0.01}
-          value={form.amount || ''}
-          onChange={(e) => set('amount', Number(e.target.value))}
+        <SmartAmountInput
+          label="Amount"
+          value={form.amountExpr}
+          onChange={(raw) => set('amountExpr', raw)}
+          currency={form.currency}
         />
         <GlassSelect
           label="Billing Cycle"
@@ -227,7 +232,7 @@ function SubForm({
 
       <div className="flex gap-2.5 justify-end pt-1">
         <GlassButton variant="ghost" size="sm" onClick={onClose}>Cancel</GlassButton>
-        <GlassButton variant="primary" size="sm" loading={loading} onClick={() => onSave(form)}>
+        <GlassButton variant="primary" size="sm" loading={loading} onClick={handleSave}>
           {initial?._id ? 'Save Changes' : 'Add Subscription'}
         </GlassButton>
       </div>

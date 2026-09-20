@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Plus, Check } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassTextarea, GlassSelect } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { useToast } from '@/components/ui/Toast'
 import { cn, EXPENSE_CATEGORIES, HABIT_ICONS } from '@/lib/utils'
 import type { DashboardTask } from '@/lib/dashboard'
@@ -62,18 +64,12 @@ export function QuickAddModal({ type, onClose, onTaskAdded }: QuickAddModalProps
           {/* Panel */}
           <motion.div
             className={cn(
-              'relative w-full z-10',
+              'glass-floating relative w-full z-10',
               'rounded-t-3xl sm:rounded-2xl',
               'max-h-[90vh] overflow-y-auto',
               type === 'splitbill' ? 'sm:max-w-lg' : 'sm:max-w-md'
             )}
-            style={{
-              background: 'rgba(255,255,255,0.97)',
-              backdropFilter: 'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)',
-            }}
+            style={{ boxShadow: 'var(--glass-shadow-xl)' }}
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 40 }}
@@ -81,20 +77,20 @@ export function QuickAddModal({ type, onClose, onTaskAdded }: QuickAddModalProps
           >
             {/* Drag handle (mobile) */}
             <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-10 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.12)' }} />
+              <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             {/* Header */}
             <div
               className="flex items-center justify-between px-5 pt-4 sm:pt-5 pb-4"
-              style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+              style={{ borderBottom: '1px solid var(--border)' }}
             >
               <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {TITLES[type]}
               </h2>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-black/[0.05] transition-colors"
+                className="nav-hover p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-muted)' }}
                 aria-label="Close"
               >
@@ -319,7 +315,8 @@ function AddExpenseForm({ onClose }: { onClose: () => void }) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    const amt = parseFloat(amount)
+    const parsed = parseAmountExpression(amount)
+    const amt = parsed.value
     if (!amt || amt <= 0) return
     setSaving(true)
     try {
@@ -348,14 +345,11 @@ function AddExpenseForm({ onClose }: { onClose: () => void }) {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <GlassInput
-        label="Amount (₹)"
-        type="number"
-        placeholder="0.00"
-        min="0.01"
-        step="0.01"
+      <SmartAmountInput
+        label="Amount"
         value={amount}
-        onChange={(e) => setAmount(e.target.value)}
+        onChange={(raw) => setAmount(raw)}
+        currency="INR"
         autoFocus
         required
       />
@@ -403,7 +397,7 @@ function AddExpenseForm({ onClose }: { onClose: () => void }) {
         variant="primary"
         fullWidth
         loading={saving}
-        disabled={!amount || parseFloat(amount) <= 0}
+        disabled={!amount || (parseAmountExpression(amount).value ?? 0) <= 0}
       >
         <Check size={14} />
         Add Expense
@@ -494,7 +488,8 @@ function AddSplitBillForm({ onClose }: { onClose: () => void }) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    const amt = parseFloat(total)
+    const parsed = parseAmountExpression(total)
+    const amt = parsed.value
     const filledPeople = people.filter((p) => p.trim())
     if (!name.trim() || !amt || filledPeople.length < 2) return
     setSaving(true)
@@ -564,7 +559,7 @@ function AddSplitBillForm({ onClose }: { onClose: () => void }) {
   }
 
   const filledPeople = people.filter((p) => p.trim())
-  const amt = parseFloat(total)
+  const amt = parseAmountExpression(total).value ?? 0
   const perHead = filledPeople.length >= 2 && amt > 0 ? amt / filledPeople.length : 0
 
   return (
@@ -578,14 +573,11 @@ function AddSplitBillForm({ onClose }: { onClose: () => void }) {
         required
       />
 
-      <GlassInput
-        label="Total amount (₹)"
-        type="number"
-        placeholder="0.00"
-        min="0.01"
-        step="0.01"
+      <SmartAmountInput
+        label="Total amount"
         value={total}
-        onChange={(e) => setTotal(e.target.value)}
+        onChange={(raw) => setTotal(raw)}
+        currency="INR"
         required
       />
 
@@ -638,7 +630,7 @@ function AddSplitBillForm({ onClose }: { onClose: () => void }) {
         variant="primary"
         fullWidth
         loading={saving}
-        disabled={!name.trim() || !total || parseFloat(total) <= 0 || filledPeople.length < 2}
+        disabled={!name.trim() || !total || (parseAmountExpression(total).value ?? 0) <= 0 || filledPeople.length < 2}
       >
         <Check size={14} />
         Create Split

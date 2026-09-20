@@ -133,16 +133,21 @@ export function NotificationsClient() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap">
+      <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap" style={{ boxShadow: 'inset 0 1px 0 var(--glass-catchlight)' }}>
         {tabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
             className={cn(
-              'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all',
-              tab === key ? 'glass-segment-active text-white' : 'hover:bg-black/[0.04]'
+              'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150',
+              tab === key
+                ? 'glass-segment-active'
+                : 'hover:bg-black/[0.04]'
             )}
-            style={tab === key ? {} : { color: 'var(--text-muted)' }}
+            style={tab === key
+              ? { color: 'var(--accent-text)' }
+              : { color: 'var(--text-muted)' }
+            }
           >
             {label}
           </button>
@@ -185,17 +190,18 @@ function NotificationItem({ notification: n, onMarkRead, onDelete }: {
       exit={{ opacity: 0, x: -24, height: 0, marginBottom: 0 }}
       transition={{ duration: 0.2 }}
       className={cn(
-        'group glass rounded-xl flex items-start gap-3.5 px-4 py-3.5',
-        'hover:bg-black/[0.02] transition-colors',
-        !n.read && 'border-l-[3px] border-indigo-500'
+        'group rounded-xl flex items-start gap-3.5 px-4 py-3.5',
+        'transition-all duration-200',
+        !n.read
+          ? 'glass-elevated border-l-[3px] border-indigo-500 hover:shadow-[var(--glass-hover-shadow)]'
+          : 'glass hover:bg-black/[0.02]',
       )}
     >
       {/* Icon */}
       <div className={cn(
         'w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5',
-        !n.read ? 'bg-indigo-500/10' : ''
+        !n.read ? 'bg-indigo-500/10 ring-1 ring-indigo-500/20' : 'glass-subtle'
       )}
-      style={n.read ? { background: 'rgba(0,0,0,0.04)' } : {}}
       >
         {TYPE_ICONS[n.type] ?? <Bell size={14} style={{ color: 'var(--text-muted)' }} />}
       </div>
@@ -221,7 +227,7 @@ function NotificationItem({ notification: n, onMarkRead, onDelete }: {
         <button
           onClick={() => onMarkRead(n._id, n.read)}
           title={n.read ? 'Mark unread' : 'Mark read'}
-          className="p-1.5 rounded-lg hover:bg-black/[0.05] hover:text-indigo-500 transition-colors"
+          className="p-1.5 rounded-lg nav-hover hover:text-indigo-500 transition-colors"
           style={{ color: 'var(--text-faint)' }}
         >
           <Check size={13} />
@@ -229,7 +235,7 @@ function NotificationItem({ notification: n, onMarkRead, onDelete }: {
         <button
           onClick={() => onDelete(n._id)}
           title="Delete"
-          className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-500 transition-colors"
+          className="p-1.5 rounded-lg nav-hover-danger hover:text-red-500 transition-colors"
           style={{ color: 'var(--text-faint)' }}
         >
           <X size={13} />

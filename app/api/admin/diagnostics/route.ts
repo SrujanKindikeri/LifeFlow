@@ -105,6 +105,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       habitRemindersEnabled: number
       spendingAlertsEnabled: number
       dailySummaryEnabled: number
+      // Account lifecycle
+      activeAccounts: number
+      deletedAccounts: number
+      pendingPermanentDeletion: number
     }>([
       {
         $group: {
@@ -219,22 +223,60 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               ],
             },
           },
+
+          // ── Account lifecycle (soft-delete) ───────────────────────────
+          // activeAccounts: status = "active" OR field absent (legacy users)
+          activeAccounts: {
+            $sum: {
+              $cond: [
+                { $or: [
+                  { $eq: ['$accountStatus', 'active'] },
+                  { $eq: [{ $ifNull: ['$accountStatus', 'active'] }, 'active'] },
+                ]},
+                1,
+                0,
+              ],
+            },
+          },
+
+          deletedAccounts: {
+            $sum: {
+              $cond: [{ $eq: ['$accountStatus', 'deleted'] }, 1, 0],
+            },
+          },
+
+          // pendingPermanentDeletion: deleted AND scheduledPermanentDeletionAt <= now
+          pendingPermanentDeletion: {
+            $sum: {
+              $cond: [
+                { $and: [
+                  { $eq: ['$accountStatus', 'deleted'] },
+                  { $lte: ['$scheduledPermanentDeletionAt', new Date()] },
+                ]},
+                1,
+                0,
+              ],
+            },
+          },
         },
       },
     ])
 
     // Handle empty collection (aggregation returns nothing when there are no documents)
     const stats = result ?? {
-      totalUsers:             0,
-      twoFactorEnabled:       0,
-      recoveryFieldPresent:   0,
-      usersWithRecoveryCodes: 0,
-      emailNotifFieldPresent: 0,
-      emailNotifEnabled:      0,
-      taskRemindersEnabled:   0,
-      habitRemindersEnabled:  0,
-      spendingAlertsEnabled:  0,
-      dailySummaryEnabled:    0,
+      totalUsers:              0,
+      twoFactorEnabled:        0,
+      recoveryFieldPresent:    0,
+      usersWithRecoveryCodes:  0,
+      emailNotifFieldPresent:  0,
+      emailNotifEnabled:       0,
+      taskRemindersEnabled:    0,
+      habitRemindersEnabled:   0,
+      spendingAlertsEnabled:   0,
+      dailySummaryEnabled:     0,
+      activeAccounts:          0,
+      deletedAccounts:         0,
+      pendingPermanentDeletion: 0,
     }
 
     // ── Recovery code count distribution ────────────────────────────────────
@@ -291,6 +333,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           habitReminders:  stats.habitRemindersEnabled,
           spendingAlerts:  stats.spendingAlertsEnabled,
           dailySummary:    stats.dailySummaryEnabled,
+        },
+
+        // Account lifecycle (soft-delete) — counts only, never PII
+        accountLifecycle: {
+          active:                  stats.activeAccounts,
+          deleted:                 stats.deletedAccounts,
+          pendingPermanentDeletion: stats.pendingPermanentDeletion,
         },
 
         // Runtime environment checks (boolean flags only — never secret values)

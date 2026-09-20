@@ -6,6 +6,8 @@ import { BarChart2, Plus, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { EXPENSE_CATEGORIES } from '@/lib/utils'
@@ -25,21 +27,33 @@ function BudgetForm({ initial, onSave, onClose, loading }: {
   const currentMonth = new Date().toISOString().slice(0,7)
   const [form, setForm] = useState({
     category: initial?.category ?? 'food',
-    amount: initial?.amount ?? 0,
+    amountExpr: initial?.amount != null ? String(initial.amount) : '',
     month: initial?.month ?? currentMonth,
     currency: initial?.currency ?? 'INR',
   })
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }))
+
+  function handleSave() {
+    const parsed = parseAmountExpression(form.amountExpr)
+    const numericAmount = parsed.value
+    onSave({ ...form, amount: numericAmount })
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <GlassSelect label="Category" value={form.category} onChange={(v) => set('category', v)} options={CAT_OPTIONS} />
       <div className="grid grid-cols-2 gap-3">
-        <GlassInput label="Budget (₹)" type="number" min={1} value={form.amount || ''} onChange={(e) => set('amount', Number(e.target.value))} />
+        <SmartAmountInput
+          label="Budget"
+          value={form.amountExpr}
+          onChange={(raw) => set('amountExpr', raw)}
+          currency={form.currency}
+        />
         <GlassInput label="Month" type="month" value={form.month} onChange={(e) => set('month', e.target.value)} />
       </div>
       <div className="flex gap-2.5 justify-end">
         <GlassButton variant="ghost" size="sm" onClick={onClose}>Cancel</GlassButton>
-        <GlassButton variant="primary" size="sm" loading={loading} onClick={() => onSave(form)}>
+        <GlassButton variant="primary" size="sm" loading={loading} onClick={handleSave}>
           {initial?._id ? 'Update Budget' : 'Set Budget'}
         </GlassButton>
       </div>

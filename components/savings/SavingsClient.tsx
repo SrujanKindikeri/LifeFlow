@@ -7,6 +7,8 @@ import { PiggyBank, Plus, Pencil, Trash2, History } from 'lucide-react'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassTextarea } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { formatDate } from '@/lib/utils'
@@ -33,7 +35,7 @@ function GoalForm({ initial, onSave, onClose, loading, onFormChange, draftIdPara
   draftIdParam?: string
 }) {
   const [form, setForm] = useState({
-    title: initial?.title ?? '', targetAmount: initial?.targetAmount ?? 0,
+    title: initial?.title ?? '', targetAmountExpr: initial?.targetAmount != null ? String(initial.targetAmount) : '',
     icon: initial?.icon ?? '🎯', color: initial?.color ?? '#3b82f6',
     targetDate: initial?.targetDate ?? '', notes: initial?.notes ?? '',
   })
@@ -47,17 +49,28 @@ function GoalForm({ initial, onSave, onClose, loading, onFormChange, draftIdPara
       .then((d) => {
         if (d?.draft?.data) {
           const data = d.draft.data as Partial<typeof form>
-          const loaded = { title: data.title ?? '', targetAmount: Number(data.targetAmount ?? 0), icon: data.icon ?? '🎯', color: data.color ?? '#3b82f6', targetDate: data.targetDate ?? '', notes: data.notes ?? '' }
+          const loaded = { title: data.title ?? '', targetAmountExpr: data.targetAmountExpr ?? '', icon: data.icon ?? '🎯', color: data.color ?? '#3b82f6', targetDate: data.targetDate ?? '', notes: data.notes ?? '' }
           setForm(loaded); onFormChange?.(loaded)
         }
       }).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  function handleSave() {
+    const parsed = parseAmountExpression(form.targetAmountExpr)
+    const targetAmount = parsed.value
+    onSave({ ...form, targetAmount: targetAmount ?? 0 })
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <GlassInput label="Goal Title" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Laptop Fund" required />
-      <GlassInput label="Target Amount (₹)" type="number" min={1} value={form.targetAmount || ''} onChange={(e) => set('targetAmount', Number(e.target.value))} />
+      <SmartAmountInput
+        label="Target Amount"
+        value={form.targetAmountExpr}
+        onChange={(raw) => set('targetAmountExpr', raw)}
+        currency="INR"
+      />
       <GlassInput label="Target Date" type="date" value={form.targetDate} onChange={(e) => set('targetDate', e.target.value)} />
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-muted)' }}>Icon</p>
@@ -80,7 +93,7 @@ function GoalForm({ initial, onSave, onClose, loading, onFormChange, draftIdPara
       <GlassTextarea label="Notes" value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} />
       <div className="flex gap-2.5 justify-end">
         <GlassButton variant="ghost" size="sm" onClick={onClose}>Cancel</GlassButton>
-        <GlassButton variant="primary" size="sm" loading={loading} onClick={() => onSave(form)}>
+        <GlassButton variant="primary" size="sm" loading={loading} onClick={handleSave}>
           {initial?._id ? 'Save' : 'Create Goal'}
         </GlassButton>
       </div>
@@ -103,12 +116,14 @@ function ContributionModal({ goal, onAdded }: { goal: SGoal; onClose: ()=>void; 
   }, [goal._id])
 
   async function add() {
-    if (!amount || Number(amount) <= 0) { showError('Amount must be > 0'); return }
+    const parsed = parseAmountExpression(amount)
+    const numericAmount = parsed.value
+    if (!numericAmount || numericAmount <= 0) { showError('Amount must be > 0'); return }
     setAdding(true)
     try {
       const res = await fetch(`/api/savings-goals/${goal._id}/contributions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: Number(amount), date, note }),
+        body: JSON.stringify({ amount: numericAmount, date, note }),
       })
       if (!res.ok) throw new Error()
       success('Contribution added'); setAmount(''); setNote('')
@@ -136,7 +151,7 @@ function ContributionModal({ goal, onAdded }: { goal: SGoal; onClose: ()=>void; 
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <GlassInput label="Amount (₹)" type="number" min={0.01} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+        <SmartAmountInput label="Amount" value={amount} onChange={(raw) => setAmount(raw)} currency="INR" />
         <GlassInput label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
       <GlassInput label="Note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />

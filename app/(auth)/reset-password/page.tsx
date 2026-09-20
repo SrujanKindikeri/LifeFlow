@@ -155,14 +155,8 @@ function ResetPasswordContent() {
         className="w-full max-w-[400px]"
       >
         <div
-          className="relative rounded-[28px] overflow-hidden"
-          style={{
-            background:          'rgba(255,255,255,0.88)',
-            backdropFilter:      'blur(36px) saturate(1.8)',
-            WebkitBackdropFilter:'blur(36px) saturate(1.8)',
-            border:              '1px solid rgba(0,0,0,0.08)',
-            boxShadow:           '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)',
-          }}
+          className="glass-floating glass-catchlight relative rounded-[28px] overflow-hidden"
+          style={{ boxShadow: 'var(--glass-shadow-lg)' }}
         >
           <div
             className="absolute inset-x-0 top-0 h-px pointer-events-none"
@@ -242,14 +236,8 @@ function ResetPasswordContent() {
         className="w-full max-w-[400px]"
       >
         <div
-          className="relative rounded-[28px] overflow-hidden"
-          style={{
-            background:          'rgba(255,255,255,0.88)',
-            backdropFilter:      'blur(36px) saturate(1.8)',
-            WebkitBackdropFilter:'blur(36px) saturate(1.8)',
-            border:              '1px solid rgba(0,0,0,0.08)',
-            boxShadow:           '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)',
-          }}
+          className="glass-floating glass-catchlight relative rounded-[28px] overflow-hidden"
+          style={{ boxShadow: 'var(--glass-shadow-lg)' }}
         >
           <div
             className="absolute inset-x-0 top-0 h-px pointer-events-none"
@@ -442,15 +430,8 @@ export default function ResetPasswordPage() {
       fallback={
         <div className="w-full max-w-[400px]">
           <div
-            className="rounded-[28px] overflow-hidden p-8 flex items-center justify-center"
-            style={{
-              background:          'rgba(255,255,255,0.88)',
-              backdropFilter:      'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter:'blur(36px) saturate(1.8)',
-              border:              '1px solid rgba(0,0,0,0.08)',
-              boxShadow:           '0 8px 40px rgba(0,0,0,0.10)',
-              minHeight:           '280px',
-            }}
+            className="glass-floating glass-catchlight rounded-[28px] overflow-hidden p-8 flex items-center justify-center"
+            style={{ minHeight: '280px' }}
           >
             <div
               className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"

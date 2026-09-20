@@ -31,6 +31,8 @@ import {
 import { Modal } from '@/components/ui/Modal'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { useToast } from '@/components/ui/Toast'
 import { EXPENSE_CATEGORIES } from '@/lib/utils'
 import type { CapturedImage } from './TransactionCapturePanel'
@@ -192,7 +194,7 @@ export function TransactionAnalysisModal({
 
   // ── Duplicate check ────────────────────────────────────────────────────────
   async function checkDuplicate(): Promise<DuplicateInfo | null> {
-    const amountNum = parseFloat(amount)
+    const amountNum = parseAmountExpression(amount).value
     if (!amountNum || !date) return null
     setCheckingDup(true)
     try {
@@ -220,8 +222,9 @@ export function TransactionAnalysisModal({
 
   // ── Confirm ────────────────────────────────────────────────────────────────
   async function handleConfirm(forceDuplicate = false) {
-    const amountNum = parseFloat(amount)
-    if (!amount || isNaN(amountNum) || amountNum <= 0) {
+    const amountParseResult = parseAmountExpression(amount)
+    const amountNum = amountParseResult.value
+    if (!amount || amountNum === null || amountParseResult.error !== null || amountNum <= 0) {
       toastError('Please enter a valid amount.')
       return
     }
@@ -431,29 +434,13 @@ export function TransactionAnalysisModal({
         )}
 
         {/* ── Core expense fields ────────────────────────────────────────── */}
-        <div>
-          <label className="text-sm font-medium block mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-            Amount <span style={{ color: 'var(--danger, #dc2626)' }}>*</span>
-          </label>
-          <div className="relative">
-            <span
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              ₹
-            </span>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0.01"
-              step="0.01"
-              placeholder="0.00"
-              className="glass-input w-full rounded-xl pl-8 pr-3.5 py-2.5 text-sm"
-              value={amount}
-              onChange={(e) => { setAmount(e.target.value); setDuplicateChecked(false); setDuplicate(null) }}
-            />
-          </div>
-        </div>
+        <SmartAmountInput
+          label="Amount *"
+          value={amount}
+          onChange={(raw) => { setAmount(raw); setDuplicateChecked(false); setDuplicate(null) }}
+          currency="INR"
+          required
+        />
 
         <GlassSelect
           label="Category *"

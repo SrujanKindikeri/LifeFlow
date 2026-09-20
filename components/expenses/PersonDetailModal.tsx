@@ -35,14 +35,8 @@ export function PersonDetailModal({ isOpen, onClose, personShare, bill }: Person
 
           {/* Sheet */}
           <motion.div
-            className="relative w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto"
-            style={{
-              background: 'rgba(255,255,255,0.97)',
-              backdropFilter: 'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.06)',
-            }}
+            className="glass-floating relative w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto"
+            style={{ boxShadow: 'var(--glass-shadow-xl)' }}
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 40 }}
@@ -50,13 +44,13 @@ export function PersonDetailModal({ isOpen, onClose, personShare, bill }: Person
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-10 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.12)' }} />
+              <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             {/* Header */}
             <div
               className="flex items-center justify-between px-5 pt-4 sm:pt-5 pb-4"
-              style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+              style={{ borderBottom: '1px solid var(--border)' }}
             >
               <div className="flex items-center gap-2.5">
                 <span className="w-9 h-9 rounded-full bg-indigo-500/20 flex items-center justify-center text-sm text-indigo-600 font-bold">
@@ -71,7 +65,7 @@ export function PersonDetailModal({ isOpen, onClose, personShare, bill }: Person
               </div>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-black/[0.05] transition-colors"
+                className="nav-hover p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-muted)' }}
               >
                 <X size={16} />
@@ -91,7 +85,7 @@ export function PersonDetailModal({ isOpen, onClose, personShare, bill }: Person
                       <div
                         key={line.itemId}
                         className="flex items-center justify-between py-2.5 px-0"
-                        style={i < personShare.items.length - 1 ? { borderBottom: '1px solid rgba(0,0,0,0.06)' } : {}}
+                        style={i < personShare.items.length - 1 ? { borderBottom: '1px solid var(--border)' } : {}}
                       >
                         <div>
                           <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{line.itemName}</p>

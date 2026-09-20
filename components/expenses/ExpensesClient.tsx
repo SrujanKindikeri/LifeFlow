@@ -97,8 +97,9 @@ export function ExpensesClient() {
           body: JSON.stringify(bill),
         })
         if (!res.ok) {
-          const data = await res.json()
-          throw new Error(data.error ?? 'Update failed')
+          let errMsg = 'Update failed'
+          try { const d = await res.json(); errMsg = d.error ?? errMsg } catch { /* non-JSON body */ }
+          throw new Error(errMsg)
         }
         const data = await res.json()
         setBills((prev) => prev.map((b) => (b._id === bill._id ? data.groupBill : b)))
@@ -111,8 +112,9 @@ export function ExpensesClient() {
           body: JSON.stringify(bill),
         })
         if (!res.ok) {
-          const data = await res.json()
-          throw new Error(data.error ?? 'Create failed')
+          let errMsg = 'Failed to save group bill'
+          try { const d = await res.json(); errMsg = d.error ?? errMsg } catch { /* non-JSON body */ }
+          throw new Error(errMsg)
         }
         const data = await res.json()
         setBills((prev) => [data.groupBill, ...prev])

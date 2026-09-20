@@ -194,10 +194,10 @@ export function DraftsClient() {
                 transition={{ type: 'spring', stiffness: 420, damping: 30 }}
                 className="absolute right-0 top-full mt-1.5 z-20 rounded-xl py-1 min-w-[180px]"
                 style={{
-                  background: 'rgba(255,255,255,0.97)',
+                  background: 'var(--glass-floating-bg)',
                   backdropFilter: 'blur(24px)',
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+                  border: '1px solid var(--border)',
+                  boxShadow: 'var(--glass-shadow-md)',
                 }}
               >
                 {SORT_OPTIONS.map((opt) => (
@@ -206,7 +206,7 @@ export function DraftsClient() {
                     onClick={() => { setSort(opt.value); setShowSort(false) }}
                     className={cn(
                       'w-full text-left px-4 py-2 text-sm transition-colors',
-                      sort === opt.value ? 'font-semibold' : 'hover:bg-black/[0.04]'
+                      sort === opt.value ? 'font-semibold' : 'nav-hover'
                     )}
                     style={{ color: sort === opt.value ? 'var(--accent)' : 'var(--text-secondary)' }}
                   >

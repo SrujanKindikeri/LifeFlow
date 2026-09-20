@@ -111,6 +111,7 @@ export function CommandPalette() {
     if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveIdx((i) => Math.max(i-1, 0)) }
     if (e.key === 'Enter' && filtered[clampedActiveIdx]) { execute(filtered[clampedActiveIdx]) }
     if (e.key === 'Escape') { setOpen(false) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtered, clampedActiveIdx])
 
   return (
@@ -121,19 +122,16 @@ export function CommandPalette() {
             {/* Backdrop */}
             <motion.div
               className="absolute inset-0"
-              style={{ background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)' }}
+              style={{ background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(4px)' }}
               initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
               onClick={() => setOpen(false)}
             />
 
-            {/* Palette */}
+            {/* Palette — glass-floating adapts to dark mode via CSS vars */}
             <motion.div
-              className="relative w-full max-w-lg rounded-2xl overflow-hidden"
+              className="glass-floating relative w-full max-w-lg rounded-2xl overflow-hidden"
               style={{
-                background: 'rgba(255,255,255,0.97)',
-                backdropFilter: 'blur(36px) saturate(1.8)',
-                border: '1px solid rgba(0,0,0,0.08)',
-                boxShadow: '0 24px 80px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08)',
+                boxShadow: 'var(--glass-shadow-xl)',
                 maxHeight: '70vh',
               }}
               initial={{ opacity:0, scale:0.94, y:-12 }}
@@ -153,13 +151,20 @@ export function CommandPalette() {
                   className="flex-1 bg-transparent text-sm outline-none"
                   style={{ color: 'var(--text-primary)' }}
                 />
-                <kbd className="text-[10px] px-1.5 py-0.5 rounded-md font-mono" style={{ background: 'rgba(0,0,0,0.06)', color: 'var(--text-faint)' }}>ESC</kbd>
+                <kbd
+                  className="text-[10px] px-1.5 py-0.5 rounded-md font-mono"
+                  style={{ background: 'var(--border-strong)', color: 'var(--text-faint)' }}
+                >
+                  ESC
+                </kbd>
               </div>
 
               {/* Results */}
               <div className="overflow-y-auto" style={{ maxHeight: 'calc(70vh - 60px)' }}>
                 {filtered.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>No results for &quot;{query}&quot;</div>
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+                    No results for &quot;{query}&quot;
+                  </div>
                 ) : (
                   groups.map((group) => {
                     const items = filtered.filter((c) => c.group === group)
@@ -179,9 +184,12 @@ export function CommandPalette() {
                               onClick={() => execute(cmd)}
                               className={cn(
                                 'w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors',
-                                isActive && 'bg-black/[0.04]'
+                                isActive ? 'nav-hover' : ''
                               )}
-                              style={{ color: 'var(--text-secondary)' }}
+                              style={{
+                                color: 'var(--text-secondary)',
+                                background: isActive ? 'var(--nav-hover-bg)' : undefined,
+                              }}
                             >
                               <span className="w-5 flex-shrink-0" style={{ color: isActive ? 'var(--accent)' : 'var(--text-faint)' }}>
                                 {cmd.icon}

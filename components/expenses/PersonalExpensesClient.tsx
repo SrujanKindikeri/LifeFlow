@@ -10,6 +10,8 @@ import {
 } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { EmptyState, SkeletonList } from '@/components/ui/Loading'
 import { useToast } from '@/components/ui/Toast'
@@ -303,8 +305,9 @@ export function PersonalExpensesClient() {
   }
 
   async function handleSave(forceAdd = false) {
-    const amount = parseFloat(form.amount)
-    if (!form.amount || isNaN(amount) || amount <= 0) { toastError('Enter a valid amount'); return }
+    const parsed = parseAmountExpression(form.amount)
+    const amount = parsed.value
+    if (!form.amount || amount === null || parsed.error !== null || amount <= 0) { toastError('Enter a valid amount'); return }
     if (!form.date) { toastError('Date is required'); return }
 
     // ── Duplicate reference check (create mode only) ───────────────────────
@@ -324,7 +327,7 @@ export function PersonalExpensesClient() {
     // Warn if a manually-entered expense looks like a duplicate of an
     // auto-generated subscription expense for the same date/amount.
     if (!editingExpense && !forceAdd) {
-      const amt = parseFloat(form.amount)
+      const amt = parseAmountExpression(form.amount).value ?? 0
       const subDup = expenses.find(
         (e) =>
           e.source === 'subscription' &&
@@ -903,33 +906,21 @@ export function PersonalExpensesClient() {
           {/* Amount */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Amount</label>
+              <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Amount</label>
               {ocrFilled.amount && <VerifyBadge />}
             </div>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium" style={{ color: 'var(--text-muted)' }}>₹</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                pattern="[0-9]*\.?[0-9]{0,2}"
-                placeholder="0.00"
-                className="glass-input w-full rounded-xl pl-8 pr-3.5 py-2.5 text-sm"
-                value={form.amount}
-                onChange={(e) => {
-                  // Allow only valid numeric input; strip non-numeric except single dot
-                  const raw = e.target.value.replace(/[^0-9.]/g, '')
-                  const parts = raw.split('.')
-                  const cleaned = parts.length > 2
-                    ? parts[0] + '.' + parts.slice(1).join('')
-                    : raw
-                  setForm((f) => ({ ...f, amount: cleaned }))
-                  setOcrFilled((f) => ({ ...f, amount: false }))
-                  setDupWarning(null)
-                  if (!editingExpense) draft.triggerAutosave()
-                }}
-                autoFocus
-              />
-            </div>
+            <SmartAmountInput
+              value={form.amount}
+              onChange={(raw) => {
+                setForm((f) => ({ ...f, amount: raw }))
+                setOcrFilled((f) => ({ ...f, amount: false }))
+                setDupWarning(null)
+                if (!editingExpense) draft.triggerAutosave()
+              }}
+              currency="INR"
+              autoFocus
+              required
+            />
           </div>
 
           {/* Category — never auto-filled by OCR */}
@@ -1196,7 +1187,7 @@ export function PersonalExpensesClient() {
                     Possible duplicate subscription expense
                   </p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    <strong>{subDupWarning.subscriptionName}</strong> · ₹{parseFloat(form.amount).toLocaleString('en-IN')} · {form.date}
+                    <strong>{subDupWarning.subscriptionName}</strong> · ₹{(parseAmountExpression(form.amount).value ?? 0).toLocaleString('en-IN')} · {form.date}
                     <br />An auto-generated expense already exists for this subscription on this date.
                   </p>
                 </div>

@@ -218,7 +218,7 @@ export function DashboardClient({ data }: Props) {
       case 'tasks':
         return (
           <motion.div key="tasks" variants={fadeUp}>
-            <GlassCard className="h-full" padding="md">
+            <GlassCard padding="md">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 size={14} className="text-indigo-400" />
@@ -244,7 +244,7 @@ export function DashboardClient({ data }: Props) {
               ) : (
                 <div className="space-y-0.5">
                   {tasks.slice(0, 6).map((task) => (
-                    <motion.div key={task._id} layout className="group flex items-center gap-3 py-2 px-2 rounded-xl hover:bg-white/[0.04] transition-colors">
+                    <motion.div key={task._id} layout className="group flex items-center gap-3 py-2 px-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors">
                       <button onClick={() => toggleTask(task._id, task.completed)} className="flex-shrink-0 transition-transform active:scale-90" aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}>
                         <AnimatePresence mode="wait" initial={false}>
                           {task.completed
@@ -276,7 +276,7 @@ export function DashboardClient({ data }: Props) {
       case 'habits':
         return (
           <motion.div key="habits" variants={fadeUp}>
-            <GlassCard className="h-full" padding="md">
+            <GlassCard padding="md">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Flame size={14} className="text-orange-400" />
@@ -302,7 +302,7 @@ export function DashboardClient({ data }: Props) {
               ) : (
                 <div className="space-y-0.5">
                   {habits.slice(0, 6).map((habit) => (
-                    <motion.div key={habit._id} layout className="group flex items-center gap-3 py-2 px-2 rounded-xl hover:bg-white/[0.04] transition-colors">
+                    <motion.div key={habit._id} layout className="group flex items-center gap-3 py-2 px-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors">
                       <span className="text-base w-6 text-center shrink-0">{habit.icon}</span>
                       <div className="flex-1 min-w-0">
                         <span className="text-sm block truncate">{habit.name}</span>
@@ -315,8 +315,9 @@ export function DashboardClient({ data }: Props) {
                         aria-label={habit.completedToday ? 'Mark incomplete' : 'Mark complete'}
                         className={cn(
                           'w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-all active:scale-90',
-                          habit.completedToday ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-300' : 'border-black/[0.12] group-hover:border-black/[0.25]'
+                          habit.completedToday ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-300' : ''
                         )}
+                        style={!habit.completedToday ? { borderColor: 'var(--border-strong)' } : {}}
                       >
                         <AnimatePresence mode="wait" initial={false}>
                           {habit.completedToday && (
@@ -432,7 +433,7 @@ export function DashboardClient({ data }: Props) {
                 </Link>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="rounded-xl p-3" style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)' }}>
+                <div className="glass-money-collect rounded-xl p-3">
                   <div className="flex items-center gap-1 mb-1">
                     <ArrowUpRight size={11} className="text-indigo-500" />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>To Collect</p>
@@ -441,7 +442,7 @@ export function DashboardClient({ data }: Props) {
                     ₹{(data.moneySummary.toCollectMinor / 100).toLocaleString('en-IN')}
                   </p>
                 </div>
-                <div className="rounded-xl p-3" style={{ background: 'rgba(249,115,22,0.07)', border: '1px solid rgba(249,115,22,0.15)' }}>
+                <div className="glass-money-pay rounded-xl p-3">
                   <div className="flex items-center gap-1 mb-1">
                     <ArrowDownLeft size={11} className="text-orange-500" />
                     <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>To Pay</p>
@@ -495,7 +496,7 @@ export function DashboardClient({ data }: Props) {
                       <motion.div
                         whileHover={{ scale: 1.015 }}
                         transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-                        className="glass-subtle rounded-xl p-3 hover:bg-white/[0.07] transition-colors cursor-pointer h-full"
+                        className="glass-subtle rounded-xl p-3 hover:shadow-[var(--glass-hover-shadow)] transition-all duration-200 cursor-pointer h-full"
                       >
                         <p className="text-[12px] font-semibold mb-1 truncate" style={{ color: 'var(--text-primary)' }}>{note.title}</p>
                         <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{note.content || 'No content'}</p>
@@ -563,7 +564,7 @@ export function DashboardClient({ data }: Props) {
             {/* Search trigger */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-2 glass px-3.5 py-2 rounded-xl text-sm hover:bg-black/[0.05] transition-all"
+              className="flex items-center gap-2 glass-elevated px-3.5 py-2 rounded-xl text-sm hover:shadow-[var(--glass-hover-shadow)] transition-all duration-200"
               style={{ color: 'var(--text-muted)' }}
               aria-label="Open search (Ctrl+K)"
             >
@@ -575,20 +576,20 @@ export function DashboardClient({ data }: Props) {
             {/* Customize */}
             <button
               onClick={() => setCustomizeOpen(true)}
-              className="p-2.5 glass rounded-xl hover:bg-white/[0.07] transition-colors"
+              className="p-2.5 glass rounded-xl nav-hover transition-colors"
               aria-label="Customize dashboard"
             >
               <Settings2 size={16} style={{ color: 'var(--text-muted)' }} />
             </button>
 
-            <Link href="/app/notifications" className="relative p-2.5 glass rounded-xl hover:bg-white/[0.07] transition-colors" aria-label="Notifications">
+            <Link href="/app/notifications" className="relative p-2.5 glass rounded-xl nav-hover transition-colors" aria-label="Notifications">
               <Bell size={17} style={{ color: 'var(--text-muted)' }} />
               {data.unreadNotifications > 0 && (
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-500 rounded-full shadow-[0_0_6px_rgba(99,102,241,0.8)]" />
               )}
             </Link>
 
-            <Link href="/app/profile" className="p-1 glass rounded-xl hover:bg-white/[0.07] transition-colors">
+            <Link href="/app/profile" className="p-1 glass rounded-xl nav-hover transition-colors">
               <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-[13px] font-bold text-indigo-300">
                 {data.user.name?.[0]?.toUpperCase() ?? 'U'}
               </div>
@@ -602,10 +603,16 @@ export function DashboardClient({ data }: Props) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
         >
-          <div className="relative overflow-hidden rounded-2xl glass-elevated p-5 sm:p-6">
-            <div className="absolute -top-12 -right-12 w-44 h-44 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-violet-500/08 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/14 to-transparent pointer-events-none" />
+          <div className="relative overflow-hidden rounded-2xl glass-elevated glass-catchlight p-5 sm:p-6">
+            {/* Decorative blurs — aria-hidden wrapper keeps them out of
+                the .glass-catchlight > * selector so their absolute
+                positioning is not overridden to relative (which would
+                add ~320 px of invisible height above the content). */}
+            <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 0 }}>
+              <div className="absolute -top-12 -right-12 w-44 h-44 bg-indigo-500/10 rounded-full blur-3xl" />
+              <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-violet-500/08 rounded-full blur-3xl" />
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/14 to-transparent" />
+            </div>
 
             <div className="relative flex flex-col sm:flex-row sm:items-center gap-5">
               {/* Progress ring */}
@@ -710,7 +717,7 @@ export function DashboardClient({ data }: Props) {
               if (idx !== gridIdx) return null
               if (!showTasksHabitsGrid) return null
               return (
-                <motion.div key="tasks-habits-grid" variants={fadeUp} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <motion.div key="tasks-habits-grid" variants={fadeUp} className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:items-start">
                   {sectionVisible['tasks'] !== false && renderSection('tasks')}
                   {sectionVisible['habits'] !== false && renderSection('habits')}
                 </motion.div>

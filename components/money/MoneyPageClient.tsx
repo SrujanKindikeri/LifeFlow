@@ -136,11 +136,7 @@ export function MoneyPageClient() {
       {/* ── Summary cards ── */}
       <div className="grid grid-cols-2 gap-3">
         <motion.div
-          className="rounded-2xl p-4"
-          style={{
-            background: 'rgba(99,102,241,0.07)',
-            border: '1px solid rgba(99,102,241,0.15)',
-          }}
+          className="glass-money-collect rounded-2xl p-4"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
@@ -160,11 +156,7 @@ export function MoneyPageClient() {
         </motion.div>
 
         <motion.div
-          className="rounded-2xl p-4"
-          style={{
-            background: 'rgba(249,115,22,0.07)',
-            border: '1px solid rgba(249,115,22,0.15)',
-          }}
+          className="glass-money-pay rounded-2xl p-4"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
@@ -186,8 +178,8 @@ export function MoneyPageClient() {
 
       {/* ── Tabs ── */}
       <div
-        className="flex gap-1 p-1 rounded-xl"
-        style={{ background: 'rgba(0,0,0,0.05)' }}
+        className="flex gap-1 p-1 glass rounded-xl"
+        style={{ boxShadow: 'inset 0 1px 0 var(--glass-catchlight)' }}
       >
         {TABS.map((t) => (
           <button

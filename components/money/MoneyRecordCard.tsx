@@ -15,8 +15,9 @@ interface Props {
 }
 
 export function MoneyRecordCard({ record, onClick }: Props) {
-  const pct = record.originalAmountMinor > 0
-    ? Math.round((record.paidMinor / record.originalAmountMinor) * 100)
+  const totalMinor = record.totalAmountMinor ?? record.originalAmountMinor
+  const pct = totalMinor > 0
+    ? Math.round((record.paidMinor / totalMinor) * 100)
     : 0
   const isPaid = record.status === 'paid'
 
@@ -26,14 +27,8 @@ export function MoneyRecordCard({ record, onClick }: Props) {
       whileHover={{ scale: 1.012, y: -1 }}
       whileTap={{ scale: 0.985 }}
       transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-      className="w-full text-left rounded-2xl p-4 transition-all"
-      style={{
-        background: 'rgba(255,255,255,0.85)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        border: '1px solid rgba(0,0,0,0.07)',
-        boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-      }}
+      className="glass w-full text-left rounded-2xl p-4 transition-all"
+      style={{ boxShadow: 'var(--glass-shadow)' }}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -67,7 +62,7 @@ export function MoneyRecordCard({ record, onClick }: Props) {
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <p className="text-[16px] font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
             {isPaid
-              ? formatPaiseDisplay(record.originalAmountMinor, record.currency)
+              ? formatPaiseDisplay(totalMinor, record.currency)
               : formatPaiseDisplay(record.remainingMinor, record.currency)}
           </p>
           <span
@@ -94,7 +89,7 @@ export function MoneyRecordCard({ record, onClick }: Props) {
         <div className="mb-3">
           <div
             className="h-1.5 rounded-full overflow-hidden mb-1"
-            style={{ background: 'rgba(0,0,0,0.07)' }}
+            style={{ background: 'var(--border)' }}
           >
             <motion.div
               className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500"

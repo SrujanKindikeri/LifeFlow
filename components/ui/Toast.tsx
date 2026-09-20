@@ -30,32 +30,24 @@ const iconMap: Record<ToastType, React.ReactNode> = {
   info:    <Info          size={15} className="flex-shrink-0" />,
 }
 
-/* Light-mode toast colours: subtle tinted white glass */
-const styleMap: Record<ToastType, React.CSSProperties> = {
-  success: {
-    background: 'rgba(255,255,255,0.95)',
-    border: '1px solid rgba(22,163,74,0.20)',
-    color: 'var(--success)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
-  },
-  error: {
-    background: 'rgba(255,255,255,0.95)',
-    border: '1px solid rgba(220,38,38,0.20)',
-    color: 'var(--danger)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
-  },
-  warning: {
-    background: 'rgba(255,255,255,0.95)',
-    border: '1px solid rgba(217,119,6,0.20)',
-    color: 'var(--warning)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
-  },
-  info: {
-    background: 'rgba(255,255,255,0.95)',
-    border: '1px solid rgba(37,99,235,0.20)',
-    color: 'var(--accent)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.10)',
-  },
+/*
+  Toast border colours keyed by type — these stay the same in light and dark
+  because they're already translucent semantic colours.
+  The background is now driven by the CSS variable --glass-floating-bg so it
+  automatically adapts between light and dark without JS.
+*/
+const borderMap: Record<ToastType, string> = {
+  success: '1px solid rgba(22,163,74,0.25)',
+  error:   '1px solid rgba(220,38,38,0.25)',
+  warning: '1px solid rgba(217,119,6,0.25)',
+  info:    '1px solid rgba(37,99,235,0.25)',
+}
+
+const iconColorMap: Record<ToastType, string> = {
+  success: 'var(--success)',
+  error:   'var(--danger)',
+  warning: 'var(--warning)',
+  info:    'var(--accent)',
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -108,7 +100,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 'text-sm font-medium',
                 'backdrop-blur-xl',
               )}
-              style={styleMap[t.type]}
+              style={{
+                /* glass-floating-bg adapts to light/dark automatically */
+                background: 'var(--glass-floating-bg)',
+                backdropFilter: 'blur(36px) saturate(1.8)',
+                border: borderMap[t.type],
+                boxShadow: 'var(--glass-shadow-md)',
+                color: iconColorMap[t.type],
+              }}
             >
               {iconMap[t.type]}
               <span className="flex-1 leading-snug" style={{ color: 'var(--text-primary)' }}>

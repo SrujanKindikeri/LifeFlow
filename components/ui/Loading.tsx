@@ -17,12 +17,7 @@ export function Skeleton({
 export function SkeletonCard({ className }: { className?: string }) {
   return (
     <div
-      className={cn('rounded-2xl p-5 space-y-3', className)}
-      style={{
-        background: 'rgba(255,255,255,0.65)',
-        border: '1px solid rgba(0,0,0,0.07)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-      }}
+      className={cn('glass rounded-2xl p-5 space-y-3', className)}
       aria-hidden="true"
     >
       <Skeleton className="h-4 w-2/3 rounded-lg" />
@@ -39,11 +34,7 @@ export function SkeletonList({ lines = 4 }: { lines?: number }) {
       {Array.from({ length: lines }).map((_, i) => (
         <div
           key={i}
-          className="rounded-xl p-3.5 flex items-center gap-3"
-          style={{
-            background: 'rgba(255,255,255,0.65)',
-            border: '1px solid rgba(0,0,0,0.07)',
-          }}
+          className="glass-subtle rounded-xl p-3.5 flex items-center gap-3"
         >
           <Skeleton className="h-5 w-5 rounded-full flex-shrink-0" />
           <div className="flex-1 space-y-2">
@@ -71,12 +62,7 @@ export function EmptyState({ icon, title, description, action, className }: Empt
       {/* Icon in a glass circle */}
       <div className="relative mb-5">
         <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
-          style={{
-            background: 'rgba(255,255,255,0.75)',
-            border: '1px solid rgba(0,0,0,0.07)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-          }}
+          className="glass-elevated w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
         >
           {icon}
         </div>
@@ -129,14 +115,7 @@ export function FullPageLoader() {
     <div className="app-bg fixed inset-0 flex items-center justify-center z-[999]">
       <div className="flex flex-col items-center gap-5">
         {/* Logo */}
-        <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center"
-          style={{
-            background: 'rgba(255,255,255,0.85)',
-            border: '1px solid rgba(0,0,0,0.08)',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-          }}
-        >
+        <div className="glass-floating w-14 h-14 rounded-2xl flex items-center justify-center">
           <span className="text-2xl">⚡</span>
         </div>
         <p className="text-[15px] font-semibold text-gradient">LifeFlow</p>

@@ -310,3 +310,94 @@ export function checkNotificationTestLimit(ip: string, userId: string): RateLimi
     windowMs: 60 * 60 * 1000,
   })
 }
+
+// ─── Account deletion limiter ────────────────────────────────────────────────
+
+/**
+ * Rate limit for the DELETE /api/auth/delete-account endpoint.
+ *
+ * Two guards applied in order:
+ *   1. Per-userId: max 3 attempts per 60-minute window.
+ *      Prevents rapid cycling through delete→restore→delete.
+ *   2. Per-IP: max 10 attempts per hour across all accounts.
+ *      Secondary defence against bulk automated deletion.
+ *
+ * These limits are deliberately lenient enough that a legitimate user who
+ * accidentally submits the form twice is never locked out, while still
+ * blocking bulk automation.
+ */
+export function checkAccountDeletionLimit(ip: string, userId: string): RateLimitResult {
+  // Per-user hourly cap
+  const userResult = checkRateLimit({
+    key:      `account-delete:user:${userId}`,
+    limit:    3,
+    windowMs: 60 * 60 * 1000,
+  })
+  if (!userResult.allowed) return userResult
+
+  // Per-IP hourly cap
+  return checkRateLimit({
+    key:      `account-delete:ip:${ip}`,
+    limit:    10,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+// ─── Account restore limiter ─────────────────────────────────────────────────
+
+/**
+ * Rate limit for the POST /api/auth/restore-account endpoint.
+ *
+ * Three guards applied in order:
+ *   1. Per-userId: max 1 attempt per 30-second cooldown.
+ *      Prevents rapid hammering of the restore endpoint.
+ *   2. Per-userId: max 5 attempts per hour.
+ *      Prevents brute-force of the password field on restore.
+ *   3. Per-IP: max 10 attempts per hour across all accounts.
+ *      Secondary defence against distributed brute-force.
+ */
+export function checkAccountRestoreLimit(ip: string, userId: string): RateLimitResult {
+  // Cooldown: 1 attempt per 30 s per user
+  const cooldown = checkRateLimit({
+    key:      `account-restore:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 30 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // Hourly cap per user
+  const userHourly = checkRateLimit({
+    key:      `account-restore:hourly:${userId}`,
+    limit:    5,
+    windowMs: 60 * 60 * 1000,
+  })
+  if (!userHourly.allowed) return userHourly
+
+  // Hourly cap per IP
+  return checkRateLimit({
+    key:      `account-restore:ip:${ip}`,
+    limit:    10,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+// ─── Restore-token attempt limiter ───────────────────────────────────────────
+
+/**
+ * Rate limit for POST /api/auth/restore-account when submitting a token.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-token-hash: 5 attempts per 15-minute window.
+ *      Mirrors the password-reset attempt limit — prevents brute-force even
+ *      if an attacker somehow intercepts an unexpired hash.
+ *
+ * Keyed on the token hash (not a userId) because at the point we check this
+ * we may not yet have resolved which user the token belongs to.
+ */
+export function checkRestoreTokenAttemptLimit(tokenHash: string): RateLimitResult {
+  return checkRateLimit({
+    key:      `restore-token:attempt:${tokenHash}`,
+    limit:    5,
+    windowMs: 15 * 60 * 1000,
+  })
+}

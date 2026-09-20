@@ -74,35 +74,79 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // ── Step 1: Authentication ────────────────────────────────────────────
+    console.log('[GROUP BILL] save started')
     const { userId, lifeFlowId } = await requireAuth()
-    const body = await req.json()
+    console.log('[GROUP BILL] authenticated — user OK')
 
+    // ── Step 2: Parse request body ────────────────────────────────────────
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      console.error('[GROUP BILL] failed to parse request body as JSON')
+      return NextResponse.json(
+        { error: 'Invalid request body — expected JSON' },
+        { status: 400 }
+      )
+    }
+
+    // ── Step 3: Zod validation ────────────────────────────────────────────
     const parsed = groupBillSchema.safeParse(body)
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
+      // Collect all validation issues for the server log (never sent to client)
+      const allIssues = parsed.error.issues.map(
+        (i) => `${i.path.join('.')}: ${i.message}`
+      )
+      console.error('[GROUP BILL] validation failed', allIssues)
+      // Return only the first human-readable message to the client
+      return NextResponse.json(
+        { error: parsed.error.issues[0].message },
+        { status: 400 }
+      )
     }
 
     const data = parsed.data
+    console.log('[GROUP BILL] validation passed —', {
+      name: data.name,
+      date: data.date,
+      currency: data.currency,
+      peopleCount: data.people.length,
+      itemCount: data.items.length,
+      splitMode: data.splitMode,
+    })
 
-    // Always recalculate server-side to prevent tampering
-    const result = calculateBill(
-      data.people,
-      data.items,
-      {
-        discountType: data.discountType,
-        discountValue: data.discountValue,
-        taxType: data.taxType,
-        taxValue: data.taxValue,
-        serviceChargeType: data.serviceChargeType,
-        serviceChargeValue: data.serviceChargeValue,
-        tipType: data.tipType,
-        tipValue: data.tipValue,
-      },
-      data.splitMode,
-      data.customSplits
-    )
+    // ── Step 4: Server-side recalculation ─────────────────────────────────
+    let result: ReturnType<typeof calculateBill>
+    try {
+      result = calculateBill(
+        data.people,
+        data.items,
+        {
+          discountType: data.discountType,
+          discountValue: data.discountValue,
+          taxType: data.taxType,
+          taxValue: data.taxValue,
+          serviceChargeType: data.serviceChargeType,
+          serviceChargeValue: data.serviceChargeValue,
+          tipType: data.tipType,
+          tipValue: data.tipValue,
+        },
+        data.splitMode,
+        data.customSplits
+      )
+    } catch (calcError) {
+      console.error('[GROUP BILL] calculateBill threw', calcError)
+      return NextResponse.json(
+        { error: 'Failed to calculate bill totals. Check item and people data.' },
+        { status: 422 }
+      )
+    }
+    console.log('[GROUP BILL] calculation OK — grandTotal:', result.totals.grandTotal)
 
+    // ── Step 5: Database save ─────────────────────────────────────────────
     await connectDB()
+    console.log('[GROUP BILL] DB connected')
 
     const bill = await GroupBill.create({
       ...data,
@@ -117,6 +161,8 @@ export async function POST(req: NextRequest) {
       settlements: result.settlements.map((s) => ({ ...s, settled: false })),
     })
 
+    console.log('[GROUP BILL] saved successfully — id:', bill._id.toString())
+
     return NextResponse.json(
       { groupBill: serializeBill(bill.toObject()) },
       { status: 201 }
@@ -125,7 +171,23 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[group-bills POST]', error)
+    if (error instanceof Error && error.message === 'UserNotFound') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    // Log the real error server-side (never exposed to client)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyErr = error as any
+    const validationErrors = anyErr?.errors
+      ? Object.entries(anyErr.errors as Record<string, { message: string }>).map(
+          ([field, e]) => `${field}: ${e.message}`
+        )
+      : undefined
+    console.error('[GROUP BILL] save failed —', {
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      // Mongoose validation errors carry an 'errors' object with per-field details
+      validationErrors,
+    })
     return NextResponse.json({ error: 'Failed to create group bill' }, { status: 500 })
   }
 }

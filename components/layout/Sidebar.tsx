@@ -83,28 +83,23 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="hidden lg:flex flex-col shrink-0 h-screen sticky top-0 p-3"
-      style={{ width: 'var(--sidebar-width, 252px)' }}>
-
-      {/* Floating glass sidebar panel */}
+    <aside
+      className="hidden lg:flex flex-col shrink-0 h-screen sticky top-0 p-3"
+      style={{ width: 'var(--sidebar-width, 252px)' }}
+    >
+      {/* Floating glass sidebar panel — liquid glass with catch-light and depth */}
       <div
-        className="flex flex-col h-full rounded-2xl py-4 px-2.5"
+        className="glass-panel glass-catchlight flex flex-col h-full rounded-2xl py-4 px-2.5"
         style={{
-          background: 'rgba(255,255,255,0.85)',
-          backdropFilter: 'blur(32px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(32px) saturate(1.8)',
-          border: '1px solid rgba(0,0,0,0.07)',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 4px rgba(0,0,0,0.04)',
+          border: '1px solid var(--glass-panel-border)',
+          boxShadow: 'var(--glass-panel-shadow), inset 0 1px 0 var(--glass-catchlight)',
         }}
       >
 
         {/* ── Logo ── */}
         <Link
           href="/app/dashboard"
-          className="flex items-center gap-2.5 px-3 py-2.5 mb-5 rounded-xl transition-colors group"
-          style={{ ['--hover-bg' as string]: 'rgba(0,0,0,0.03)' }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.03)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          className="nav-hover flex items-center gap-2.5 px-3 py-2.5 mb-5 rounded-xl transition-colors group"
         >
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center text-[18px] flex-shrink-0"
@@ -116,9 +111,7 @@ export function Sidebar() {
           >
             ⚡
           </div>
-          <span
-            className="text-[16px] font-bold text-gradient tracking-tight"
-          >
+          <span className="text-[16px] font-bold text-gradient tracking-tight">
             LifeFlow
           </span>
         </Link>
@@ -154,9 +147,7 @@ export function Sidebar() {
                           transition={{ type: 'spring', stiffness: 420, damping: 30 }}
                           className={cn(
                             'relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors',
-                            isActive
-                              ? ''
-                              : 'hover:bg-black/[0.03]'
+                            !isActive && 'nav-hover'
                           )}
                           style={{
                             color: isActive ? 'var(--accent-text)' : 'var(--text-secondary)',
@@ -173,7 +164,7 @@ export function Sidebar() {
                             <span
                               className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
                               style={{
-                                background: isActive ? 'rgba(37,99,235,0.18)' : 'rgba(37,99,235,0.12)',
+                                background: isActive ? 'rgba(37,99,235,0.18)' : 'var(--accent-dim)',
                                 color: 'var(--accent)',
                               }}
                             >
@@ -203,7 +194,7 @@ export function Sidebar() {
                   whileHover={{ x: 2 }}
                   className={cn(
                     'flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors',
-                    isActive ? 'nav-active-pill' : 'hover:bg-black/[0.03]'
+                    isActive ? 'nav-active-pill' : 'nav-hover'
                   )}
                   style={{
                     color: isActive ? 'var(--accent-text)' : 'var(--text-secondary)',
@@ -223,7 +214,7 @@ export function Sidebar() {
           <button onClick={handleLogout} className="w-full text-left mt-0.5">
             <motion.div
               whileHover={{ x: 2 }}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors hover:bg-red-50"
+              className="nav-hover-danger flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors"
               style={{ color: 'var(--text-muted)' }}
               onMouseEnter={e => {
                 e.currentTarget.style.color = 'var(--danger-text)'

@@ -7,6 +7,11 @@
  * SERVER-ONLY — never import from client components.
  */
 
+import {
+  buildNotificationIconHtml,
+  parseIconTimeLabel,
+} from '@/lib/notificationIcon'
+
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
 const BRAND_NAME    = 'LifeFlow'
@@ -855,6 +860,9 @@ export function buildIncompleteTasksEmail(opts: IncompleteTasksEmailOptions): {
   const subject   = `${taskCount} incomplete ${taskWord} today — ${BRAND_NAME}`
 
   const html = wrapHtml(`
+    <!-- ══ Time-based notification icon (7:00 PM) ════════════════════════ -->
+    ${buildNotificationIconHtml('07:00', 'PM', '20px', { size: 80 })}
+
     <h2 style="margin:0 0 6px;
                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
                             'Segoe UI',Arial,sans-serif;
@@ -1084,6 +1092,9 @@ export function buildDailySummaryEmail(opts: DailySummaryEmailOptions): {
   }
 
   const html = wrapHtml(`
+    <!-- ══ Time-based notification icon (11:55 PM) ═══════════════════════ -->
+    ${buildNotificationIconHtml('11:55', 'PM', '20px', { size: 80 })}
+
     <h2 style="margin:0 0 6px;
                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
                             'Segoe UI',Arial,sans-serif;
@@ -1417,6 +1428,9 @@ export function buildTomorrowPreviewEmail(opts: TomorrowPreviewEmailOptions): {
   ` : ''
 
   const html = wrapHtml(`
+    <!-- ══ Time-based notification icon (10:00 PM) ═══════════════════════ -->
+    ${buildNotificationIconHtml('10:00', 'PM', '20px', { size: 80 })}
+
     <h2 style="margin:0 0 6px;
                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
                             'Segoe UI',Arial,sans-serif;
@@ -1598,6 +1612,9 @@ export function buildWeeklySummaryEmail(opts: WeeklySummaryEmailOptions): {
   }
 
   const html = wrapHtml(`
+    <!-- ══ Time-based notification icon (10:00 PM — Sunday) ═════════════ -->
+    ${buildNotificationIconHtml('10:00', 'PM', '20px', { size: 80 })}
+
     <h2 style="margin:0 0 6px;
                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
                             'Segoe UI',Arial,sans-serif;
@@ -1717,6 +1734,12 @@ export interface TaskReminderEmailOptions {
   priority?: 'low' | 'medium' | 'high'
   /** Project or category name — optional */
   projectName?: string
+  /**
+   * Formatted reminder time label e.g. "10:00 AM".
+   * Used in the time-based notification icon.  Defaults to "30 min" indicator
+   * if not provided (backward-compatible).
+   */
+  reminderTimeLabel?: string
   /** Deep link URL */
   appUrl: string
 }
@@ -1737,9 +1760,12 @@ export function buildTaskReminderEmail(opts: TaskReminderEmailOptions): {
   html: string
   text: string
 } {
-  const { toName, taskTitle, dueLabel, recurrenceLabel, priority, projectName, appUrl } = opts
+  const { toName, taskTitle, dueLabel, recurrenceLabel, priority, projectName, reminderTimeLabel, appUrl } = opts
   const firstName = toName.split(' ')[0] ?? toName
   const subject   = `Task reminder: ${taskTitle} — ${BRAND_NAME}`
+
+  // Resolve time icon components from the reminder time label (dynamic) or fall back to a safe default
+  const iconTime = reminderTimeLabel ? parseIconTimeLabel(reminderTimeLabel) : null
 
   // Priority badge — shown as a subtle pill only when priority is set
   const priorityColors: Record<string, { bg: string; text: string; label: string }> = {
@@ -1764,35 +1790,12 @@ export function buildTaskReminderEmail(opts: TaskReminderEmailOptions): {
 
   const html = wrapHtml(`
 
-    <!-- ══ Clock icon ════════════════════════════════════════════════════ -->
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-           width="100%" style="margin:0 0 28px;">
-      <tr>
-        <td align="center">
-          <svg width="64" height="64" viewBox="0 0 64 64" fill="none"
-               xmlns="http://www.w3.org/2000/svg"
-               role="img" aria-label="Task reminder"
-               style="display:block;margin:0 auto;">
-            <!-- Outer glow -->
-            <circle cx="32" cy="32" r="32" fill="#eff6ff"/>
-            <!-- Inner -->
-            <circle cx="32" cy="32" r="24" fill="#dbeafe"/>
-            <!-- Clock face -->
-            <circle cx="32" cy="32" r="16" fill="#ffffff" stroke="${BRAND_COLOR}" stroke-width="1.8"/>
-            <!-- Hour hand  → pointing up-left (10 o'clock) -->
-            <line x1="32" y1="32" x2="24" y2="24"
-                  stroke="${BRAND_COLOR}" stroke-width="2.2"
-                  stroke-linecap="round"/>
-            <!-- Minute hand → pointing right (30 min) -->
-            <line x1="32" y1="32" x2="42" y2="32"
-                  stroke="${BRAND_COLOR}" stroke-width="2.2"
-                  stroke-linecap="round"/>
-            <!-- Centre dot -->
-            <circle cx="32" cy="32" r="2" fill="${BRAND_COLOR}"/>
-          </svg>
-        </td>
-      </tr>
-    </table>
+    <!-- ══ Time-based notification icon ═════════════════════════════════ -->
+    <!-- Shows the actual scheduled reminder time instead of a clock icon -->
+    ${iconTime
+      ? buildNotificationIconHtml(iconTime.hhmm, iconTime.ampm, '28px', { size: 80 })
+      : buildNotificationIconHtml('--:--', 'AM', '28px', { size: 80 })
+    }
 
     <!-- ══ Heading ═══════════════════════════════════════════════════════ -->
     <h2 style="margin:0 0 6px;
@@ -2131,6 +2134,549 @@ export function buildTestNotificationEmail(opts: TestNotificationEmailOptions): 
     ``,
     `— The LifeFlow Team`,
   ].join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── Morning daily brief (7:00 AM) ───────────────────────────────────────────
+
+export interface MorningBriefEmailOptions {
+  /** Recipient's display name */
+  toName: string
+  /** Human-readable date label e.g. "Thursday, 17 Sep" */
+  todayLabel: string
+  /** Formatted scheduled time label e.g. "7:00 AM" */
+  scheduledTimeLabel: string
+  /** Number of tasks due today (incomplete) */
+  taskCount: number
+  /** Up to 5 task titles */
+  taskTitles: string[]
+  /** Number of already-completed tasks today */
+  completedTaskCount: number
+  /** Number of habits remaining to complete today */
+  habitCount: number
+  /** Up to 5 habit names with emoji */
+  habitNames: string[]
+  /** Up to 3 active goal titles */
+  goalTitles: string[]
+  /** Total active goals */
+  totalGoals: number
+  /** App base URL */
+  appUrl: string
+}
+
+/**
+ * Build the "Today's LifeFlow" morning daily brief email.
+ *
+ * Sent automatically at 7:00 AM in each user's local timezone.
+ * Only sent to users where:
+ *   • notificationsTested === true
+ *   • emailNotifications.enabled === true
+ *   • emailNotifications.dailySummary === true
+ *   • There is something relevant today (tasks OR habits OR goals)
+ *
+ * NOTIFICATION STATUS ICON
+ * ──────────────────────────
+ * The header uses a Wi-Fi-style signal / notification icon with:
+ *   • Large circular outer arc
+ *   • Centred Wi-Fi signal arcs (three concentric arcs)
+ *   • Centred lower dot
+ *   • Scheduled time displayed prominently below the icon
+ * This conveys "scheduled notification delivered on time" at a glance.
+ */
+export function buildMorningBriefEmail(opts: MorningBriefEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const {
+    toName,
+    todayLabel,
+    scheduledTimeLabel,
+    taskCount,
+    taskTitles,
+    completedTaskCount,
+    habitCount,
+    habitNames,
+    goalTitles,
+    totalGoals,
+    appUrl,
+  } = opts
+
+  const firstName = toName.split(' ')[0] ?? toName
+  const subject   = `Today's LifeFlow — ${todayLabel}`
+
+  // ─── Section helpers ──────────────────────────────────────────────────────
+
+  function sectionHeader(label: string): string {
+    return `
+      <p style="margin:0 0 4px;
+                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                             'Segoe UI',Arial,sans-serif;
+                font-size:10.5px;font-weight:700;color:#94a3b8;
+                text-transform:uppercase;letter-spacing:0.9px;">
+        ${escapeHtml(label)}
+      </p>`
+  }
+
+  function buildBriefSection(
+    sectionLabel: string,
+    count: number,
+    items: string[],
+    itemWord: string,
+    ctaPath: string,
+    emptyMsg?: string
+  ): string {
+    if (count === 0 && !emptyMsg) return ''
+    return `
+      ${sectionHeader(sectionLabel)}
+      ${count > 0
+        ? `${buildItemList(items)}
+           ${count > items.length
+             ? `<p style="margin:-12px 0 18px;
+                          font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                       'Segoe UI',Arial,sans-serif;
+                          font-size:12px;color:#94a3b8;">
+                  &hellip;and ${count - items.length} more ${escapeHtml(itemWord)}
+                </p>`
+             : `<p style="margin:-12px 0 18px;
+                          font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                       'Segoe UI',Arial,sans-serif;
+                          font-size:12px;color:#94a3b8;">
+                  <a href="${escapeHtml(appUrl + ctaPath)}"
+                     style="color:#2563eb;text-decoration:none;">View in LifeFlow &rarr;</a>
+                </p>`}`
+        : `<p style="margin:0 0 18px;
+                     font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                  'Segoe UI',Arial,sans-serif;
+                     font-size:13px;color:#94a3b8;font-style:italic;">
+             ${escapeHtml(emptyMsg ?? '')}
+           </p>`}
+    `
+  }
+
+  const html = wrapHtml(`
+
+    <!-- ══ Notification time icon ════════════════════════════════════════ -->
+    <!--
+      Time-based notification icon (replaces former Wi-Fi symbol):
+        • Large circular outer arc, open at the bottom
+        • Bottom dots (•  ●  •) below the gap
+        • Scheduled time (HH:MM / AM or PM) in the center
+      The Wi-Fi symbol has been removed entirely.
+      Only the actual scheduled delivery time appears in the center.
+    -->
+    ${buildNotificationIconHtml(
+      (() => { const t = parseIconTimeLabel(scheduledTimeLabel); return t.hhmm })(),
+      (() => { const t = parseIconTimeLabel(scheduledTimeLabel); return t.ampm })(),
+      '8px'
+    )}
+
+    <!-- "Daily Brief" label below the icon -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           width="100%" style="margin:0 0 28px;">
+      <tr>
+        <td align="center">
+          <p style="margin:0;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:11.5px;font-weight:600;color:#2563eb;
+                    letter-spacing:0.7px;text-transform:uppercase;">
+            Daily Brief
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <!-- ══ Heading ═══════════════════════════════════════════════════════ -->
+    <h2 style="margin:0 0 4px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Good morning, ${escapeHtml(firstName)}.
+    </h2>
+    <p style="margin:0 0 28px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;">
+      ${escapeHtml(todayLabel)}
+    </p>
+
+    ${completedTaskCount > 0 ? `
+    <!-- Already-done nudge -->
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;
+                padding:11px 16px;margin:0 0 24px;">
+      <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                         'Segoe UI',Arial,sans-serif;
+                font-size:13px;color:#15803d;line-height:1.55;">
+        &#10003;&nbsp; You already completed
+        <strong>${completedTaskCount}</strong>
+        task${completedTaskCount === 1 ? '' : 's'} today. Keep it up!
+      </p>
+    </div>` : ''}
+
+    <!-- ══ Tasks ══════════════════════════════════════════════════════════ -->
+    ${buildBriefSection(
+      'Tasks due today',
+      taskCount,
+      taskTitles,
+      'tasks',
+      '/app/tasks',
+      'No tasks due today — enjoy your day!'
+    )}
+
+    <!-- ══ Habits ══════════════════════════════════════════════════════════ -->
+    ${buildBriefSection(
+      'Habits to complete',
+      habitCount,
+      habitNames,
+      'habits',
+      '/app/habits'
+    )}
+
+    <!-- ══ Goals ══════════════════════════════════════════════════════════ -->
+    ${totalGoals > 0 ? `
+    ${sectionHeader('Active goals')}
+    ${buildItemList(goalTitles)}
+    ${totalGoals > goalTitles.length
+      ? `<p style="margin:-12px 0 18px;
+                   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                'Segoe UI',Arial,sans-serif;
+                   font-size:12px;color:#94a3b8;">
+             &hellip;and ${totalGoals - goalTitles.length} more goals
+           </p>`
+      : `<p style="margin:-12px 0 18px;
+                   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                'Segoe UI',Arial,sans-serif;
+                   font-size:12px;color:#94a3b8;">
+             <a href="${escapeHtml(appUrl + '/app/goals')}"
+                style="color:#2563eb;text-decoration:none;">View all goals &rarr;</a>
+           </p>`}
+    ` : ''}
+
+    <!-- ══ CTA ═══════════════════════════════════════════════════════════ -->
+    ${buildNotifCta(`${appUrl}/app/dashboard`, 'Open LifeFlow')}
+    ${notifFooter(appUrl)}
+  `)
+
+  // ─── Plain text version ────────────────────────────────────────────────────
+  const textLines: string[] = [
+    `Today's LifeFlow — ${todayLabel}`,
+    `Scheduled: ${scheduledTimeLabel} (Daily Brief)`,
+    ``,
+    `Good morning, ${firstName}.`,
+    ``,
+  ]
+
+  if (completedTaskCount > 0) {
+    textLines.push(`✓ ${completedTaskCount} task${completedTaskCount === 1 ? '' : 's'} already completed today.`, ``)
+  }
+
+  if (taskCount > 0) {
+    textLines.push(`TASKS DUE TODAY (${taskCount})`)
+    taskTitles.forEach((t) => textLines.push(`  • ${t}`))
+    if (taskCount > taskTitles.length) textLines.push(`  … and ${taskCount - taskTitles.length} more`)
+    textLines.push(``)
+  } else {
+    textLines.push(`TASKS`, `  No tasks due today.`, ``)
+  }
+
+  if (habitCount > 0) {
+    textLines.push(`HABITS TO COMPLETE (${habitCount})`)
+    habitNames.forEach((h) => textLines.push(`  • ${h}`))
+    if (habitCount > habitNames.length) textLines.push(`  … and ${habitCount - habitNames.length} more`)
+    textLines.push(``)
+  }
+
+  if (totalGoals > 0) {
+    textLines.push(`ACTIVE GOALS (${totalGoals})`)
+    goalTitles.forEach((g) => textLines.push(`  • ${g}`))
+    if (totalGoals > goalTitles.length) textLines.push(`  … and ${totalGoals - goalTitles.length} more`)
+    textLines.push(``)
+  }
+
+  textLines.push(
+    `Open LifeFlow: ${appUrl}/app/dashboard`,
+    ``,
+    `Manage notification preferences: ${appUrl}/app/profile`,
+  )
+
+  return { subject, html, text: textLines.join('\n') }
+}
+
+// ─── Account deletion scheduled ───────────────────────────────────────────────
+
+export interface AccountDeletedEmailOptions {
+  toName: string
+  toEmail: string
+  /** ISO string of soft-deletion timestamp */
+  deletedAt: string
+  /** ISO string of scheduled permanent-deletion date */
+  scheduledPermanentDeletionAt: string
+  appUrl: string
+  /**
+   * Full restoration URL containing the secure single-use token.
+   * Format: `${appUrl}/restore-account?token=<base64url-token>`
+   * The raw token is generated by the delete-account route and must never be
+   * logged.  Pass the complete URL so this template stays token-unaware.
+   */
+  restoreUrl: string
+}
+
+/**
+ * Confirmation email sent once after an account is soft-deleted.
+ * Tells the user what was done, when permanent deletion will occur,
+ * and how to restore their account within the 30-day window.
+ */
+export function buildAccountDeletedEmail(opts: AccountDeletedEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, toEmail: _toEmail, deletedAt, scheduledPermanentDeletionAt, appUrl: _appUrl, restoreUrl } = opts
+  // _toEmail and _appUrl are part of the interface for caller completeness but are not
+  // rendered directly — all display content is derived from other fields or restoreUrl.
+  const firstName = toName.split(' ')[0] ?? toName
+
+  // Format dates for display — e.g. "September 17, 2026"
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+    })
+  const deletedDateStr    = fmt(deletedAt)
+  const permanentDateStr  = fmt(scheduledPermanentDeletionAt)
+  // restoreUrl is supplied by the caller — it contains the secure single-use
+  // token and must never be reconstructed here.
+
+  const subject = `Restore your ${BRAND_NAME} account`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 8px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'SF Pro Text','Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Restore your ${BRAND_NAME} account
+    </h2>
+    <p style="margin:0 0 16px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)},
+    </p>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Your ${BRAND_NAME} account has been scheduled for deletion.
+      Your account and data are currently preserved.
+      You can restore your account before the permanent deletion date.
+    </p>
+
+    <!-- Info box -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="background:#fefce8;border:1px solid #fde047;border-radius:10px;
+                   padding:16px 18px;">
+          <p style="margin:0 0 8px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:13.5px;font-weight:600;color:#713f12;">
+            &#128337;&nbsp; Your account timeline
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                      'Segoe UI',Arial,sans-serif;
+                         font-size:13px;color:#78350f;padding:2px 10px 2px 0;
+                         white-space:nowrap;font-weight:600;">
+                Account deleted
+              </td>
+              <td style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                      'Segoe UI',Arial,sans-serif;
+                         font-size:13px;color:#92400e;padding:2px 0;">
+                ${escapeHtml(deletedDateStr)}
+              </td>
+            </tr>
+            <tr>
+              <td style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                      'Segoe UI',Arial,sans-serif;
+                         font-size:13px;color:#78350f;padding:2px 10px 2px 0;
+                         white-space:nowrap;font-weight:600;">
+                Permanent deletion
+              </td>
+              <td style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                      'Segoe UI',Arial,sans-serif;
+                         font-size:13px;color:#92400e;padding:2px 0;">
+                ${escapeHtml(permanentDateStr)}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      You can restore your account before <strong>${escapeHtml(permanentDateStr)}</strong>.
+      All your tasks, habits, goals, expenses, notes, and preferences will be exactly as you left them.
+    </p>
+
+    <!-- CTA — single-use secure restore link -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="border-radius:10px;background:#2563eb;">
+          <a href="${escapeHtml(restoreUrl)}"
+             class="btn-cta"
+             style="display:inline-block;padding:13px 28px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:14px;font-weight:600;color:#ffffff;
+                    text-decoration:none;border-radius:10px;
+                    mso-padding-alt:0;line-height:1;">
+            Restore My Account
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 8px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:12px;color:#94a3b8;line-height:1.65;">
+      This link is single-use and expires on <strong style="color:#64748b;">${escapeHtml(permanentDateStr)}</strong>.
+      Do not share it with anyone.
+    </p>
+    <p style="margin:0 0 16px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;line-height:1.65;">
+      After <strong>${escapeHtml(permanentDateStr)}</strong>, your account and all
+      associated data will be permanently and irreversibly deleted. This cannot be undone.
+    </p>
+    <p style="margin:0;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#94a3b8;line-height:1.65;">
+      If you did not request this deletion, please restore your account immediately
+      and then change your password.
+    </p>
+  `)
+
+  const text =
+    `Restore your ${BRAND_NAME} account\n\n` +
+    `Hi ${firstName},\n\n` +
+    `Your ${BRAND_NAME} account has been scheduled for deletion.\n` +
+    `Your account and data are currently preserved.\n` +
+    `You can restore your account before the permanent deletion date.\n\n` +
+    `Account deleted:     ${deletedDateStr}\n` +
+    `Permanent deletion:  ${permanentDateStr}\n\n` +
+    `Restore your account before ${permanentDateStr} by visiting:\n` +
+    `${restoreUrl}\n\n` +
+    `This link is single-use and expires on ${permanentDateStr}.\n\n` +
+    `All your tasks, habits, goals, expenses, notes, and preferences will be exactly as you left them.\n\n` +
+    `After ${permanentDateStr}, your account and all data will be permanently and irreversibly deleted.\n\n` +
+    `If you did not request this deletion, restore your account immediately and then change your password.\n\n` +
+    `— The ${BRAND_NAME} Team`
+
+  return { subject, html, text }
+}
+
+// ─── Account restored ─────────────────────────────────────────────────────────
+
+export interface AccountRestoredEmailOptions {
+  toName: string
+  toEmail: string
+  appUrl: string
+}
+
+/**
+ * Confirmation email sent once after a soft-deleted account is successfully restored.
+ */
+export function buildAccountRestoredEmail(opts: AccountRestoredEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, toEmail, appUrl } = opts
+  const firstName  = toName.split(' ')[0] ?? toName
+  const dashUrl    = `${appUrl}/app/dashboard`
+
+  const subject = `Your ${BRAND_NAME} account has been restored`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 8px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'SF Pro Text','Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Your account has been restored
+    </h2>
+    <p style="margin:0 0 16px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)},
+    </p>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Great news — your ${BRAND_NAME} account
+      (<strong>${escapeHtml(toEmail)}</strong>) has been fully restored.
+      All your data is intact and exactly as you left it.
+    </p>
+
+    <!-- Success box -->
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;
+                padding:14px 16px;margin:0 0 24px;">
+      <p style="margin:0;
+                font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                             'Segoe UI',Arial,sans-serif;
+                font-size:13.5px;color:#166534;line-height:1.65;">
+        <strong>&#10003;</strong>&nbsp; Your tasks, habits, goals, expenses, notes,
+        and preferences have all been preserved.
+      </p>
+    </div>
+
+    <!-- CTA -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="border-radius:10px;background:#2563eb;">
+          <a href="${dashUrl}"
+             class="btn-cta"
+             style="display:inline-block;padding:13px 28px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:14px;font-weight:600;color:#ffffff;
+                    text-decoration:none;border-radius:10px;
+                    mso-padding-alt:0;line-height:1;">
+            Open LifeFlow
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;line-height:1.65;">
+      If you did not request this restoration, please change your password
+      immediately and contact support.
+    </p>
+  `)
+
+  const text =
+    `Your ${BRAND_NAME} account has been restored\n\n` +
+    `Hi ${firstName},\n\n` +
+    `Your ${BRAND_NAME} account (${toEmail}) has been fully restored.\n\n` +
+    `All your tasks, habits, goals, expenses, notes, and preferences are intact.\n\n` +
+    `Open LifeFlow: ${dashUrl}\n\n` +
+    `If you did not request this restoration, please change your password immediately.\n\n` +
+    `— The ${BRAND_NAME} Team`
 
   return { subject, html, text }
 }

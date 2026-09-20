@@ -144,19 +144,13 @@ export function GlobalSearch({ isOpen, onClose, onQuickAdd }: Props) {
             transition={{ type: 'spring', stiffness: 420, damping: 32, mass: 0.85 }}
           >
             <div
-              className="rounded-2xl overflow-hidden"
-              style={{
-                background: 'rgba(255,255,255,0.97)',
-                backdropFilter: 'blur(40px) saturate(1.9)',
-                WebkitBackdropFilter: 'blur(40px) saturate(1.9)',
-                border: '1px solid rgba(0,0,0,0.09)',
-                boxShadow: '0 24px 60px rgba(0,0,0,0.14), 0 4px 16px rgba(0,0,0,0.07)',
-              }}
+              className="glass-floating rounded-2xl overflow-hidden"
+              style={{ boxShadow: 'var(--glass-shadow-xl)' }}
             >
               {/* Input row */}
               <div
                 className="flex items-center gap-3 px-4 py-3.5"
-                style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+                style={{ borderBottom: '1px solid var(--border)' }}
               >
                 {searching
                   ? <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
@@ -175,7 +169,7 @@ export function GlobalSearch({ isOpen, onClose, onQuickAdd }: Props) {
                 {query && (
                   <button
                     onClick={() => { setQuery(''); setResults([]); inputRef.current?.focus() }}
-                    className="p-1 rounded-lg hover:bg-black/[0.05] transition-colors"
+                    className="nav-hover p-1 rounded-lg transition-colors"
                     style={{ color: 'var(--text-muted)' }}
                     aria-label="Clear search"
                   >
@@ -184,7 +178,7 @@ export function GlobalSearch({ isOpen, onClose, onQuickAdd }: Props) {
                 )}
                 <kbd
                   className="hidden sm:block text-[10px] px-1.5 py-0.5 rounded font-mono"
-                  style={{ background: 'rgba(0,0,0,0.06)', color: 'var(--text-faint)' }}
+                  style={{ background: 'var(--border-strong)', color: 'var(--text-faint)' }}
                 >
                   ESC
                 </kbd>

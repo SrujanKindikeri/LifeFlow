@@ -7,18 +7,20 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import mongoose from 'mongoose'
 import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import MoneyRecord from '@/models/MoneyRecord'
 import MoneyPayment from '@/models/MoneyPayment'
 import { moneyRecordUpdateSchema } from '@/lib/validations'
 import { calcBalance, deriveStatus, rupeesToPaise } from '@/lib/moneyCalculator'
-import type { IMoneyRecord } from '@/models/MoneyRecord'
+import type { IMoneyRecord, IMoneyAdditionalAmount } from '@/models/MoneyRecord'
 import type { IMoneyPayment } from '@/models/MoneyPayment'
 
 function serializeRecord(record: IMoneyRecord, payments: IMoneyPayment[]) {
   const balance = calcBalance(
     record.originalAmountMinor,
+    record.additionalAmounts ?? [],
     payments.map((p) => p.amountMinor)
   )
   return {
@@ -27,6 +29,15 @@ function serializeRecord(record: IMoneyRecord, payments: IMoneyPayment[]) {
     person:              record.person,
     direction:           record.direction,
     originalAmountMinor: record.originalAmountMinor,
+    totalAmountMinor:    balance.totalMinor,
+    additionalAmounts:   (record.additionalAmounts ?? []).map((a: IMoneyAdditionalAmount) => ({
+      _id:         (a._id as mongoose.Types.ObjectId).toString(),
+      amountMinor: a.amountMinor,
+      reason:      a.reason,
+      date:        a.date,
+      note:        a.note,
+      createdAt:   a.createdAt instanceof Date ? a.createdAt.toISOString() : a.createdAt,
+    })),
     currency:            record.currency,
     reason:              record.reason,
     category:            record.category,
@@ -120,6 +131,7 @@ export async function PATCH(
     const payments = await MoneyPayment.find({ moneyRecordId: id }).lean()
     const balance = calcBalance(
       record.originalAmountMinor,
+      record.additionalAmounts ?? [],
       (payments as unknown as IMoneyPayment[]).map((p) => p.amountMinor)
     )
     record.status = deriveStatus(balance, record.dueDate)

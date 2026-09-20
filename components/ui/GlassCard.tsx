@@ -14,6 +14,8 @@ interface GlassCardProps extends HTMLMotionProps<'div'> {
   level?:     GlassLevel
   glow?:      boolean
   highlight?: boolean
+  /** Add specular catch-light to the top-left corner */
+  catchlight?: boolean
 }
 
 const paddingMap: Record<PaddingSize, string> = {
@@ -34,11 +36,12 @@ const levelMap: Record<GlassLevel, string> = {
 export function GlassCard({
   children,
   className,
-  hover     = false,
-  padding   = 'md',
-  level     = 'regular',
-  glow      = false,
-  highlight = false,
+  hover      = false,
+  padding    = 'md',
+  level      = 'regular',
+  glow       = false,
+  highlight  = false,
+  catchlight = false,
   ...props
 }: GlassCardProps) {
   return (
@@ -48,12 +51,16 @@ export function GlassCard({
         levelMap[level],
         paddingMap[padding],
         hover && [
-          'cursor-pointer transition-all duration-200',
-          'hover:shadow-[0_8px_32px_rgba(0,0,0,0.10)]',
-          'hover:-translate-y-0.5',
+          'cursor-pointer',
+          'transition-[box-shadow,transform]',
+          'duration-200',
+          'hover:shadow-[var(--glass-hover-shadow)]',
+          'hover:-translate-y-px',
+          'active:translate-y-0',
         ],
-        glow && 'shadow-[0_0_32px_rgba(37,99,235,0.10)]',
-        highlight && 'glass-highlight',
+        glow       && 'shadow-[0_0_32px_rgba(37,99,235,0.10)]',
+        highlight  && 'glass-highlight',
+        catchlight && 'glass-catchlight',
         className
       )}
       {...props}

@@ -72,14 +72,11 @@ export function BottomNav() {
               onClick={() => setMoreOpen(false)}
             />
             <motion.nav
-              className="fixed right-3 z-40 py-1.5 min-w-[180px] rounded-2xl lg:hidden"
+              className="glass-panel fixed right-3 z-40 py-1.5 min-w-[180px] rounded-2xl lg:hidden"
               style={{
                 bottom: 'calc(var(--bottomnav-height, 68px) + 10px)',
-                background: 'rgba(255,255,255,0.94)',
-                backdropFilter: 'blur(32px) saturate(1.8)',
-                WebkitBackdropFilter: 'blur(32px) saturate(1.8)',
-                border: '1px solid rgba(0,0,0,0.08)',
-                boxShadow: '0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+                border: '1px solid var(--glass-panel-border)',
+                boxShadow: '0 8px 40px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.08)',
               }}
               initial={{ opacity: 0, scale: 0.88, y: 12 }}
               animate={{ opacity: 1, scale: 1,    y: 0  }}
@@ -94,7 +91,7 @@ export function BottomNav() {
                     <div
                       className={cn(
                         'flex items-center gap-3 px-4 py-2.5 text-[13px] font-medium transition-colors mx-1 rounded-xl',
-                        isActive ? 'nav-active-pill' : 'hover:bg-black/[0.03]'
+                        isActive ? 'nav-active-pill' : 'nav-hover'
                       )}
                       style={{
                         color: isActive ? 'var(--accent-text)' : 'var(--text-secondary)',
@@ -111,7 +108,7 @@ export function BottomNav() {
 
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-3 px-4 py-2.5 text-[13px] font-medium transition-colors rounded-xl hover:bg-red-50"
+                className="nav-hover-danger flex items-center gap-3 px-4 py-2.5 text-[13px] font-medium transition-colors rounded-xl"
                 style={{ color: 'var(--danger)', width: 'calc(100% - 8px)', margin: '0 4px' }}
               >
                 <LogOut size={15} />
@@ -122,16 +119,13 @@ export function BottomNav() {
         )}
       </AnimatePresence>
 
-      {/* ── Bottom bar ── */}
+      {/* ── Bottom bar — uses CSS variables so dark mode works ── */}
       <nav
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30"
+        className="glass-panel lg:hidden fixed bottom-0 left-0 right-0 z-30"
         style={{
           height: 'var(--bottomnav-height, 68px)',
-          background: 'rgba(255,255,255,0.90)',
-          backdropFilter: 'blur(28px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(28px) saturate(1.8)',
-          borderTop: '1px solid rgba(0,0,0,0.07)',
-          boxShadow: '0 -1px 8px rgba(0,0,0,0.05)',
+          borderTop: '1px solid var(--glass-panel-border)',
+          boxShadow: '0 -2px 16px rgba(0,0,0,0.06), 0 -1px 4px rgba(0,0,0,0.04)',
         }}
         aria-label="Bottom navigation"
       >

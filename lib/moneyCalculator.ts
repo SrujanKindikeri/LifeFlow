@@ -5,7 +5,7 @@
  * 1 rupee = 100 paise.  Never use floating-point for money math.
  */
 
-import type { MoneyStatus } from '@/models/MoneyRecord'
+import type { MoneyStatus, IMoneyAdditionalAmount } from '@/models/MoneyRecord'
 
 // ── Unit conversion ───────────────────────────────────────────────────────────
 
@@ -27,26 +27,50 @@ export function formatPaise(paise: number, currency = 'INR'): string {
   return `${symbol}${rupees.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 }
 
+// ── Total amount ──────────────────────────────────────────────────────────────
+
+/**
+ * Compute the total amount owed/lent by adding the original amount to all
+ * additional amounts that were added after the record was created.
+ *
+ * originalAmountMinor is NEVER mutated — this is the safe accumulator.
+ */
+export function getTotalAmountMinor(
+  originalAmountMinor: number,
+  additionalAmounts: Pick<IMoneyAdditionalAmount, 'amountMinor'>[]
+): number {
+  return additionalAmounts.reduce((sum, a) => sum + a.amountMinor, originalAmountMinor)
+}
+
 // ── Balance calculation ───────────────────────────────────────────────────────
 
 export interface MoneyBalance {
   originalMinor:  number
+  totalMinor:     number   // originalMinor + all additional amounts
   paidMinor:      number
   remainingMinor: number
 }
 
 /**
- * Calculate the outstanding balance from a list of payment amounts (paise).
- * Immutable — never modifies the input array.
+ * Calculate the outstanding balance.
+ *
+ * @param originalAmountMinor  The immutable original amount in paise.
+ * @param additionalAmounts    Any amounts added after creation (may be empty).
+ * @param paymentAmountsPaise  All recorded payment amounts in paise.
+ *
+ * Immutable — never modifies the input arrays.
  */
 export function calcBalance(
   originalAmountMinor: number,
+  additionalAmounts: Pick<IMoneyAdditionalAmount, 'amountMinor'>[],
   paymentAmountsPaise: number[]
 ): MoneyBalance {
-  const paidMinor = paymentAmountsPaise.reduce((sum, p) => sum + p, 0)
-  const remainingMinor = originalAmountMinor - paidMinor
+  const totalMinor    = getTotalAmountMinor(originalAmountMinor, additionalAmounts)
+  const paidMinor     = paymentAmountsPaise.reduce((sum, p) => sum + p, 0)
+  const remainingMinor = totalMinor - paidMinor
   return {
     originalMinor: originalAmountMinor,
+    totalMinor,
     paidMinor,
     remainingMinor: Math.max(0, remainingMinor),
   }

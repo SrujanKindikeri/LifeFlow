@@ -4,6 +4,8 @@ import { useState, useRef } from 'react'
 import { Scan, Check, X, AlertTriangle } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { EXPENSE_CATEGORIES } from '@/lib/utils'
@@ -92,7 +94,8 @@ export function ReceiptScanner({ onExpenseAdded }: { onExpenseAdded: () => void 
   }
 
   async function confirm() {
-    if (!fields.amount || !parseFloat(fields.amount)) {
+    const parsed = parseAmountExpression(fields.amount)
+    if (!fields.amount || !parsed.value) {
       showError('Amount is required'); return
     }
     setSaving(true)
@@ -101,7 +104,7 @@ export function ReceiptScanner({ onExpenseAdded }: { onExpenseAdded: () => void 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount:      parseFloat(fields.amount),
+          amount:      parsed.value,
           category:    fields.category,
           description: [fields.merchant, fields.items, fields.notes].filter(Boolean).join(' · ').slice(0,200) || 'Receipt expense',
           date:        fields.date,
@@ -160,7 +163,7 @@ export function ReceiptScanner({ onExpenseAdded }: { onExpenseAdded: () => void 
 
             <GlassInput label="Merchant / Store" value={fields.merchant} onChange={(e) => setField('merchant', e.target.value)} placeholder="e.g. Big Bazaar" />
             <div className="grid grid-cols-2 gap-3">
-              <GlassInput label="Amount (₹)" type="number" min={0.01} step={0.01} value={fields.amount} onChange={(e) => setField('amount', e.target.value)} placeholder="0.00" />
+              <SmartAmountInput label="Amount" value={fields.amount} onChange={(raw) => setField('amount', raw)} currency="INR" />
               <GlassInput label="Date" type="date" value={fields.date} onChange={(e) => setField('date', e.target.value)} />
             </div>
             <GlassSelect label="Category" value={fields.category} onChange={(v) => setField('category', v)} options={CAT_OPTIONS} />

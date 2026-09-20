@@ -34,6 +34,8 @@ import {
 import { GlassCard } from '@/components/ui/GlassCard'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { useToast } from '@/components/ui/Toast'
 import { cn } from '@/lib/utils'
 import { calculateBill } from '@/lib/billCalculator'
@@ -206,7 +208,10 @@ export function GroupBillSplitter({
     switch (step) {
       case 'details': return name.trim().length > 0 && date.length === 10
       case 'people':  return people.length >= 1
-      case 'items':   return items.length > 0
+      // Require at least one item AND every item must have a non-empty name.
+      // An item added with "Add Item Manually" starts with name=''; blocking
+      // advance here prevents the server from rejecting with a Zod error.
+      case 'items':   return items.length > 0 && items.every((it) => it.name.trim().length > 0)
       case 'assign':  return true   // assignment is optional
       case 'charges': return true
       case 'summary': return true
@@ -224,28 +229,55 @@ export function GroupBillSplitter({
   }
 
   // ── Save ───────────────────────────────────────────────────────────────────
+  // Synchronous in-progress guard — prevents concurrent saves if the user
+  // clicks the button before the parent re-render disables it.
+  const isSavingRef = useRef(false)
+
   async function handleSave() {
-    if (!calcResult) { toastError('No people or items to split'); return }
-    const bill: GroupBillData = {
-      name: name.trim(), date, currency, people, items, splitMode, customSplits,
-      discountType, discountValue, taxType, taxValue,
-      serviceChargeType, serviceChargeValue, tipType, tipValue,
-      subtotal:             calcResult.totals.subtotal,
-      discountAmount:       calcResult.totals.discountAmount,
-      taxAmount:            calcResult.totals.taxAmount,
-      serviceChargeAmount:  calcResult.totals.serviceChargeAmount,
-      tipAmount:            calcResult.totals.tipAmount,
-      total:                calcResult.totals.grandTotal,
-      settlements:          calcResult.settlements.map((s) => ({ ...s, settled: false })),
-      savedAsExpense:       initialData?.savedAsExpense ?? false,
-      expenseId:            initialData?.expenseId,
-      _id:                  initialData?._id,
-    }
+    // Prevent concurrent invocations (rapid double-clicks before re-render)
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+
     try {
-      await onSave(bill)
-      toastSuccess('Group bill saved!')
-    } catch {
-      toastError('Failed to save group bill')
+      if (!calcResult) { toastError('No people or items to split'); return }
+
+      // Client-side pre-flight: catch blank item names before the API call
+      const blankItem = items.find((it) => !it.name.trim())
+      if (blankItem) {
+        toastError('All items must have a name before saving.')
+        // Jump back to items step so the user can fix it
+        setStep('items')
+        return
+      }
+
+      const bill: GroupBillData = {
+        name: name.trim(), date, currency, people, items, splitMode, customSplits,
+        discountType, discountValue, taxType, taxValue,
+        serviceChargeType, serviceChargeValue, tipType, tipValue,
+        subtotal:             calcResult.totals.subtotal,
+        discountAmount:       calcResult.totals.discountAmount,
+        taxAmount:            calcResult.totals.taxAmount,
+        serviceChargeAmount:  calcResult.totals.serviceChargeAmount,
+        tipAmount:            calcResult.totals.tipAmount,
+        total:                calcResult.totals.grandTotal,
+        settlements:          calcResult.settlements.map((s) => ({ ...s, settled: false })),
+        savedAsExpense:       initialData?.savedAsExpense ?? false,
+        expenseId:            initialData?.expenseId,
+        _id:                  initialData?._id,
+      }
+      try {
+        await onSave(bill)
+        toastSuccess('Group bill saved!')
+      } catch (err) {
+        // Surface the real API error message instead of a generic fallback
+        const msg =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Failed to save group bill'
+        toastError(msg)
+      }
+    } finally {
+      isSavingRef.current = false
     }
   }
 
@@ -455,6 +487,13 @@ export function GroupBillSplitter({
               >
                 <Plus size={14} /> Add Item Manually
               </GlassButton>
+
+              {/* Warn about unnamed items — explains why "Next" is disabled */}
+              {items.length > 0 && items.some((it) => !it.name.trim()) && (
+                <p className="text-xs mt-2 text-amber-600">
+                  All items need a name before you can continue.
+                </p>
+              )}
             </GlassCard>
           )}
 
@@ -592,6 +631,22 @@ function ItemRow({ item, sym, onChange, onRemove }: {
   onChange: (updated: BillItem) => void
   onRemove: () => void
 }) {
+  // Local expression state so we can display "500+50" while storing 550 in item.price
+  const [priceExpr, setPriceExpr] = useState(item.price > 0 ? String(item.price) : '')
+
+  // Sync priceExpr when item.price changes externally (e.g. from scan)
+  const prevPrice = useRef(item.price)
+  useEffect(() => {
+    if (prevPrice.current !== item.price) {
+      prevPrice.current = item.price
+      // Only overwrite expr if it doesn't already evaluate to the same value
+      const currentCalc = parseAmountExpression(priceExpr).value
+      if (currentCalc !== item.price) {
+        setPriceExpr(item.price > 0 ? String(item.price) : '')
+      }
+    }
+  }, [item.price, priceExpr])
+
   return (
     <div className="flex items-center gap-2 p-2.5 rounded-xl border border-black/[0.06]" style={{ background: 'rgba(255,255,255,0.7)' }}>
       <div className="flex-1 min-w-0 grid grid-cols-3 gap-2">
@@ -614,16 +669,16 @@ function ItemRow({ item, sym, onChange, onRemove }: {
           }}
           style={{ color: 'var(--text-primary)' }}
         />
-        <div className="relative">
-          <span className="absolute left-0 top-0 bottom-0 flex items-center text-xs opacity-50">{sym}</span>
-          <input
-            className="w-full pl-3 text-sm bg-transparent border-b border-black/10 outline-none pb-0.5 focus:border-indigo-400"
-            type="number" min="0" step="0.01" placeholder="Price"
-            value={item.price}
-            onChange={(e) => onChange({ ...item, price: parseFloat(e.target.value) || 0 })}
-            style={{ color: 'var(--text-primary)' }}
-          />
-        </div>
+        <SmartAmountInput
+          value={priceExpr}
+          onChange={(raw, numeric) => {
+            setPriceExpr(raw)
+            prevPrice.current = numeric ?? 0
+            onChange({ ...item, price: numeric ?? 0 })
+          }}
+          currency={sym === '₹' ? 'INR' : sym === '$' ? 'USD' : sym === '€' ? 'EUR' : sym === '£' ? 'GBP' : 'INR'}
+          placeholder="Price"
+        />
       </div>
       <div className="text-sm font-semibold shrink-0 w-16 text-right tabular-nums" style={{ color: 'var(--text-primary)' }}>
         {sym}{(item.price * item.quantity).toFixed(2)}

@@ -1,5 +1,18 @@
 import mongoose, { Document, Model, Schema } from 'mongoose'
 
+// ── Account lifecycle ─────────────────────────────────────────────────────────
+
+/**
+ * "active"  — normal account, all features accessible.
+ * "deleted" — soft-deleted; account is within the 30-day recovery window.
+ *             Sessions are invalidated at deletion time.  No new sessions
+ *             can be started until the account is restored.
+ *             All user data is preserved in MongoDB during this window.
+ */
+export type AccountStatus = 'active' | 'deleted'
+
+export type AppTheme = 'light' | 'dark' | 'system'
+
 export interface IUser extends Document {
   _id: mongoose.Types.ObjectId
   publicId: string
@@ -16,6 +29,26 @@ export interface IUser extends Document {
   avatar?: string
   currency: string
   timezone: string
+
+  // ── Appearance & Experience preferences ──────────────────────────────────
+  /**
+   * User-controlled appearance and experience settings.
+   * All fields have safe defaults so existing users are unaffected.
+   */
+  appearancePreferences: {
+    /** Selected colour scheme. 'system' follows OS/browser preference. */
+    theme: AppTheme
+    /** Whether Night Shift is enabled (softer visuals during configured hours). */
+    nightShiftEnabled: boolean
+    /** Night Shift start time in 24h "HH:MM" format, e.g. "22:00". */
+    nightShiftStart: string
+    /** Night Shift end time in 24h "HH:MM" format, e.g. "07:00". */
+    nightShiftEnd: string
+    /** Whether in-app notification tones are enabled. */
+    turnToneEnabled: boolean
+    /** Volume from 0 (silent) to 1 (max). */
+    turnToneVolume: number
+  }
   notificationPreferences: {
     habitReminders: boolean
     taskReminders: boolean
@@ -72,6 +105,21 @@ export interface IUser extends Document {
   /** UTC expiry — reset token is invalid at or after this date */
   passwordResetExpiresAt: Date | null
 
+  // ── Account restoration token ─────────────────────────────────────────────
+  /**
+   * SHA-256 hash of the raw single-use restoration token included in the
+   * "Restore your LifeFlow account" email.  Never store the raw token.
+   * Cleared immediately on successful restoration or on re-issue (if delete
+   * is triggered again).
+   */
+  accountRestoreTokenHash: string | null
+  /**
+   * UTC expiry — restoration token is invalid at or after this date.
+   * Default window: ACCOUNT_RESTORE_TOKEN_EXPIRY_DAYS env var (default 30 days,
+   * matching the recovery window so the link stays valid for the full period).
+   */
+  accountRestoreExpiresAt: Date | null
+
   // ── TOTP / Google Authenticator ───────────────────────────────────────────
   /** Whether TOTP 2FA is active for this account */
   twoFactorEnabled: boolean
@@ -89,6 +137,25 @@ export interface IUser extends Document {
    * An entry is removed from the array once used.
    */
   twoFactorRecoveryCodeHashes: string[]
+
+  // ── Account lifecycle (soft-delete) ──────────────────────────────────────
+  /**
+   * "active"  — normal operational state (default for all users).
+   * "deleted" — soft-deleted; account is in the 30-day recovery window.
+   *             Data is preserved.  Sessions are invalidated on deletion.
+   */
+  accountStatus: AccountStatus
+  /**
+   * UTC timestamp when the account was soft-deleted.
+   * Null for active accounts.
+   */
+  deletedAt: Date | null
+  /**
+   * UTC timestamp after which permanent deletion may run.
+   * Set to deletedAt + 30 days.  Null for active accounts.
+   * The cleanup job processes accounts where this date has passed.
+   */
+  scheduledPermanentDeletionAt: Date | null
 
   createdAt: Date
   updatedAt: Date
@@ -129,6 +196,19 @@ const UserSchema = new Schema<IUser>(
     avatar: { type: String },
     currency: { type: String, default: 'INR', maxlength: 5 },
     timezone: { type: String, default: 'Asia/Kolkata', maxlength: 50 },
+
+    // ── Appearance & Experience preferences ──────────────────────────────────
+    // Safe defaults ensure all existing users get light theme, Night Shift
+    // off, and Turn Tone on at 50 % volume — no data migration required.
+    appearancePreferences: {
+      theme:             { type: String, enum: ['light', 'dark', 'system'], default: 'light' },
+      nightShiftEnabled: { type: Boolean, default: false },
+      nightShiftStart:   { type: String,  default: '22:00', maxlength: 5 },
+      nightShiftEnd:     { type: String,  default: '07:00', maxlength: 5 },
+      turnToneEnabled:   { type: Boolean, default: true  },
+      turnToneVolume:    { type: Number,  default: 0.5, min: 0, max: 1 },
+    },
+
     notificationPreferences: {
       habitReminders: { type: Boolean, default: true },
       taskReminders: { type: Boolean, default: true },
@@ -193,6 +273,22 @@ const UserSchema = new Schema<IUser>(
       default: null,
     },
 
+    // ── Account restoration token ────────────────────────────────────────────
+    // A single-use, short-lived (30-day) token sent in the account-deletion
+    // confirmation email.  Only the SHA-256 hash is stored here; the raw token
+    // goes only into the email URL and is discarded afterward.
+    // Cleared on successful restoration or when a new deletion is triggered.
+    accountRestoreTokenHash: {
+      type:   String,
+      default: null,
+      index:  true,
+      sparse: true,  // unique sparse: fast lookup, no null collisions
+    },
+    accountRestoreExpiresAt: {
+      type:    Date,
+      default: null,
+    },
+
     // ── TOTP / Google Authenticator ─────────────────────────────────────────
     twoFactorEnabled: {
       type: Boolean,
@@ -209,6 +305,26 @@ const UserSchema = new Schema<IUser>(
     twoFactorRecoveryCodeHashes: {
       type: [String],
       default: [],
+    },
+
+    // ── Account lifecycle (soft-delete) ──────────────────────────────────────
+    // accountStatus defaults to 'active' so all existing users are unaffected.
+    // The scheduler and requireAuth() filter on accountStatus: 'active'.
+    accountStatus: {
+      type:    String,
+      enum:    ['active', 'deleted'],
+      default: 'active',
+      index:   true,
+    },
+    deletedAt: {
+      type:    Date,
+      default: null,
+      index:   true,   // used by cleanup job: { accountStatus, deletedAt }
+    },
+    scheduledPermanentDeletionAt: {
+      type:    Date,
+      default: null,
+      index:   true,   // used by cleanup job: range query on this field
     },
   },
   { timestamps: true }

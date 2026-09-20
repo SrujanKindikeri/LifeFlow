@@ -383,8 +383,8 @@ function PersonalAnalytics({
                 <Tooltip
                   formatter={(value) => formatCurrency(Number(value))}
                   contentStyle={{
-                    background: 'rgba(255,255,255,0.96)',
-                    border: '1px solid rgba(0,0,0,0.08)',
+                    background: 'var(--glass-floating-bg)',
+                    border: '1px solid var(--border)',
                     borderRadius: '12px',
                     fontSize: '12px',
                     color: 'var(--text-primary)',

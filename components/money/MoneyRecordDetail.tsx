@@ -4,13 +4,14 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Plus, Pencil, Trash2, CheckCircle2,
-  Calendar, FileText, User,
+  Calendar, FileText, User, TrendingUp, History,
 } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { RecordPaymentModal } from './RecordPaymentModal'
+import { AddAmountModal } from './AddAmountModal'
 import {
   formatPaiseDisplay, statusLabel, statusColor, statusBg,
   paymentDirectionText, shortDate,
@@ -28,18 +29,25 @@ interface Props {
 export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdated, onRecordDeleted }: Props) {
   const { success, error } = useToast()
   const [record, setRecord] = useState<MoneyRecordData>(initialRecord)
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [editPayment, setEditPayment] = useState<MoneyPaymentData | null>(null)
+  const [paymentModalOpen, setPaymentModalOpen]   = useState(false)
+  const [addAmountModalOpen, setAddAmountModalOpen] = useState(false)
+  const [editPayment, setEditPayment]             = useState<MoneyPaymentData | null>(null)
   const [deletePaymentTarget, setDeletePaymentTarget] = useState<MoneyPaymentData | null>(null)
   const [deleteRecordConfirm, setDeleteRecordConfirm] = useState(false)
-  const [deletingPayment, setDeletingPayment] = useState(false)
-  const [deletingRecord, setDeletingRecord] = useState(false)
+  const [deletingPayment, setDeletingPayment]     = useState(false)
+  const [deletingRecord, setDeletingRecord]       = useState(false)
 
-  const pct = record.originalAmountMinor > 0
-    ? Math.round((record.paidMinor / record.originalAmountMinor) * 100)
+  // totalAmountMinor is the displayed "total" — falls back to originalAmountMinor
+  // for records that predate this feature (additionalAmounts will be empty array).
+  const totalMinor = record.totalAmountMinor ?? record.originalAmountMinor
+
+  const pct = totalMinor > 0
+    ? Math.round((record.paidMinor / totalMinor) * 100)
     : 0
 
   const isPaid = record.status === 'paid'
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
 
   function handlePaymentRecorded(updatedRecord: MoneyRecordData) {
     setRecord(updatedRecord)
@@ -52,6 +60,11 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
     setEditPayment(null)
   }
 
+  function handleAmountAdded(updatedRecord: MoneyRecordData) {
+    setRecord(updatedRecord)
+    onRecordUpdated(updatedRecord)
+  }
+
   async function handleDeletePayment() {
     if (!deletePaymentTarget) return
     setDeletingPayment(true)
@@ -60,10 +73,7 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
         `/api/money-records/${record._id}/payments/${deletePaymentTarget._id}`,
         { method: 'DELETE' }
       )
-      if (!res.ok) {
-        error('Failed to delete payment')
-        return
-      }
+      if (!res.ok) { error('Failed to delete payment'); return }
       const data = await res.json()
       setRecord(data.record)
       onRecordUpdated(data.record)
@@ -80,10 +90,7 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
     setDeletingRecord(true)
     try {
       const res = await fetch(`/api/money-records/${record._id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        error('Failed to delete record')
-        return
-      }
+      if (!res.ok) { error('Failed to delete record'); return }
       success('Record deleted')
       onRecordDeleted(record._id)
       setDeleteRecordConfirm(false)
@@ -93,6 +100,46 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
       setDeletingRecord(false)
     }
   }
+
+  // ── Combined amount history: original + additionals, sorted newest-first ──
+  const additionals = record.additionalAmounts ?? []
+  type HistoryEntry = {
+    key: string
+    amountMinor: number
+    label: string
+    date: string
+    note?: string
+    isOriginal: boolean
+  }
+  const amountHistory: HistoryEntry[] = [
+    // Original entry always at the bottom (oldest)
+    {
+      key:         'original',
+      amountMinor: record.originalAmountMinor,
+      label:       record.reason,
+      date:        record.givenDate,
+      note:        record.note,
+      isOriginal:  true,
+    },
+    // Additional entries
+    ...additionals.map((a) => ({
+      key:         a._id,
+      amountMinor: a.amountMinor,
+      label:       a.reason,
+      date:        a.date,
+      note:        a.note,
+      isOriginal:  false,
+    })),
+  ]
+    // Sort newest-first
+    .sort((a, b) => {
+      if (a.date > b.date) return -1
+      if (a.date < b.date) return  1
+      // original always last when dates are equal
+      if (a.isOriginal) return 1
+      if (b.isOriginal) return -1
+      return 0
+    })
 
   return (
     <div className="space-y-4">
@@ -156,25 +203,28 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
           </span>
         </div>
 
-        {/* Amount */}
+        {/* Total amount — always shows the running total */}
         <div className="mb-4">
           <p className="text-[28px] font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
-            {formatPaiseDisplay(record.originalAmountMinor, record.currency)}
+            {formatPaiseDisplay(totalMinor, record.currency)}
           </p>
           <p className="text-[13px] mt-1" style={{ color: 'var(--text-muted)' }}>
             {record.direction === 'given'
-              ? `You gave ${record.person.name}`
-              : `You borrowed from ${record.person.name}`}
+              ? `Total given to ${record.person.name}`
+              : `Total borrowed from ${record.person.name}`}
             {' · '}{shortDate(record.givenDate)}
           </p>
-          {record.reason && (
-            <p className="text-[13px] mt-1" style={{ color: 'var(--text-secondary)' }}>
-              {record.reason}
+          {/* Show breakdown only when there are additional amounts */}
+          {additionals.length > 0 && (
+            <p className="text-[12px] mt-0.5 tabular-nums" style={{ color: 'var(--text-muted)' }}>
+              {formatPaiseDisplay(record.originalAmountMinor, record.currency)} original
+              {' + '}
+              {formatPaiseDisplay(totalMinor - record.originalAmountMinor, record.currency)} added
             </p>
           )}
         </div>
 
-        {/* Progress */}
+        {/* Progress bar */}
         {!isPaid && (
           <div className="mb-4">
             <div className="flex items-center justify-between text-[11px] mb-1.5">
@@ -214,8 +264,8 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
             <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
             <p className="text-sm font-semibold text-emerald-600">
               {record.direction === 'given'
-                ? `${record.person.name} has fully repaid ${formatPaiseDisplay(record.originalAmountMinor, record.currency)}.`
-                : `You have fully repaid ${formatPaiseDisplay(record.originalAmountMinor, record.currency)}.`}
+                ? `${record.person.name} has fully repaid ${formatPaiseDisplay(totalMinor, record.currency)}.`
+                : `You have fully repaid ${formatPaiseDisplay(totalMinor, record.currency)}.`}
             </p>
           </div>
         )}
@@ -247,19 +297,149 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
           )}
         </div>
 
-        {/* Record Payment CTA */}
-        {!isPaid && (
-          <div className="mt-5">
+        {/* Action buttons */}
+        <div className="mt-5 flex flex-wrap gap-2">
+          {/* Add Amount — always available (even on paid records to reopen them) */}
+          <GlassButton
+            variant="ghost"
+            onClick={() => setAddAmountModalOpen(true)}
+          >
+            <TrendingUp size={14} />
+            Add Amount
+          </GlassButton>
+
+          {/* Record Payment — only when there is still something to pay */}
+          {!isPaid && (
             <GlassButton
               variant="primary"
               onClick={() => setPaymentModalOpen(true)}
-              className="w-full sm:w-auto"
             >
               <Plus size={14} />
               Record Payment
             </GlassButton>
+          )}
+        </div>
+      </GlassCard>
+
+      {/* ── Amount History ── */}
+      <GlassCard padding="md">
+        <div className="flex items-center gap-2 mb-4">
+          <History size={14} style={{ color: 'var(--accent)' }} />
+          <h3 className="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Amount History
+          </h3>
+          <span
+            className="text-[11px] px-2 py-0.5 rounded-full font-medium ml-auto tabular-nums"
+            style={{
+              background: 'rgba(99,102,241,0.1)',
+              color: 'var(--accent)',
+            }}
+          >
+            {amountHistory.length} {amountHistory.length === 1 ? 'entry' : 'entries'}
+          </span>
+        </div>
+
+        <div className="relative">
+          {/* Timeline line */}
+          <div
+            className="absolute left-4 top-2 bottom-2 w-px"
+            style={{ background: 'rgba(99,102,241,0.15)' }}
+          />
+          <div className="space-y-3">
+            {amountHistory.map((entry, idx) => (
+              <motion.div
+                key={entry.key}
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="flex items-start gap-4"
+              >
+                {/* Timeline dot */}
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 relative"
+                  style={{
+                    background: entry.isOriginal
+                      ? 'rgba(99,102,241,0.08)'
+                      : 'rgba(22,163,74,0.1)',
+                    border: entry.isOriginal
+                      ? '2px solid rgba(99,102,241,0.2)'
+                      : '2px solid rgba(22,163,74,0.3)',
+                  }}
+                >
+                  <TrendingUp
+                    size={12}
+                    style={{ color: entry.isOriginal ? 'var(--accent)' : '#16a34a' }}
+                  />
+                </div>
+
+                {/* Entry card */}
+                <div
+                  className="flex-1 rounded-xl px-3.5 py-3"
+                  style={{
+                    background: entry.isOriginal
+                      ? 'rgba(0,0,0,0.025)'
+                      : 'rgba(22,163,74,0.04)',
+                    border: entry.isOriginal
+                      ? '1px solid rgba(0,0,0,0.06)'
+                      : '1px solid rgba(22,163,74,0.12)',
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[13px] font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+                        + {formatPaiseDisplay(entry.amountMinor, record.currency)}
+                      </p>
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        {entry.label}
+                        {entry.isOriginal && (
+                          <span
+                            className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+                            style={{
+                              background: 'rgba(99,102,241,0.1)',
+                              color: 'var(--accent)',
+                            }}
+                          >
+                            Original
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <span className="text-[11px] shrink-0" style={{ color: 'var(--text-faint)' }}>
+                      {shortDate(entry.date)}
+                    </span>
+                  </div>
+                  {entry.note && (
+                    <p className="text-[11px] italic mt-1.5" style={{ color: 'var(--text-muted)' }}>
+                      &ldquo;{entry.note}&rdquo;
+                    </p>
+                  )}
+                </div>
+              </motion.div>
+            ))}
           </div>
-        )}
+
+          {/* Summary footer */}
+          <div
+            className="mt-4 flex items-center justify-between px-4 py-3 rounded-xl"
+            style={{
+              background: 'rgba(99,102,241,0.05)',
+              border: '1px solid rgba(99,102,241,0.1)',
+            }}
+          >
+            <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Total:</span>{' '}
+              {formatPaiseDisplay(totalMinor, record.currency)}
+            </div>
+            <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Paid:</span>{' '}
+              {formatPaiseDisplay(record.paidMinor, record.currency)}
+            </div>
+            <div className="text-[12px]" style={{ color: isPaid ? 'var(--success-text, #16a34a)' : 'var(--text-secondary)' }}>
+              <span className="font-semibold">Remaining:</span>{' '}
+              {isPaid ? formatPaiseDisplay(0, record.currency) : formatPaiseDisplay(record.remainingMinor, record.currency)}
+            </div>
+          </div>
+        </div>
       </GlassCard>
 
       {/* ── Payment History ── */}
@@ -310,7 +490,7 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
             <div className="space-y-3">
               {record.payments.map((payment, idx) => {
                 const amountStr = formatPaiseDisplay(payment.amountMinor, record.currency)
-                const dirText = paymentDirectionText(record.direction, record.person.name, amountStr)
+                const dirText   = paymentDirectionText(record.direction, record.person.name, amountStr)
                 return (
                   <motion.div
                     key={payment._id}
@@ -392,9 +572,9 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
             >
               <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
                 <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                  Original:
+                  Total:
                 </span>{' '}
-                {formatPaiseDisplay(record.originalAmountMinor, record.currency)}
+                {formatPaiseDisplay(totalMinor, record.currency)}
               </div>
               <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
                 <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>
@@ -404,7 +584,7 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
               </div>
               <div className="text-[12px]" style={{ color: isPaid ? 'var(--success-text, #16a34a)' : 'var(--text-secondary)' }}>
                 <span className="font-semibold">Remaining:</span>{' '}
-                {isPaid ? '₹0' : formatPaiseDisplay(record.remainingMinor, record.currency)}
+                {isPaid ? formatPaiseDisplay(0, record.currency) : formatPaiseDisplay(record.remainingMinor, record.currency)}
               </div>
             </div>
           </div>
@@ -412,6 +592,14 @@ export function MoneyRecordDetail({ record: initialRecord, onBack, onRecordUpdat
       </GlassCard>
 
       {/* ── Modals ── */}
+
+      {/* Add Amount */}
+      <AddAmountModal
+        record={record}
+        isOpen={addAmountModalOpen}
+        onClose={() => setAddAmountModalOpen(false)}
+        onAmountAdded={handleAmountAdded}
+      />
 
       {/* Record new payment */}
       <RecordPaymentModal

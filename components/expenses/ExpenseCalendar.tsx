@@ -273,11 +273,11 @@ export function ExpenseCalendar({
               'sm:absolute sm:bottom-auto sm:left-auto sm:right-auto sm:rounded-2xl sm:w-[340px]',
             )}
             style={{
-              background: 'rgba(255,255,255,0.96)',
+              background: 'var(--glass-floating-bg)',
               backdropFilter: 'blur(40px) saturate(1.9)',
               WebkitBackdropFilter: 'blur(40px) saturate(1.9)',
-              border: '1px solid rgba(0,0,0,0.07)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)',
+              border: '1px solid var(--glass-floating-border)',
+              boxShadow: 'var(--glass-shadow-lg)',
             }}
             // Mobile: slide up from bottom; desktop: fade + scale from top
             initial={{ opacity: 0, y: 24, scale: 0.97 }}
@@ -287,7 +287,7 @@ export function ExpenseCalendar({
           >
             {/* Drag handle (mobile) */}
             <div className="flex justify-center pt-3 pb-0 sm:hidden">
-              <div className="w-9 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.11)' }} />
+              <div className="w-9 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             <div className="p-4 pb-5 sm:p-5">
@@ -296,7 +296,7 @@ export function ExpenseCalendar({
                 <button
                   onClick={prevMonth}
                   aria-label="Previous month"
-                  className="p-1.5 rounded-xl transition-colors hover:bg-black/[0.05] focus-ring"
+                  className="p-1.5 rounded-xl transition-colors nav-hover focus-ring"
                   style={{ color: 'var(--text-secondary)' }}
                 >
                   <ChevronLeft size={16} />
@@ -316,7 +316,7 @@ export function ExpenseCalendar({
                   <button
                     onClick={goToToday}
                     aria-label="Go to today"
-                    className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors hover:bg-black/[0.05] focus-ring"
+                    className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors nav-hover focus-ring"
                     style={{ color: 'var(--accent)' }}
                   >
                     Today
@@ -324,7 +324,7 @@ export function ExpenseCalendar({
                   <button
                     onClick={nextMonth}
                     aria-label="Next month"
-                    className="p-1.5 rounded-xl transition-colors hover:bg-black/[0.05] focus-ring"
+                    className="p-1.5 rounded-xl transition-colors nav-hover focus-ring"
                     style={{ color: 'var(--text-secondary)' }}
                   >
                     <ChevronRight size={16} />
@@ -333,7 +333,7 @@ export function ExpenseCalendar({
                   <button
                     onClick={onClose}
                     aria-label="Close calendar"
-                    className="hidden sm:flex p-1.5 rounded-xl transition-colors hover:bg-black/[0.05] focus-ring ml-1"
+                    className="hidden sm:flex p-1.5 rounded-xl transition-colors nav-hover focus-ring ml-1"
                     style={{ color: 'var(--text-muted)' }}
                   >
                     <X size={14} />
@@ -457,7 +457,7 @@ function DayCell({
         'rounded-xl cursor-pointer transition-colors duration-100',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40',
         // Hover state for unselected days
-        !isSelected && 'hover:bg-black/[0.04]',
+        !isSelected && 'nav-hover',
       )}
       style={{
         // Selected: blue-tinted glass circle/pill

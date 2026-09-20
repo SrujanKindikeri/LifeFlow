@@ -23,6 +23,7 @@ export type ActivityType =
   | 'group_bill_settled'
   | 'money_given'
   | 'money_borrowed'
+  | 'money_amount_added'
   | 'payment_received'
   | 'payment_made'
   | 'goal_created'
@@ -61,7 +62,7 @@ const ActivitySchema = new Schema<IActivity>(
         'habit_completed',
         'expense_added',
         'group_bill_created', 'group_bill_settled',
-        'money_given', 'money_borrowed',
+        'money_given', 'money_borrowed', 'money_amount_added',
         'payment_received', 'payment_made',
         'goal_created', 'goal_completed', 'goal_updated',
         'project_created', 'project_completed',

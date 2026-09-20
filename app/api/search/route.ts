@@ -205,7 +205,7 @@ export async function GET(req: NextRequest) {
       for (const r of moneyRecords) {
         const rec = r as unknown as IMoneyRecord
         const payments = paymentMap.get(r._id.toString()) ?? []
-        const balance = calcBalance(rec.originalAmountMinor, payments.map((p) => p.amountMinor))
+        const balance = calcBalance(rec.originalAmountMinor, rec.additionalAmounts ?? [], payments.map((p) => p.amountMinor))
         const remaining = balance.remainingMinor / 100
         const direction = rec.direction === 'given' ? 'Owes you' : 'You owe'
         results.push({

@@ -84,7 +84,7 @@ export function GroupBillDetail({
       </div>
 
       {/* Total hero */}
-      <GlassCard padding="md" className="text-center">
+      <GlassCard padding="md" level="elevated" catchlight className="text-center">
         <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Total Group Bill</p>
         <p className="text-2xl font-bold gradient-text">{formatMoney(bill.total, bill.currency)}</p>
         <div className="flex justify-center gap-4 mt-2 text-xs flex-wrap" style={{ color: 'var(--text-muted)' }}>
@@ -115,7 +115,7 @@ export function GroupBillDetail({
           <span>Add my share to Personal Spending</span>
         </GlassButton>
       ) : (
-        <div className="flex items-center gap-2 px-3 py-2.5 glass rounded-xl border border-emerald-500/20">
+        <div className="flex items-center gap-2 px-3 py-2.5 glass-elevated rounded-xl border border-emerald-500/20">
           <CheckCircle2 size={15} className="text-emerald-500 shrink-0" />
           <div>
             <p className="text-sm text-emerald-600 font-medium">Added to Personal Spending</p>
@@ -127,7 +127,7 @@ export function GroupBillDetail({
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 glass rounded-xl p-1">
+      <div className="flex gap-1 glass-elevated rounded-xl p-1" style={{ boxShadow: 'inset 0 1px 0 var(--glass-catchlight)' }}>
         {([
           { key: 'split',       label: 'Split',       icon: <Users   size={14} /> },
           { key: 'settlements', label: 'Settlements', icon: <Receipt size={14} /> },
@@ -136,12 +136,15 @@ export function GroupBillDetail({
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
+              'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all duration-150',
               tab === t.key
-                ? 'bg-indigo-500/15 text-indigo-600'
-                : 'hover:bg-black/[0.04]'
+                ? 'glass-segment-active'
+                : 'nav-hover'
             )}
-            style={tab === t.key ? {} : { color: 'var(--text-muted)' }}
+            style={tab === t.key
+              ? { color: 'var(--accent-text)' }
+              : { color: 'var(--text-muted)' }
+            }
           >
             {t.icon}
             {t.label}

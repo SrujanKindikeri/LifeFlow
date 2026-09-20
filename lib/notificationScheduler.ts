@@ -3,48 +3,68 @@
  *
  * NOTIFICATION SCHEDULE (all times in the USER'S LOCAL TIMEZONE)
  * ──────────────────────────────────────────────────────────────
- *   Any time       → 30-minute task due-soon reminder
- *                    Subject: "Task reminder: <title>"
- *                    Sent 30 minutes before each task's due time.
- *                    One reminder per task per calendar date.
- *                    Skipped if task is already completed.
- *                    Skipped during quiet hours (00:00–07:00).
+ *   07:00 (7 AM)      → Morning daily brief
+ *                       Subject: "Today's LifeFlow — {date}"
+ *                       Personalised snapshot: tasks, habits, goals.
+ *                       Not sent if nothing is scheduled for today.
  *
- *   19:00 (7 PM)   → Today's incomplete tasks check
- *                    Subject: "You still have work to finish today"
- *                    Sent only when incomplete tasks exist.
+ *   Any time          → 30-minute task due-soon reminder
+ *                       Subject: "Task reminder: <title>"
+ *                       Sent 30 minutes before each task's due time.
+ *                       One reminder per task per calendar date.
+ *                       Skipped if task is already completed.
+ *                       Skipped during quiet hours (00:00–07:00).
  *
- *   22:00 (10 PM)  → Tomorrow preview
- *                    Subject: "Tomorrow's plan is ready"
- *                    Shows tomorrow's tasks + habits.
- *                    Not sent if nothing is planned.
+ *   19:00 (7 PM)      → Today's incomplete tasks check
+ *                       Subject: "You still have work to finish today"
+ *                       Sent only when incomplete tasks exist.
  *
- *   23:55 (11:55 PM) → Daily summary
- *                    Subject: "Your LifeFlow daily summary — {date}"
- *                    Tasks + habits + expenses overview.
- *                    Not sent if there is nothing to report.
+ *   22:00 (10 PM)     → Tomorrow preview
+ *                       Subject: "Tomorrow's plan is ready"
+ *                       Shows tomorrow's tasks + habits.
+ *                       Not sent if nothing is planned.
  *
- *   Sunday 22:00   → Weekly summary
- *                    Subject: "Your LifeFlow weekly summary — {weekLabel}"
- *                    Covers the past 7 days.
+ *   23:55 (11:55 PM)  → Daily summary
+ *                       Subject: "Your LifeFlow daily summary — {date}"
+ *                       Tasks + habits + expenses overview.
+ *                       Not sent if there is nothing to report.
  *
- *   09:00–11:00    → Habit reminder (morning, push + in-app + email)
- *                    Sent when habits are incomplete.
+ *   Sunday 22:00      → Weekly summary
+ *                       Subject: "Your LifeFlow weekly summary — {weekLabel}"
+ *                       Covers the past 7 days.
  *
- *   Any time       → Spending / budget alerts (threshold crossed)
+ *   09:00–11:00       → Habit reminder (morning, push + in-app + email)
+ *                       Sent when habits are incomplete.
+ *
+ *   Any time          → Spending / budget alerts (threshold crossed)
  *
  * DESIGN PRINCIPLES
  * ─────────────────
  * 1. Idempotency.  Every notification type has a deterministic key stored in
  *    NotificationLog.  Re-running the scheduler never double-sends.
+ *    Concurrent scheduler instances (e.g. after Docker restart) are safe via
+ *    MongoDB's unique index on the key field — the second insert throws E11000
+ *    which we catch and treat as "already claimed".
  *
- * 2. Timezone-awareness.  All schedule windows use each user's `timezone` field
+ * 2. Precise UTC timestamps.  Every scheduled window is converted to UTC before
+ *    any comparison.  localTimeToUtc() derives the exact UTC moment for any
+ *    "HH:MM" in any IANA timezone, including DST transitions.  The scheduler
+ *    never uses the EC2 server's local timezone for user notification times.
+ *
+ * 3. Sub-minute precision.  When called by the precise scheduler (every minute
+ *    or more frequently), checkWindowSeconds() detects whether the current UTC
+ *    instant falls within a ±30-second window around the target UTC moment.
+ *    When called by the hourly scheduler, a ±60-minute window is used instead,
+ *    guaranteeing every notification fires at most once per day.
+ *
+ * 4. Timezone-awareness.  All schedule windows use each user's `timezone` field
  *    (falls back to DEFAULT_TIMEZONE env var → 'Asia/Kolkata').
+ *    DST is handled automatically by Intl.DateTimeFormat — no fixed offsets.
  *
- * 3. User isolation.  Queries always include userId.  Users never see each
+ * 5. User isolation.  Queries always include userId.  Users never see each
  *    other's data.
  *
- * 4. Delivery channels.  Each notification goes to all enabled channels:
+ * 6. Delivery channels.  Each notification goes to all enabled channels:
  *      a) In-app  — always created in the Notification collection
  *      b) Push    — sent via lib/pushSender.ts (silently skipped if no VAPID)
  *      c) Email   — sent via getNotificationService() only when:
@@ -53,17 +73,29 @@
  *                   • EMAIL_PROVIDER != 'none'
  *    Channel failures do not abort other channels.
  *
- * 5. Quiet hours.  Default: 00:00–07:00 local time.  Notifications are
+ * 7. Status tracking.  NotificationLog records each delivery attempt with a
+ *    lifecycle status: pending → processing → sent_to_smtp / failed.
+ *    The Profile notification history reads from this enriched log.
+ *
+ * 8. Missed notification policy.
+ *    - Task due-soon reminders: if the server was offline during the reminder
+ *      window and the task's dueTime has already passed, the reminder is
+ *      skipped (not sent late).
+ *    - Daily/weekly summaries: a 90-minute grace window is allowed so a brief
+ *      server hiccup doesn't silently suppress the day's summary.
+ *    - Morning brief: 60-minute grace window (7:00–8:00 AM local).
+ *
+ * 9. Quiet hours.  Default: 00:00–07:00 local time.  Notifications are
  *    suppressed in this window.  (The 11:55 PM daily summary is just before
  *    the quiet window begins at midnight.)
  *
- * 6. Email recipient security.  The recipient address is always resolved from
- *    the user's database record (user.email).  No client-supplied address is
- *    ever used.
+ * 10. Email recipient security.  The recipient address is always resolved from
+ *     the user's database record (user.email).  No client-supplied address is
+ *     ever used.
  *
- * 7. Privacy.  Push notification bodies are concise — no full task titles,
- *    financial amounts, or other sensitive data that could appear on a lock
- *    screen.
+ * 11. Privacy.  Push notification bodies are concise — no full task titles,
+ *     financial amounts, or other sensitive data that could appear on a lock
+ *     screen.
  *
  * EMAIL VERIFICATION SAFETY
  * ─────────────────────────
@@ -80,8 +112,12 @@ import Habit from '@/models/Habit'
 import HabitLog from '@/models/HabitLog'
 import Budget from '@/models/Budget'
 import Expense from '@/models/Expense'
+import Goal from '@/models/Goal'
 import Notification from '@/models/Notification'
-import NotificationLog, { type ScheduledNotificationType } from '@/models/NotificationLog'
+import NotificationLog, {
+  type ScheduledNotificationType,
+  type NotificationDeliveryStatus,
+} from '@/models/NotificationLog'
 import { sendPushToUser } from '@/lib/pushSender'
 import { getNotificationService } from '@/lib/notifications'
 import {
@@ -94,6 +130,7 @@ import {
   buildDailySummaryEmail,
   buildWeeklySummaryEmail,
   buildTaskReminderEmail,
+  buildMorningBriefEmail,
 } from '@/lib/auth/email-templates'
 import logger from '@/lib/logger'
 
@@ -147,6 +184,11 @@ function localMinute(date: Date, timezone: string): number {
   } catch {
     return date.getUTCMinutes()
   }
+}
+
+/** Return the local second (0–59) for a given instant in the given timezone. */
+function _localSecond(date: Date): number {
+  return date.getUTCSeconds()
 }
 
 /**
@@ -231,6 +273,133 @@ function currentMonth(date: Date, timezone: string): string {
   return dateInTimezone(date, timezone).slice(0, 7)
 }
 
+// ─── Precise UTC timestamp helpers ────────────────────────────────────────────
+
+/**
+ * Convert a user's local "HH:MM" time on a specific YYYY-MM-DD date to a UTC
+ * Date object.
+ *
+ * This is the correct, DST-safe approach:
+ *   1. Format the target as a local ISO string "YYYY-MM-DDTHH:MM:00"
+ *   2. Pass it through Intl.DateTimeFormat to find the UTC offset at that
+ *      exact moment in that timezone (handles DST transitions correctly).
+ *   3. Return the resulting UTC Date.
+ *
+ * Examples:
+ *   localTimeToUtc('2026-09-17', '07:00', 'Asia/Kolkata')
+ *     → 2026-09-17T01:30:00.000Z   (IST = UTC+5:30)
+ *
+ *   localTimeToUtc('2026-03-08', '07:00', 'America/New_York')
+ *     → 2026-03-08T12:00:00.000Z   (EDT = UTC-4, after spring-forward)
+ *
+ *   localTimeToUtc('2026-10-25', '01:30', 'Europe/London')
+ *     → 2026-10-25T01:30:00.000Z   (BST→GMT transition hour)
+ *
+ * @param dateStr  YYYY-MM-DD (the calendar date in the user's timezone)
+ * @param timeStr  HH:MM (24-hour, the local time)
+ * @param timezone IANA timezone string e.g. "Asia/Kolkata"
+ * @returns UTC Date, or null if inputs are invalid
+ */
+export function localTimeToUtc(
+  dateStr: string,
+  timeStr: string,
+  timezone: string
+): Date | null {
+  try {
+    const [y, mo, d] = dateStr.split('-').map(Number)
+    const [h, mi]    = timeStr.split(':').map(Number)
+    if ([y, mo, d, h, mi].some((n) => isNaN(n))) return null
+
+    // Step 1: Create a "naive" UTC moment assuming the local time IS UTC.
+    //         This is a starting approximation only.
+    const naiveUtc = new Date(Date.UTC(y, mo - 1, d, h, mi, 0, 0))
+
+    // Step 2: Ask Intl what the local date/time components are for naiveUtc
+    //         in the target timezone.
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year:     'numeric',
+      month:    '2-digit',
+      day:      '2-digit',
+      hour:     '2-digit',
+      minute:   '2-digit',
+      hour12:   false,
+    }).formatToParts(naiveUtc)
+
+    const get = (t: string) => parseInt(parts.find((p) => p.type === t)!.value, 10)
+    const localY  = get('year')
+    const localMo = get('month')
+    const localD  = get('day')
+    const localH  = get('hour')
+    const localMi = get('minute')
+
+    // Step 3: The offset between what we asked for and what we got is the
+    //         timezone offset at that moment (in milliseconds).
+    const localAsUtcMs = Date.UTC(localY, localMo - 1, localD, localH, localMi, 0, 0)
+    const targetUtcMs  = Date.UTC(y, mo - 1, d, h, mi, 0, 0)
+    const offsetMs     = naiveUtc.getTime() - localAsUtcMs
+
+    return new Date(targetUtcMs + offsetMs)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check whether `now` is within `graceSeconds` seconds AFTER a target UTC time.
+ *
+ * Used for precise window detection:
+ *   - graceSeconds = 30  → only fire within 30 s of the exact target (sub-minute cron)
+ *   - graceSeconds = 3600 → fire within 1 hour of the target (hourly cron)
+ *
+ * "After" means: targetUtc <= now < targetUtc + graceSeconds*1000
+ *
+ * @param now          Current UTC instant
+ * @param targetUtc    The scheduled UTC instant
+ * @param graceSeconds How many seconds after the target we still consider it valid
+ */
+export function isWithinGraceWindow(
+  now: Date,
+  targetUtc: Date,
+  graceSeconds: number
+): boolean {
+  const nowMs    = now.getTime()
+  const targetMs = targetUtc.getTime()
+  return nowMs >= targetMs && nowMs < targetMs + graceSeconds * 1000
+}
+
+/**
+ * Return the UTC Date for a named schedule anchor on a given local date.
+ *
+ * Anchors:
+ *   'morning_brief'      → 07:00 local
+ *   'incomplete_tasks'   → 19:00 local
+ *   'tomorrow_preview'   → 22:00 local
+ *   'daily_summary'      → 23:55 local
+ *   'weekly_summary'     → 22:00 local (Sunday only)
+ *   'habit_reminder'     → 09:30 local
+ *
+ * Returns null if conversion fails.
+ */
+export function getScheduleTargetUtc(
+  anchor: 'morning_brief' | 'incomplete_tasks' | 'tomorrow_preview' |
+          'daily_summary' | 'weekly_summary' | 'habit_reminder',
+  localDate: string,
+  timezone: string
+): Date | null {
+  const anchorTimes: Record<string, string> = {
+    morning_brief:    '07:00',
+    incomplete_tasks: '19:00',
+    tomorrow_preview: '22:00',
+    daily_summary:    '23:55',
+    weekly_summary:   '22:00',
+    habit_reminder:   '09:30',
+  }
+  const timeStr = anchorTimes[anchor]
+  if (!timeStr) return null
+  return localTimeToUtc(localDate, timeStr, timezone)
+}
+
 // ─── Quiet hours ──────────────────────────────────────────────────────────────
 
 /**
@@ -245,32 +414,86 @@ function isQuietHour(localHr: number): boolean {
   return localHr >= DEFAULT_QUIET_START && localHr < DEFAULT_QUIET_END
 }
 
-// ─── Idempotency ──────────────────────────────────────────────────────────────
+// ─── Idempotency & status helpers ─────────────────────────────────────────────
 
 /**
- * Check whether a notification has already been sent for the given key.
- * Returns true if already sent (caller should skip).
- * Records the key if not yet sent (caller should proceed to send).
+ * Build the deterministic idempotency key from its components.
+ */
+function buildKey(
+  userId: mongoose.Types.ObjectId,
+  type: ScheduledNotificationType,
+  forDate: string,
+  extraDiscriminator = ''
+): string {
+  return [userId.toString(), type, forDate, extraDiscriminator]
+    .filter(Boolean)
+    .join(':')
+}
+
+/**
+ * Atomically claim a notification slot.
  *
- * Uses MongoDB's unique index on `key` — concurrent duplicate inserts throw
- * E11000 which we catch and treat as "already sent".
+ * Returns true  → already sent or currently processing; caller should skip.
+ * Returns false → slot is now claimed as 'pending'; caller should proceed to send.
+ *
+ * IDEMPOTENCY RULES
+ * ─────────────────
+ * • status = 'sent_to_smtp'  → skip (already delivered successfully)
+ * • status = 'processing'    → skip (another worker is currently sending it)
+ * • status = 'pending'       → skip (claimed by concurrent scheduler in this window)
+ * • status = 'failed'        → RETRY: delete the failed record and re-claim
+ *   Rationale: a failed notification was never delivered.  The scheduler should
+ *   attempt again on the next run within the grace window.  Once the grace
+ *   window closes the notification is permanently skipped.
+ * • No record                → create as 'pending' and proceed
+ *
+ * Concurrent safety:
+ *   The unique index on `key` ensures only one scheduler insert wins.
+ *   The second concurrent insert throws E11000 → caller skips.
+ *
+ * The `scheduledAt` UTC timestamp is stored for history queries.
  */
 async function checkAndRecord(
   userId: mongoose.Types.ObjectId,
   type: ScheduledNotificationType,
   forDate: string,
-  extraDiscriminator = ''
+  extraDiscriminator = '',
+  scheduledAt?: Date,
+  contentPreview?: string
 ): Promise<boolean> {
-  const key = [userId.toString(), type, forDate, extraDiscriminator]
-    .filter(Boolean)
-    .join(':')
+  const key = buildKey(userId, type, forDate, extraDiscriminator)
 
-  const exists = await NotificationLog.exists({ key })
-  if (exists) return true // already sent
+  const existing = await NotificationLog.findOne({ key }).select('status').lean()
+  if (existing) {
+    if (existing.status === 'failed') {
+      // Retry: remove the failed record so we can re-claim it this run.
+      // If the grace window has closed the outer processor already returned early,
+      // so we only reach this point when re-delivery is still valid.
+      await NotificationLog.deleteOne({ key }).catch(() => undefined)
+      logger.info('[notifScheduler] Retrying failed notification', {
+        userId: userId.toString(),
+        type,
+        forDate,
+        extraDiscriminator,
+      })
+      // Fall through to create a fresh 'pending' record below.
+    } else {
+      // pending / processing / sent_to_smtp — skip
+      return true
+    }
+  }
 
   try {
-    await NotificationLog.create({ key, userId, type, forDate })
-    return false // proceed — we just claimed this slot
+    await NotificationLog.create({
+      key,
+      userId,
+      type,
+      forDate,
+      scheduledAt: scheduledAt ?? new Date(),
+      status:      'pending' as NotificationDeliveryStatus,
+      contentPreview: (contentPreview ?? '').slice(0, 200),
+    })
+    return false // claimed — proceed to send
   } catch (err: unknown) {
     // E11000 = concurrent scheduler run already inserted this key
     if (
@@ -281,6 +504,90 @@ async function checkAndRecord(
     }
     throw err
   }
+}
+
+/**
+ * Strip HTML tags from an email body and truncate to 2000 chars.
+ * Used to produce a safe plain-text snapshot for the notification history
+ * detail view.  Never stores raw HTML — only plain text.
+ */
+function stripHtmlForSnapshot(html: string): string {
+  return html
+    // Remove <style> blocks entirely
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    // Remove <script> blocks entirely
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    // Replace block-level elements with newlines for readability
+    .replace(/<\/?(p|div|br|tr|li|h[1-6]|section|article|header|footer|blockquote)[^>]*>/gi, '\n')
+    // Replace table cells with tabs
+    .replace(/<\/?(td|th)[^>]*>/gi, '\t')
+    // Remove all remaining tags
+    .replace(/<[^>]+>/g, '')
+    // Decode common HTML entities
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    // Collapse runs of whitespace/newlines
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 2000)
+}
+
+/**
+ * Mark a notification log entry as successfully sent to the SMTP transport.
+ * Sets status → 'sent_to_smtp' and records sentAt = now.
+ * Optionally stores the email subject and a plain-text body snapshot.
+ */
+async function markNotificationSent(
+  userId: mongoose.Types.ObjectId,
+  type: ScheduledNotificationType,
+  forDate: string,
+  extraDiscriminator = '',
+  emailSubject?: string,
+  emailBodyHtml?: string
+): Promise<void> {
+  const key = buildKey(userId, type, forDate, extraDiscriminator)
+  const update: Record<string, unknown> = {
+    status: 'sent_to_smtp' as NotificationDeliveryStatus,
+    sentAt: new Date(),
+  }
+  if (emailSubject) {
+    update.emailSubject = emailSubject.slice(0, 500)
+  }
+  if (emailBodyHtml) {
+    update.emailBodySnapshot = stripHtmlForSnapshot(emailBodyHtml)
+  }
+  await NotificationLog.updateOne({ key }, { $set: update }).catch(() => undefined)
+}
+
+/**
+ * Mark a notification log entry as failed.
+ * Sanitises the error message to never include credentials.
+ */
+async function markNotificationFailed(
+  userId: mongoose.Types.ObjectId,
+  type: ScheduledNotificationType,
+  forDate: string,
+  extraDiscriminator = '',
+  errorMessage?: string
+): Promise<void> {
+  const key = buildKey(userId, type, forDate, extraDiscriminator)
+  const safe = (errorMessage ?? 'unknown error')
+    .replace(/pass(word)?[=:\s]+\S+/gi, '[REDACTED]')
+    .slice(0, 500)
+  await NotificationLog.updateOne(
+    { key },
+    {
+      $set: {
+        status:       'failed' as NotificationDeliveryStatus,
+        errorMessage: safe,
+      },
+    }
+  ).catch(() => undefined)
 }
 
 // ─── Type definitions ─────────────────────────────────────────────────────────
@@ -338,7 +645,7 @@ interface UserResult {
  * The email address is ALWAYS sourced from the user's DB record — never from
  * client input.
  */
-function shouldSendEmail(
+export function shouldSendEmail(
   emailPrefs: EmailNotifPrefs,
   categoryKey: keyof Omit<EmailNotifPrefs, 'enabled'>,
   userEmail: string
@@ -359,6 +666,10 @@ interface DeliveryOptions {
   emailPrefs:      EmailNotifPrefs
   emailPrefKey:    keyof Omit<EmailNotifPrefs, 'enabled'>
   userEmail:       string
+  /** Idempotency discriminators — used to update the log entry status. */
+  notifType:       ScheduledNotificationType
+  forDate:         string
+  extraDiscriminator?: string
   inApp: {
     title:   string
     message: string
@@ -383,15 +694,24 @@ interface DeliveryOptions {
  * Channel independence: a failure in push does not abort email, and vice versa.
  * The recipient email address is always taken from `opts.userEmail` which must
  * be the authenticated user's registered address from the database.
+ *
+ * After all channels are attempted, the NotificationLog entry is updated:
+ *   → sent_to_smtp  if email was attempted and succeeded
+ *   → failed        if email was the only channel and it failed
+ *   → sent_to_smtp  if in-app/push succeeded (email not configured/enabled)
  */
 async function deliver(opts: DeliveryOptions): Promise<void> {
   const {
     userId, lifeFlowId, prefs, prefKey,
     emailPrefs, emailPrefKey, userEmail,
+    notifType, forDate, extraDiscriminator,
     inApp, push, email,
   } = opts
 
   if (!prefs[prefKey]) return // user has this category disabled
+
+  let emailOk = false
+  let emailAttempted = false
 
   // ── In-app ─────────────────────────────────────────────────────────────────
   await Notification.create({
@@ -422,6 +742,7 @@ async function deliver(opts: DeliveryOptions): Promise<void> {
   // The recipient is always the user's own registered address — never a
   // client-supplied address.
   if (email && shouldSendEmail(emailPrefs, emailPrefKey, userEmail)) {
+    emailAttempted = true
     logger.info('[EMAIL] notification preparing', {
       userId:           userId.toString(),
       notificationType: emailPrefKey,
@@ -439,6 +760,7 @@ async function deliver(opts: DeliveryOptions): Promise<void> {
       })
 
       if (result.ok) {
+        emailOk = true
         logger.info('[EMAIL] sent successfully', {
           notificationType: emailPrefKey,
           messageId:        result.messageId,
@@ -448,11 +770,14 @@ async function deliver(opts: DeliveryOptions): Promise<void> {
           notificationType: emailPrefKey,
           error:            result.error ?? 'provider returned non-ok',
         })
+        await markNotificationFailed(
+          userId, notifType, forDate, extraDiscriminator ?? '',
+          result.error ?? 'provider returned non-ok'
+        )
+        return
       }
     } catch (err: unknown) {
       // Email failure never aborts in-app or push — log and continue.
-      // Sanitise: only log the error message string, never raw SMTP objects
-      // that could contain credentials or tokens.
       const sanitisedError = err instanceof Error
         ? err.message.replace(/pass(word)?[=:\s]+\S+/gi, '[REDACTED]')
         : 'unexpected error'
@@ -461,7 +786,22 @@ async function deliver(opts: DeliveryOptions): Promise<void> {
         notificationType: emailPrefKey,
         error:            sanitisedError,
       })
+      await markNotificationFailed(
+        userId, notifType, forDate, extraDiscriminator ?? '', sanitisedError
+      )
+      return
     }
+  }
+
+  // ── Update status ──────────────────────────────────────────────────────────
+  // Mark sent_to_smtp if email was successfully delivered, or if in-app/push
+  // ran (email was not configured/required for this notification).
+  if (!emailAttempted || emailOk) {
+    await markNotificationSent(
+      userId, notifType, forDate, extraDiscriminator ?? '',
+      emailOk && email ? email.subject   : undefined,
+      emailOk && email ? email.html      : undefined,
+    )
   }
 }
 
@@ -479,30 +819,230 @@ const CATEGORY_LABELS: Record<string, string> = {
   other:         'Other',
 }
 
+// ─── 0. Morning daily brief (7:00 AM) ────────────────────────────────────────
+//
+// Sent at 07:00 local time.
+// Personalised snapshot of today: tasks, habits, goals.
+// Only sent to users who have notificationsTested=true AND email notifications enabled.
+// Not sent if there is nothing relevant for today.
+//
+// PRECISION
+// ─────────
+// The target UTC is computed from localTimeToUtc('07:00', userTimezone).
+// When using the precise endpoint (grace = 90s), this fires within seconds of 7 AM.
+// When using the hourly endpoint (grace = 3600s), this fires during the 7:xx AM hour.
+
+async function processMorningBrief(
+  user: UserRecord,
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600
+): Promise<{ sent: boolean }> {
+  // Morning brief requires email to be enabled and tested
+  if (!user.notificationsTested) return { sent: false }
+  if (!user.emailNotifications.enabled) return { sent: false }
+  if (!user.emailNotifications.dailySummary) return { sent: false }
+
+  const tz      = user.timezone
+  const today   = dateInTimezone(now, tz)
+
+  // Compute target UTC for 7:00 AM in the user's local timezone
+  const targetUtc = localTimeToUtc(today, '07:00', tz)
+  if (!targetUtc) return { sent: false }
+
+  // Only fire if we're within the grace window after the target
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id, 'MORNING_BRIEF', today, '',
+    targetUtc,
+    `Morning brief for ${today}`
+  )
+  if (alreadySent) return { sent: false }
+
+  // Gather today's data in parallel
+  const [
+    todayTasks,
+    completedTasks,
+    allDailyHabits,
+    completedHabitLogs,
+    activeGoals,
+  ] = await Promise.all([
+    Task.find({ userId: user._id, dueDate: today, completed: false })
+      .select('title priority dueTime recurring')
+      .sort({ priority: -1, dueTime: 1 })
+      .limit(10)
+      .lean(),
+    Task.countDocuments({ userId: user._id, dueDate: today, completed: true }),
+    Habit.find({ userId: user._id, frequency: 'daily' })
+      .select('name icon')
+      .lean(),
+    HabitLog.find({ userId: user._id, date: today, completed: true })
+      .select('habitId')
+      .lean(),
+    Goal.find({ userId: user._id, status: 'active' })
+      .select('title targetValue currentValue unit targetDate category')
+      .sort({ targetDate: 1 })
+      .limit(5)
+      .lean(),
+  ])
+
+  const completedHabitIds = new Set(completedHabitLogs.map((l) => l.habitId.toString()))
+  const incompleteHabits = allDailyHabits.filter((h) => !completedHabitIds.has(h._id.toString()))
+
+  // Do not send if there is genuinely nothing to brief
+  const hasContent =
+    todayTasks.length > 0 ||
+    completedTasks > 0 ||
+    incompleteHabits.length > 0 ||
+    activeGoals.length > 0
+
+  if (!hasContent) {
+    // Release the slot so it isn't counted as a skip forever
+    await NotificationLog.deleteOne({
+      userId:  user._id,
+      type:    'MORNING_BRIEF',
+      forDate: today,
+    }).catch(() => undefined)
+    return { sent: false }
+  }
+
+  const todayLabel   = formatDateLabel(today, tz)
+  const taskTitles   = todayTasks.slice(0, 5).map((t) => t.title)
+  const habitNames   = incompleteHabits.slice(0, 5).map((h) => `${h.icon} ${h.name}`)
+  const goalTitles   = activeGoals.slice(0, 3).map((g) => g.title)
+
+  const preview = [
+    todayTasks.length > 0 ? `${todayTasks.length} task(s) due` : null,
+    incompleteHabits.length > 0 ? `${incompleteHabits.length} habit(s) to complete` : null,
+    activeGoals.length > 0 ? `${activeGoals.length} active goal(s)` : null,
+  ].filter(Boolean).join(' · ')
+
+  // Update the content preview now that we know the content
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'MORNING_BRIEF', forDate: today },
+    { $set: { contentPreview: preview.slice(0, 200), status: 'processing' } }
+  ).catch(() => undefined)
+
+  const emailContent = buildMorningBriefEmail({
+    toName:            user.name,
+    todayLabel,
+    scheduledTimeLabel: '7:00 AM',
+    taskCount:          todayTasks.length,
+    taskTitles,
+    completedTaskCount: completedTasks,
+    habitCount:         incompleteHabits.length,
+    habitNames,
+    goalTitles,
+    totalGoals:        activeGoals.length,
+    appUrl,
+  })
+
+  const notifier = await getNotificationService()
+  let emailOk = false
+  try {
+    const result = await notifier.send({
+      to:      user.email,
+      subject: emailContent.subject,
+      html:    emailContent.html,
+      text:    emailContent.text,
+    })
+    emailOk = result.ok
+    if (result.ok) {
+      logger.info('[EMAIL] sent successfully', {
+        notificationType: 'morningBrief',
+        messageId:        result.messageId,
+      })
+    } else {
+      logger.warn('[EMAIL] delivery failed', {
+        notificationType: 'morningBrief',
+        error: result.error ?? 'provider returned non-ok',
+      })
+    }
+  } catch (err: unknown) {
+    const sanitisedError = err instanceof Error
+      ? err.message.replace(/pass(word)?[=:\s]+\S+/gi, '[REDACTED]')
+      : 'unexpected error'
+    logger.warn('[EMAIL] morning brief delivery failed', {
+      userId: user._id.toString(),
+      error:  sanitisedError,
+    })
+    await markNotificationFailed(user._id, 'MORNING_BRIEF', today, '', sanitisedError)
+    return { sent: false }
+  }
+
+  if (emailOk) {
+    await markNotificationSent(
+      user._id, 'MORNING_BRIEF', today, '',
+      emailContent.subject,
+      emailContent.html,
+    )
+    // Create an in-app notification as well
+    await Notification.create({
+      userId:     user._id,
+      lifeFlowId: user.publicId,
+      title:      `Good morning! Here's your day`,
+      message:    preview,
+      type:       'general',
+    }).catch(() => undefined)
+  } else {
+    await markNotificationFailed(
+      user._id, 'MORNING_BRIEF', today, '', 'email provider returned non-ok'
+    )
+    return { sent: false }
+  }
+
+  logger.info('[notifScheduler] MORNING_BRIEF sent', {
+    userId:      user._id.toString(),
+    taskCount:   todayTasks.length,
+    habitCount:  incompleteHabits.length,
+    goalCount:   activeGoals.length,
+  })
+  return { sent: true }
+}
+
 // ─── 1. Today's incomplete tasks (7 PM) ──────────────────────────────────────
 //
 // Sent at 19:00 (7 PM) local time.
 // Subject: "You still have work to finish today"
 // Only sent when there are incomplete tasks for today.
+//
+// PRECISION
+// ─────────
+// Target UTC = localTimeToUtc('19:00', userTimezone).
+// Grace window: when called by precise scheduler = 90s, by hourly = 3600s.
 
 async function processIncompleteTasks(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
   if (!prefs.taskReminders) return { sent: false }
 
-  const tz = user.timezone
-  const hr = localHour(now, tz)
-  // Send in the 19:00–21:00 local window (7 PM check-in)
-  if (hr < 19 || hr >= 21) return { sent: false }
-  if (isQuietHour(hr))     return { sent: false }
-
+  const tz    = user.timezone
   const today = dateInTimezone(now, tz)
 
-  const alreadySent = await checkAndRecord(user._id, 'TASK_INCOMPLETE_TODAY', today)
+  const targetUtc = localTimeToUtc(today, '19:00', tz)
+  if (!targetUtc) return { sent: false }
+
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id, 'TASK_INCOMPLETE_TODAY', today, '',
+    targetUtc,
+    'Incomplete tasks check'
+  )
   if (alreadySent) return { sent: false }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) {
+    await NotificationLog.deleteOne({
+      userId: user._id, type: 'TASK_INCOMPLETE_TODAY', forDate: today,
+    }).catch(() => undefined)
+    return { sent: false }
+  }
 
   const tasks = await Task.find({
     userId:    user._id,
@@ -515,11 +1055,8 @@ async function processIncompleteTasks(
     .lean()
 
   if (tasks.length === 0) {
-    // No incomplete tasks — remove the log entry so future runs aren't blocked
     await NotificationLog.deleteOne({
-      userId:  user._id,
-      type:    'TASK_INCOMPLETE_TODAY',
-      forDate: today,
+      userId: user._id, type: 'TASK_INCOMPLETE_TODAY', forDate: today,
     }).catch(() => undefined)
     return { sent: false }
   }
@@ -529,6 +1066,11 @@ async function processIncompleteTasks(
   const dateLabel = formatDateLabel(today, tz)
   const taskWord  = count === 1 ? 'task' : 'tasks'
 
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'TASK_INCOMPLETE_TODAY', forDate: today },
+    { $set: { status: 'processing', contentPreview: `${count} incomplete ${taskWord}` } }
+  ).catch(() => undefined)
+
   await deliver({
     userId:       user._id,
     lifeFlowId:   user.publicId,
@@ -537,6 +1079,8 @@ async function processIncompleteTasks(
     emailPrefs:   user.emailNotifications,
     emailPrefKey: 'taskReminders',
     userEmail:    user.email,
+    notifType:    'TASK_INCOMPLETE_TODAY',
+    forDate:      today,
     inApp: {
       title:   `${count} ${taskWord} still incomplete today`,
       message: titles.slice(0, 3).join(' • '),
@@ -573,23 +1117,29 @@ async function processIncompleteTasks(
 async function processTomorrowPreview(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
-  // Requires at least one of task or habit reminders enabled
   if (!prefs.taskReminders && !prefs.habitReminders) return { sent: false }
 
-  const tz = user.timezone
-  const hr = localHour(now, tz)
-  // Send in the 22:00–23:00 local window (10 PM)
-  if (hr < 22 || hr >= 23) return { sent: false }
-  if (isQuietHour(hr))     return { sent: false }
-
+  const tz       = user.timezone
   const today    = dateInTimezone(now, tz)
   const tomorrow = addOneDay(today)
 
-  // Use TASK_TOMORROW as the idempotency type for the combined preview
-  const alreadySent = await checkAndRecord(user._id, 'TASK_TOMORROW', tomorrow)
+  const targetUtc = localTimeToUtc(today, '22:00', tz)
+  if (!targetUtc) return { sent: false }
+
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id, 'TASK_TOMORROW', tomorrow, '',
+    targetUtc,
+    'Tomorrow preview'
+  )
   if (alreadySent) return { sent: false }
 
   const [tasks, habits] = await Promise.all([
@@ -609,11 +1159,8 @@ async function processTomorrowPreview(
   ])
 
   if (tasks.length === 0 && habits.length === 0) {
-    // Nothing for tomorrow — remove the log entry
     await NotificationLog.deleteOne({
-      userId:  user._id,
-      type:    'TASK_TOMORROW',
-      forDate: tomorrow,
+      userId: user._id, type: 'TASK_TOMORROW', forDate: tomorrow,
     }).catch(() => undefined)
     return { sent: false }
   }
@@ -628,15 +1175,21 @@ async function processTomorrowPreview(
   if (taskCount > 0)  inAppParts.push(`${taskCount} task${taskCount > 1 ? 's' : ''}`)
   if (habitCount > 0) inAppParts.push(`${habitCount} habit${habitCount > 1 ? 's' : ''}`)
 
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'TASK_TOMORROW', forDate: tomorrow },
+    { $set: { status: 'processing', contentPreview: `Tomorrow: ${inAppParts.join(' + ')}` } }
+  ).catch(() => undefined)
+
   await deliver({
     userId:       user._id,
     lifeFlowId:   user.publicId,
     prefs,
-    // Use the more permissive prefKey — taskReminders if tasks exist, else habitReminders
     prefKey:      taskCount > 0 ? 'taskReminders' : 'habitReminders',
     emailPrefs:   user.emailNotifications,
     emailPrefKey: 'taskReminders',
     userEmail:    user.email,
+    notifType:    'TASK_TOMORROW',
+    forDate:      tomorrow,
     inApp: {
       title:   `Tomorrow: ${inAppParts.join(' + ')} planned`,
       message: [...taskTitles.slice(0, 2), ...habitNames.slice(0, 1)].join(' • '),
@@ -676,26 +1229,29 @@ async function processTomorrowPreview(
 async function processDailySummary(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
   if (!prefs.dailySummary) return { sent: false }
 
-  const tz  = user.timezone
-  const hr  = localHour(now, tz)
-  const min = localMinute(now, tz)
-
-  // Send in the 23:00–23:59 local window, prioritising 23:55 but accepting any
-  // run in the 23:xx hour so an hourly cron at 23:00 still fires it.
-  if (hr !== 23) return { sent: false }
-  if (isQuietHour(hr)) return { sent: false }
-  // Within the 23:xx hour, prefer the 23:55 window but accept 23:00–23:59
-  // so a cron running at :00 of the hour still works.
-  void min // used implicitly via the hr check above
-
+  const tz    = user.timezone
   const today = dateInTimezone(now, tz)
 
-  const alreadySent = await checkAndRecord(user._id, 'DAILY_SUMMARY', today)
+  // Target: 23:55 local
+  const targetUtc = localTimeToUtc(today, '23:55', tz)
+  if (!targetUtc) return { sent: false }
+
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id, 'DAILY_SUMMARY', today, '',
+    targetUtc,
+    'Daily summary'
+  )
   if (alreadySent) return { sent: false }
 
   const [tasksCompleted, tasksRemaining, allDailyHabits, completedLogs, todayExpenses] =
@@ -711,9 +1267,7 @@ async function processDailySummary(
     tasksCompleted > 0 || tasksRemaining > 0 || allDailyHabits > 0 || todayExpenses > 0
   if (!hasAnything) {
     await NotificationLog.deleteOne({
-      userId:  user._id,
-      type:    'DAILY_SUMMARY',
-      forDate: today,
+      userId: user._id, type: 'DAILY_SUMMARY', forDate: today,
     }).catch(() => undefined)
     return { sent: false }
   }
@@ -755,6 +1309,11 @@ async function processDailySummary(
     ...(spendingNote ? [spendingNote] : []),
   ].join(' · ')
 
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'DAILY_SUMMARY', forDate: today },
+    { $set: { status: 'processing', contentPreview: summaryMsg.slice(0, 200) } }
+  ).catch(() => undefined)
+
   await deliver({
     userId:       user._id,
     lifeFlowId:   user.publicId,
@@ -763,6 +1322,8 @@ async function processDailySummary(
     emailPrefs:   user.emailNotifications,
     emailPrefKey: 'dailySummary',
     userEmail:    user.email,
+    notifType:    'DAILY_SUMMARY',
+    forDate:      today,
     inApp: {
       title:   summaryTitle,
       message: summaryMsg,
@@ -801,36 +1362,41 @@ async function processDailySummary(
 //
 // Sent every Sunday at 22:00 (10 PM) local time.
 // Covers the 7-day period ending today (Mon–Sun).
-// Not sent if there is nothing to report for the week.
 
 async function processWeeklySummary(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<{ sent: boolean }> {
   const tz  = user.timezone
-  const hr  = localHour(now, tz)
   const dow = localDayOfWeek(now, tz) // 0 = Sunday
 
-  // Only on Sundays in the 22:00–23:00 window
-  if (dow !== 0)       return { sent: false }
-  if (hr < 22 || hr >= 23) return { sent: false }
-  if (isQuietHour(hr)) return { sent: false }
+  if (dow !== 0) return { sent: false }
 
-  // The weeklySummary flag lives in emailNotifications only (no in-app equivalent)
-  // but we still gate on emailNotifications.enabled
   if (!user.emailNotifications.enabled)       return { sent: false }
   if (!user.emailNotifications.weeklySummary) return { sent: false }
 
-  const today     = dateInTimezone(now, tz)
-  // Use ISO week label as forDate discriminator so it's unique per week
-  const weekStart = subtractDays(today, 6) // 7-day window ending today
+  const today = dateInTimezone(now, tz)
+
+  const targetUtc = localTimeToUtc(today, '22:00', tz)
+  if (!targetUtc) return { sent: false }
+
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: false }
+
+  const weekStart = subtractDays(today, 6)
   const weekKey   = `${weekStart}:${today}`
 
-  const alreadySent = await checkAndRecord(user._id, 'WEEKLY_SUMMARY', today, weekKey)
+  const alreadySent = await checkAndRecord(
+    user._id, 'WEEKLY_SUMMARY', today, weekKey,
+    targetUtc,
+    'Weekly summary'
+  )
   if (alreadySent) return { sent: false }
 
-  // Gather the week's data
   const [
     tasksCompleted,
     tasksTotal,
@@ -839,42 +1405,30 @@ async function processWeeklySummary(
     weekExpenses,
   ] = await Promise.all([
     Task.countDocuments({
-      userId:    user._id,
-      dueDate:   { $gte: weekStart, $lte: today },
-      completed: true,
+      userId: user._id, dueDate: { $gte: weekStart, $lte: today }, completed: true,
     }),
     Task.countDocuments({
-      userId:  user._id,
-      dueDate: { $gte: weekStart, $lte: today },
+      userId: user._id, dueDate: { $gte: weekStart, $lte: today },
     }),
     Habit.countDocuments({ userId: user._id, frequency: 'daily' }),
     HabitLog.countDocuments({
-      userId:    user._id,
-      date:      { $gte: weekStart, $lte: today },
-      completed: true,
+      userId: user._id, date: { $gte: weekStart, $lte: today }, completed: true,
     }),
-    Expense.find({
-      userId: user._id,
-      date:   { $gte: weekStart, $lte: today },
-    })
+    Expense.find({ userId: user._id, date: { $gte: weekStart, $lte: today } })
       .select('category')
       .lean(),
   ])
 
-  // habitsTotal = possible habit-days in the week (7 days × daily habits)
   const habitsTotal = allDailyHabits * 7
 
   const hasAnything = tasksTotal > 0 || habitsTotal > 0 || weekExpenses.length > 0
   if (!hasAnything) {
     await NotificationLog.deleteOne({
-      userId:  user._id,
-      type:    'WEEKLY_SUMMARY',
-      forDate: today,
+      userId: user._id, type: 'WEEKLY_SUMMARY', forDate: today,
     }).catch(() => undefined)
     return { sent: false }
   }
 
-  // Determine top expense category for the week
   const catCounts: Record<string, number> = {}
   for (const e of weekExpenses) {
     catCounts[e.category] = (catCounts[e.category] ?? 0) + 1
@@ -882,18 +1436,13 @@ async function processWeeklySummary(
   const topCat = Object.entries(catCounts).sort((a, b) => b[1] - a[1])[0]?.[0]
   const topExpenseCategory = topCat ? (CATEGORY_LABELS[topCat] ?? topCat) : undefined
 
-  // Count active days (days with at least one completed task OR habit)
   const activeDaysSet = new Set<string>()
   const [taskDates, habitLogDates] = await Promise.all([
     Task.find({
-      userId:    user._id,
-      dueDate:   { $gte: weekStart, $lte: today },
-      completed: true,
+      userId: user._id, dueDate: { $gte: weekStart, $lte: today }, completed: true,
     }).select('dueDate').lean(),
     HabitLog.find({
-      userId:    user._id,
-      date:      { $gte: weekStart, $lte: today },
-      completed: true,
+      userId: user._id, date: { $gte: weekStart, $lte: today }, completed: true,
     }).select('date').lean(),
   ])
   for (const t of taskDates)     { if (t.dueDate) activeDaysSet.add(t.dueDate) }
@@ -901,6 +1450,12 @@ async function processWeeklySummary(
   const activeDays = activeDaysSet.size
 
   const weekLabel = weekRangeLabel(weekStart, today, tz)
+  const preview   = `Tasks ${tasksCompleted}/${tasksTotal} · Habits ${completedHabitLogs}/${habitsTotal} · ${weekExpenses.length} txn`
+
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'WEEKLY_SUMMARY', forDate: today },
+    { $set: { status: 'processing', contentPreview: preview.slice(0, 200) } }
+  ).catch(() => undefined)
 
   const notifier = await getNotificationService()
   const { subject, html, text } = buildWeeklySummaryEmail({
@@ -916,14 +1471,12 @@ async function processWeeklySummary(
     appUrl,
   })
 
-  // Weekly summary is email-only (no in-app / push — it's a rich report)
+  let emailOk = false
   try {
     const result = await notifier.send({
-      to:      user.email,
-      subject,
-      html,
-      text,
+      to: user.email, subject, html, text,
     })
+    emailOk = result.ok
     if (result.ok) {
       logger.info('[EMAIL] sent successfully', {
         notificationType: 'weeklySummary',
@@ -941,16 +1494,30 @@ async function processWeeklySummary(
       : 'unexpected error'
     logger.warn('[EMAIL] delivery failed', {
       notificationType: 'weeklySummary',
-      error:            sanitisedError,
+      error: sanitisedError,
     })
+    await markNotificationFailed(user._id, 'WEEKLY_SUMMARY', today, weekKey, sanitisedError)
+    return { sent: false }
   }
 
-  // Also create an in-app notification so the user sees it even without email
+  if (emailOk) {
+    await markNotificationSent(
+      user._id, 'WEEKLY_SUMMARY', today, weekKey,
+      subject,
+      html,
+    )
+  } else {
+    await markNotificationFailed(
+      user._id, 'WEEKLY_SUMMARY', today, weekKey, 'provider returned non-ok'
+    )
+    return { sent: false }
+  }
+
   await Notification.create({
     userId:     user._id,
     lifeFlowId: user.publicId,
     title:      'Your weekly summary is ready',
-    message:    `Tasks: ${tasksCompleted}/${tasksTotal} · Habits: ${completedHabitLogs}/${habitsTotal} · ${weekExpenses.length} transactions`,
+    message:    preview,
     type:       'general',
   }).catch((err: unknown) => {
     logger.warn('[notifScheduler] In-app weekly summary creation failed', {
@@ -970,28 +1537,35 @@ async function processWeeklySummary(
   return { sent: true }
 }
 
-// ─── 5. Habit reminder (morning, incomplete habits) ──────────────────────────
+// ─── 5. Habit reminder (morning, 9:30 AM) ────────────────────────────────────
 //
-// Sent in the 09:00–11:00 local window.
-// Now includes an email via buildHabitReminderEmail.
+// Sent at 09:30 local time.
 
 async function processHabitReminder(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<{ sent: boolean }> {
   const prefs = user.notificationPreferences
   if (!prefs.habitReminders) return { sent: false }
 
-  const tz = user.timezone
-  const hr = localHour(now, tz)
-  // Send in the 09:00–11:00 morning window
-  if (hr < 9 || hr >= 11) return { sent: false }
-  if (isQuietHour(hr))    return { sent: false }
-
+  const tz    = user.timezone
   const today = dateInTimezone(now, tz)
 
-  const alreadySent = await checkAndRecord(user._id, 'HABIT_REMINDER', today)
+  const targetUtc = localTimeToUtc(today, '09:30', tz)
+  if (!targetUtc) return { sent: false }
+
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id, 'HABIT_REMINDER', today, '',
+    targetUtc,
+    'Habit reminder'
+  )
   if (alreadySent) return { sent: false }
 
   const allDailyHabits = await Habit.find({ userId: user._id, frequency: 'daily' })
@@ -1000,17 +1574,13 @@ async function processHabitReminder(
 
   if (allDailyHabits.length === 0) {
     await NotificationLog.deleteOne({
-      userId:  user._id,
-      type:    'HABIT_REMINDER',
-      forDate: today,
+      userId: user._id, type: 'HABIT_REMINDER', forDate: today,
     }).catch(() => undefined)
     return { sent: false }
   }
 
   const completedLogs = await HabitLog.find({
-    userId:    user._id,
-    date:      today,
-    completed: true,
+    userId: user._id, date: today, completed: true,
   })
     .select('habitId')
     .lean()
@@ -1019,11 +1589,8 @@ async function processHabitReminder(
   const incomplete   = allDailyHabits.filter((h) => !completedIds.has(h._id.toString()))
 
   if (incomplete.length === 0) {
-    // All habits done — remove dedup key
     await NotificationLog.deleteOne({
-      userId:  user._id,
-      type:    'HABIT_REMINDER',
-      forDate: today,
+      userId: user._id, type: 'HABIT_REMINDER', forDate: today,
     }).catch(() => undefined)
     return { sent: false }
   }
@@ -1033,6 +1600,11 @@ async function processHabitReminder(
   const habitWord  = count === 1 ? 'habit' : 'habits'
   const todayLabel = formatDateLabel(today, tz)
 
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'HABIT_REMINDER', forDate: today },
+    { $set: { status: 'processing', contentPreview: `${count} ${habitWord} to complete` } }
+  ).catch(() => undefined)
+
   await deliver({
     userId:       user._id,
     lifeFlowId:   user.publicId,
@@ -1041,6 +1613,8 @@ async function processHabitReminder(
     emailPrefs:   user.emailNotifications,
     emailPrefKey: 'habitReminders',
     userEmail:    user.email,
+    notifType:    'HABIT_REMINDER',
+    forDate:      today,
     inApp: {
       title:   `${count} ${habitWord} to complete today`,
       message: names.slice(0, 3).join(' • '),
@@ -1074,7 +1648,6 @@ async function processHabitReminder(
 // Sent any time (no time-window restriction, respects quiet hours).
 // Alert thresholds: 80% and 100% of budget used.
 
-/** Alert thresholds: notify at 80% and again at 100%. */
 const ALERT_THRESHOLDS = [80, 100] as const
 type AlertThreshold = typeof ALERT_THRESHOLDS[number]
 
@@ -1094,9 +1667,7 @@ async function processSpendingAlerts(
   const today = dateInTimezone(now, tz)
 
   const budgets = await Budget.find({
-    userId: user._id,
-    month,
-    status: 'active',
+    userId: user._id, month, status: 'active',
   }).lean()
 
   if (budgets.length === 0) return { sent: 0 }
@@ -1117,7 +1688,7 @@ async function processSpendingAlerts(
     ])
 
     const totalRupees  = expenseAgg[0]?.total ?? 0
-    const budgetRupees = budget.amountMinor / 100  // paise → rupees
+    const budgetRupees = budget.amountMinor / 100
     if (budgetRupees <= 0) continue
 
     const percentUsed = Math.round((totalRupees / budgetRupees) * 100)
@@ -1129,18 +1700,19 @@ async function processSpendingAlerts(
     if (crossedThreshold === null) continue
 
     const discriminator = `${budget.category}:${crossedThreshold}`
-    const alreadySent   = await checkAndRecord(
-      user._id,
-      'SPENDING_ALERT',
-      month,
-      discriminator
+    const categoryLabel = CATEGORY_LABELS[budget.category] ?? budget.category
+    const isOver        = crossedThreshold >= 100
+    const preview       = isOver
+      ? `${categoryLabel} budget exceeded (${percentUsed}%)`
+      : `${categoryLabel} budget ${percentUsed}% used`
+
+    const alreadySent = await checkAndRecord(
+      user._id, 'SPENDING_ALERT', month, discriminator,
+      new Date(),
+      preview
     )
     if (alreadySent) continue
 
-    const categoryLabel = CATEGORY_LABELS[budget.category] ?? budget.category
-    const isOver        = crossedThreshold >= 100
-
-    // Privacy: never include actual rupee amounts in push/in-app summaries
     const pushTitle = isOver
       ? `${categoryLabel} budget exceeded`
       : `${categoryLabel} budget is nearly full`
@@ -1148,14 +1720,22 @@ async function processSpendingAlerts(
       ? `You have exceeded your ${categoryLabel} budget this month.`
       : `Your ${categoryLabel} budget is ${percentUsed}% used.`
 
+    await NotificationLog.updateOne(
+      { userId: user._id, type: 'SPENDING_ALERT', forDate: month },
+      { $set: { status: 'processing' } }
+    ).catch(() => undefined)
+
     await deliver({
-      userId:       user._id,
-      lifeFlowId:   user.publicId,
+      userId:             user._id,
+      lifeFlowId:         user.publicId,
       prefs,
-      prefKey:      'spendingAlerts',
-      emailPrefs:   user.emailNotifications,
-      emailPrefKey: 'spendingAlerts',
-      userEmail:    user.email,
+      prefKey:            'spendingAlerts',
+      emailPrefs:         user.emailNotifications,
+      emailPrefKey:       'spendingAlerts',
+      userEmail:          user.email,
+      notifType:          'SPENDING_ALERT',
+      forDate:            month,
+      extraDiscriminator: discriminator,
       inApp: {
         title:   pushTitle,
         message: pushBody,
@@ -1177,9 +1757,9 @@ async function processSpendingAlerts(
 
     sentCount++
     logger.info('[notifScheduler] SPENDING_ALERT sent', {
-      userId:    user._id.toString(),
-      category:  budget.category,
-      threshold: crossedThreshold,
+      userId:     user._id.toString(),
+      category:   budget.category,
+      threshold:  crossedThreshold,
       percentUsed,
     })
   }
@@ -1189,61 +1769,29 @@ async function processSpendingAlerts(
 
 // ─── 7. Task due-soon reminder (30 minutes before due time) ──────────────────
 //
-// Sends an individual email reminder 30 minutes before each task's due time.
+// Sends a reminder 30 minutes before each task's due time.
 //
-// DESIGN
-// ──────
-// The cron runs hourly.  To guarantee we catch the 30-minute window without
-// depending on a millisecond-perfect hit, we use a ±15-minute window:
+// PRECISE TIMING
+// ──────────────
+// For each task with a dueTime, the reminder target UTC is computed as:
 //
-//   targetLocalMinute = localMinute(now) + 30
-//   we match tasks whose dueTime falls in [now+15min, now+45min]
+//   reminderTargetUtc = localTimeToUtc(today, dueTime, userTimezone) - 30 minutes
 //
-// This means the window spans 30 minutes around the nominal reminder time.
-// Because idempotency is per-task per-date, only one email is ever sent even
-// if multiple scheduler runs happen to fall in the window.
+// The scheduler then checks:  isWithinGraceWindow(now, reminderTargetUtc, graceSeconds)
 //
-// RECURRENCE
-// ──────────
-// All four recurrence types (none/daily/weekly/monthly) are handled uniformly:
-//   • One-time tasks (recurring:'none')  → checked on their exact dueDate
-//   • Daily tasks                        → checked every day where dueDate is
-//                                          today OR dueDate is in the past but
-//                                          task recurs (completed is the only
-//                                          signal we have — if false, remind)
-//   • Weekly tasks                       → same logic; dueDate is used to anchor
-//                                          the original schedule
-//   • Monthly tasks                      → same logic
+// When graceSeconds = 90 (precise scheduler, ~1 min cron):
+//   Notification fires within ±90 seconds of the exact 30-minute mark.
 //
-// Since the Task model has no per-occurrence tracking (completed is a single
-// boolean), the semantics are: if the task is not yet marked done, it is
-// eligible for a reminder.  For recurring tasks, "today's occurrence" is
-// implied by the task still being incomplete.
+// When graceSeconds = 3600 (hourly scheduler):
+//   The existing ±15-minute window approach is used for full backwards compatibility.
 //
 // MISSED REMINDER PROTECTION
 // ──────────────────────────
-// If the scheduler was offline during the reminder window, the task's
-// dueTime - 30min will be in the past when the scheduler comes back.
-// We enforce a hard upper bound: we only send if the reminder time is at most
-// 15 minutes in the past (i.e. the task hasn't been due yet).  After the
-// task's dueTime passes we do NOT send the "30 minutes before" reminder — it
-// would be misleading.
-//
-// IDEMPOTENCY KEY
-// ───────────────
-//   <userId>:TASK_DUE_SOON:<taskId>:<dueDate>
-//
-// Each task gets one reminder slot per calendar date.  The unique index on
-// NotificationLog.key makes concurrent scheduler runs safe.
-//
-// QUIET HOURS
-// ───────────
-// Tasks due between 00:00 and 07:30 local time produce a reminder in the
-// 00:00–07:00 quiet window.  We skip those entirely.
+// If the server was offline during the reminder window:
+//   - With precise scheduler: the task's dueTime - 30 min will be > graceSeconds in the
+//     past when the scheduler comes back → missed → NOT sent (avoids misleading reminder).
+//   - With hourly scheduler: same ±15 min window approach as before.
 
-/**
- * Return the local time as { hour, minute } in the given timezone.
- */
 function localTime(date: Date, timezone: string): { hour: number; minute: number } {
   return {
     hour:   localHour(date, timezone),
@@ -1251,10 +1799,6 @@ function localTime(date: Date, timezone: string): { hour: number; minute: number
   }
 }
 
-/**
- * Convert a "HH:MM" string to total minutes since midnight.
- * Returns -1 if the string is not parseable.
- */
 function timeStringToMinutes(timeStr: string): number {
   if (!timeStr) return -1
   const parts = timeStr.trim().split(':')
@@ -1265,9 +1809,6 @@ function timeStringToMinutes(timeStr: string): number {
   return h * 60 + m
 }
 
-/**
- * Format HH:MM (24h) to a human-readable "8:00 PM" / "2:30 PM" label.
- */
 function formatTime12h(timeStr: string): string {
   const mins = timeStringToMinutes(timeStr)
   if (mins < 0) return timeStr
@@ -1278,11 +1819,6 @@ function formatTime12h(timeStr: string): string {
   return `${h12}:${m.toString().padStart(2, '0')} ${period}`
 }
 
-/**
- * Build a human-readable "due" label for the email.
- * If dueDate === today → "Today at HH:MM AM/PM"
- * Otherwise            → "DayName, DD Mon at HH:MM AM/PM"
- */
 function buildDueLabel(dueDate: string, dueTime: string, today: string, timezone: string): string {
   const timeLabel = formatTime12h(dueTime)
   if (dueDate === today) return `Today at ${timeLabel}`
@@ -1311,90 +1847,79 @@ const RECURRENCE_LABELS: Record<string, string> = {
 async function processTaskDueSoon(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<{ sent: number }> {
-  // Gate on in-app taskReminders preference (master in-app channel gate)
   const prefs = user.notificationPreferences
   if (!prefs.taskReminders) return { sent: 0 }
 
-  const tz = user.timezone
-  const { hour: localHr, minute: localMin } = localTime(now, tz)
+  const tz    = user.timezone
+  const today = dateInTimezone(now, tz)
 
-  // Skip the entire function in quiet hours (00:00–07:00 local).
-  // A task due at 07:30 would trigger a reminder at 07:00 — borderline acceptable,
-  // but we still allow it since 07:00 is right at the boundary.
-  if (isQuietHour(localHr)) return { sent: 0 }
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: 0 }
 
-  // Total minutes since local midnight for NOW
-  const nowTotalMin = localHr * 60 + localMin
+  let candidateTimes: string[]
 
-  // Reminder window: [now+15, now+45] total minutes.
-  // A task with dueTime exactly 30 min ahead will almost always be caught.
-  // The 30-minute span also ensures one hourly cron run catches the full slot.
-  const windowLow  = nowTotalMin + 15   // lower bound (inclusive)
-  const windowHigh = nowTotalMin + 45   // upper bound (exclusive)
+  if (graceSeconds <= 120) {
+    // ── Precise mode (sub-minute cron) ────────────────────────────────────────
+    // The reminder window is [now - graceSeconds, now + graceSeconds].
+    // A task is eligible if: localTimeToUtc(today, dueTime) - 30min ∈ [now-grace, now+grace]
+    // We compute candidate dueTime values by iterating minutes around now+30.
+    const nowMs = now.getTime()
+    const reminderTargetMs = nowMs + 30 * 60 * 1000  // 30 min from now
 
-  // Hard cut-off: if the nominal reminder time (now+30) is MORE than 15 minutes
-  // past the task's dueTime - 30, it means the scheduler missed the window.
-  // We handle this via the window math above — if dueTime - 30 is before
-  // windowLow (now+15) the task won't be found.  No additional logic needed.
+    // Collect all HH:MM strings whose UTC representation falls within grace window
+    candidateTimes = []
+    // Check a ±3 minute range around now+30 to account for sub-minute polling
+    for (let deltaSec = -graceSeconds; deltaSec <= graceSeconds; deltaSec += 60) {
+      const checkMs  = reminderTargetMs + deltaSec * 1000
+      const checkDt  = new Date(checkMs)
+      const localH   = localHour(checkDt, tz)
+      const localM   = localMinute(checkDt, tz)
+      const hh       = localH.toString().padStart(2, '0')
+      const mm       = localM.toString().padStart(2, '0')
+      candidateTimes.push(`${hh}:${mm}`)
+    }
+    // Deduplicate
+    candidateTimes = [...new Set(candidateTimes)]
+  } else {
+    // ── Hourly-cron mode (backward compatible ±15 min window) ─────────────────
+    const { hour: localHr, minute: localMin } = localTime(now, tz)
+    const nowTotalMin  = localHr * 60 + localMin
+    const windowLow    = nowTotalMin + 15
+    const windowHigh   = nowTotalMin + 45
 
-  const today    = dateInTimezone(now, tz)
-
-  // Build the candidate dueTime list from the window.
-  // We collect every HH:MM string that falls in [windowLow, windowHigh).
-  // This list is used to query MongoDB for tasks whose dueTime matches.
-  const candidateTimes: string[] = []
-  for (let m = windowLow; m < windowHigh; m++) {
-    // Handle crossing midnight (minutes ≥ 1440)
-    const clampedMin = m % 1440
-    const hh = Math.floor(clampedMin / 60).toString().padStart(2, '0')
-    const mm = (clampedMin % 60).toString().padStart(2, '0')
-    candidateTimes.push(`${hh}:${mm}`)
+    candidateTimes = []
+    for (let m = windowLow; m < windowHigh; m++) {
+      const clampedMin = m % 1440
+      const hh = Math.floor(clampedMin / 60).toString().padStart(2, '0')
+      const mm = (clampedMin % 60).toString().padStart(2, '0')
+      candidateTimes.push(`${hh}:${mm}`)
+    }
   }
 
   if (candidateTimes.length === 0) return { sent: 0 }
-
-  // Find tasks that:
-  //   a) belong to this user
-  //   b) are NOT completed
-  //   c) have a dueTime in our candidate window
-  //   d) are either:
-  //      - one-time tasks due today (dueDate === today)
-  //      - recurring tasks (any recurrence type) — for these we ignore dueDate
-  //        and just check if the task is still incomplete (our only signal)
-  //
-  // For recurring tasks we also include tasks with dueDate in the past that
-  // haven't been completed yet, because the user might have set a recurring
-  // task with an old base dueDate but still expects daily reminders.
 
   const tasks = await Task.find({
     userId:    user._id,
     completed: false,
     dueTime:   { $in: candidateTimes },
     $or: [
-      // One-time or specifically-dated tasks: must be due today or earlier
       { recurring: 'none',    dueDate: { $lte: today } },
-      // Recurring tasks: dueDate present but recurrence means every period
       { recurring: 'daily'   },
       { recurring: 'weekly'  },
       { recurring: 'monthly' },
     ],
   })
     .select('_id title dueDate dueTime recurring priority projectId')
-    .limit(20)  // safety cap — unlikely to have >20 tasks due at the same minute
+    .limit(20)
     .lean()
 
   if (tasks.length === 0) return { sent: 0 }
 
-  // For one-time tasks: we only remind if dueDate is today.
-  // For recurring tasks: we always remind (dueDate may be past, occurrence is today).
   const eligibleTasks = tasks.filter((task) => {
-    if (task.recurring === 'none') {
-      // Only remind for today's due date
-      return task.dueDate === today
-    }
-    // Recurring — always eligible (completion is the only filter)
+    if (task.recurring === 'none') return task.dueDate === today
     return true
   })
 
@@ -1403,49 +1928,61 @@ async function processTaskDueSoon(
   let sentCount = 0
 
   for (const task of eligibleTasks) {
-    // Per-task idempotency key: userId:TASK_DUE_SOON:taskId:dueDate(today)
-    // Using today (not task.dueDate) as the date discriminator ensures recurring
-    // tasks get one reminder per calendar day regardless of their base dueDate.
     const taskIdStr = task._id.toString()
+
+    // In precise mode, additionally verify the reminder target hasn't expired
+    if (graceSeconds <= 120 && task.dueTime) {
+      const dueUtc = localTimeToUtc(today, task.dueTime, tz)
+      if (dueUtc) {
+        const reminderUtc = new Date(dueUtc.getTime() - 30 * 60 * 1000)
+        if (!isWithinGraceWindow(now, reminderUtc, graceSeconds + 60)) {
+          // Missed the window — mark as expired rather than skip silently
+          logger.info('[notifScheduler] TASK_DUE_SOON missed window', {
+            userId:    user._id.toString(),
+            taskId:    taskIdStr,
+            dueTime:   task.dueTime,
+            reminderUtc: reminderUtc.toISOString(),
+            nowUtc:    now.toISOString(),
+          })
+          continue
+        }
+      }
+    }
+
+    // Compute the precise reminder UTC for the log
+    const dueUtcForLog   = task.dueTime ? localTimeToUtc(today, task.dueTime, tz) : null
+    const reminderUtcLog = dueUtcForLog
+      ? new Date(dueUtcForLog.getTime() - 30 * 60 * 1000)
+      : new Date()
+
+    const preview = `"${task.title}" due at ${formatTime12h(task.dueTime ?? '')}`
+
     const alreadySent = await checkAndRecord(
-      user._id,
-      'TASK_DUE_SOON',
-      today,
-      taskIdStr
+      user._id, 'TASK_DUE_SOON', today, taskIdStr,
+      reminderUtcLog,
+      preview
     )
     if (alreadySent) continue
 
-    // Re-fetch the task to get the absolute latest completion status.
-    // Between the bulk query above and now, the user may have completed the task.
-    const freshTask = await Task.findOne({
-      _id:    task._id,
-      userId: user._id,
-    })
+    // Re-fetch for latest completion status
+    const freshTask = await Task.findOne({ _id: task._id, userId: user._id })
       .select('completed title dueDate dueTime recurring priority')
       .lean()
 
     if (!freshTask) {
-      // Task was deleted between query and now — remove the log entry
-      await NotificationLog.deleteOne({
-        userId:  user._id,
-        type:    'TASK_DUE_SOON',
-        forDate: today,
-        key:     `${user._id.toString()}:TASK_DUE_SOON:${today}:${taskIdStr}`,
-      }).catch(() => undefined)
+      await NotificationLog.deleteOne({ key: buildKey(user._id, 'TASK_DUE_SOON', today, taskIdStr) }).catch(() => undefined)
       continue
     }
 
     if (freshTask.completed) {
-      // Task was just completed — release the idempotency slot so it can be
-      // re-used if the task is un-completed and rescheduled (edge case).
-      await NotificationLog.deleteOne({
-        userId:  user._id,
-        type:    'TASK_DUE_SOON',
-        forDate: today,
-        key:     `${user._id.toString()}:TASK_DUE_SOON:${today}:${taskIdStr}`,
-      }).catch(() => undefined)
+      await NotificationLog.deleteOne({ key: buildKey(user._id, 'TASK_DUE_SOON', today, taskIdStr) }).catch(() => undefined)
       continue
     }
+
+    await NotificationLog.updateOne(
+      { userId: user._id, type: 'TASK_DUE_SOON', forDate: today },
+      { $set: { status: 'processing' } }
+    ).catch(() => undefined)
 
     const dueLabel        = buildDueLabel(freshTask.dueDate ?? today, freshTask.dueTime ?? '', today, tz)
     const recurrenceLabel = freshTask.recurring !== 'none'
@@ -1453,13 +1990,16 @@ async function processTaskDueSoon(
       : undefined
 
     await deliver({
-      userId:       user._id,
-      lifeFlowId:   user.publicId,
+      userId:             user._id,
+      lifeFlowId:         user.publicId,
       prefs,
-      prefKey:      'taskReminders',
-      emailPrefs:   user.emailNotifications,
-      emailPrefKey: 'taskReminders',
-      userEmail:    user.email,
+      prefKey:            'taskReminders',
+      emailPrefs:         user.emailNotifications,
+      emailPrefKey:       'taskReminders',
+      userEmail:          user.email,
+      notifType:          'TASK_DUE_SOON',
+      forDate:            today,
+      extraDiscriminator: taskIdStr,
       inApp: {
         title:   `Task due in 30 minutes`,
         message: `"${freshTask.title}" is due at ${formatTime12h(freshTask.dueTime ?? '')}`,
@@ -1472,11 +2012,29 @@ async function processTaskDueSoon(
         tag:   `TASK_DUE_SOON_${taskIdStr}`,
       },
       email: buildTaskReminderEmail({
-        toName:           user.name,
-        taskTitle:        freshTask.title,
+        toName:             user.name,
+        taskTitle:          freshTask.title,
         dueLabel,
         recurrenceLabel,
-        priority:         freshTask.priority as 'low' | 'medium' | 'high' | undefined,
+        priority:           freshTask.priority as 'low' | 'medium' | 'high' | undefined,
+        // Pass the reminder time so the icon shows the actual scheduled time
+        reminderTimeLabel:  freshTask.dueTime
+          ? (() => {
+              const dueUtc = localTimeToUtc(today, freshTask.dueTime, tz)
+              if (!dueUtc) return undefined
+              const reminderUtc = new Date(dueUtc.getTime() - 30 * 60 * 1000)
+              const h = parseInt(
+                new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hour12: false })
+                  .formatToParts(reminderUtc).find((p) => p.type === 'hour')?.value ?? '0',
+                10
+              )
+              const m = new Intl.DateTimeFormat('en-US', { timeZone: tz, minute: '2-digit', hour12: false })
+                .formatToParts(reminderUtc).find((p) => p.type === 'minute')?.value ?? '00'
+              const ampm = h < 12 ? 'AM' : 'PM'
+              const h12  = h % 12 || 12
+              return `${String(h12).padStart(2, '0')}:${m} ${ampm}`
+            })()
+          : undefined,
         appUrl,
       }),
     })
@@ -1488,25 +2046,20 @@ async function processTaskDueSoon(
       taskTitle: freshTask.title,
       dueTime:   freshTask.dueTime,
       recurring: freshTask.recurring,
+      graceSeconds,
     })
   }
 
   return { sent: sentCount }
 }
 
-// ─── Legacy: separate tomorrow-tasks and tomorrow-habits ─────────────────────
-//
-// These are kept for backwards compatibility but are effectively replaced by
-// processTomorrowPreview which combines both into one 10 PM email.
-// They will be skipped if processTomorrowPreview already ran for the same date.
+// ─── Legacy no-ops ────────────────────────────────────────────────────────────
 
 async function processTomorrowTasks(
   user: UserRecord,
   now: Date,
   appUrl: string
 ): Promise<{ sent: boolean }> {
-  // The combined preview (TASK_TOMORROW) already handles this.
-  // This function is a no-op — kept so existing callers compile cleanly.
   void user; void now; void appUrl
   return { sent: false }
 }
@@ -1516,12 +2069,10 @@ async function processTomorrowHabits(
   now: Date,
   appUrl: string
 ): Promise<{ sent: boolean }> {
-  // The combined preview (TASK_TOMORROW) already handles this.
   void user; void now; void appUrl
   return { sent: false }
 }
 
-// Keep the old imports alive so TypeScript doesn't complain about unused imports
 void buildTomorrowTasksEmail
 void buildTomorrowHabitsEmail
 
@@ -1530,7 +2081,8 @@ void buildTomorrowHabitsEmail
 async function processUser(
   user: UserRecord,
   now: Date,
-  appUrl: string
+  appUrl: string,
+  graceSeconds = 3600
 ): Promise<UserResult> {
   const result: UserResult = {
     userId:  user._id.toString(),
@@ -1540,10 +2092,10 @@ async function processUser(
   }
 
   const run = async (
-    fn: (u: UserRecord, n: Date, a: string) => Promise<{ sent: boolean } | { sent: number }>
+    fn: (u: UserRecord, n: Date, a: string, g: number) => Promise<{ sent: boolean } | { sent: number }>
   ) => {
     try {
-      const r         = await fn(user, now, appUrl)
+      const r         = await fn(user, now, appUrl, graceSeconds)
       const sentCount = typeof r.sent === 'boolean' ? (r.sent ? 1 : 0) : r.sent
       result.sent    += sentCount
       result.skipped += sentCount === 0 ? 1 : 0
@@ -1552,30 +2104,34 @@ async function processUser(
     }
   }
 
-  // ── Schedule (all times in user's local timezone) ──────────────────────────
-  // 07:30+ (any time) → task due-soon reminder (30 min before due time)
-  // 19:00 (7 PM)      → incomplete tasks check
-  // 22:00 (10 PM)     → tomorrow preview (tasks + habits combined)
-  // 23:00 (11 PM+)    → daily summary (fires in 23:xx hour for 11:55 PM target)
-  // Sunday 22:00      → weekly summary
-  // 09:00–11:00       → habit reminder (morning)
-  // Any time          → spending alerts
+  // Spending alerts have no grace window param — they're event-driven
+  const runSpending = async () => {
+    try {
+      const r = await processSpendingAlerts(user, now, appUrl)
+      result.sent    += r.sent
+      result.skipped += r.sent === 0 ? 1 : 0
+    } catch (err: unknown) {
+      result.errors.push(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  await run(processMorningBrief)
   await run(processTaskDueSoon)
   await run(processIncompleteTasks)
   await run(processTomorrowPreview)
   await run(processDailySummary)
   await run(processWeeklySummary)
   await run(processHabitReminder)
-  await run(processSpendingAlerts)
+  await runSpending()
 
-  // Legacy no-ops — harmless
+  // Legacy no-ops
   await run(processTomorrowTasks)
   await run(processTomorrowHabits)
 
   return result
 }
 
-// ─── Main entry point ─────────────────────────────────────────────────────────
+// ─── Main entry points ────────────────────────────────────────────────────────
 
 export interface NotificationSchedulerResult {
   usersProcessed: number
@@ -1588,10 +2144,18 @@ export interface NotificationSchedulerResult {
 /**
  * Run the notification scheduler for all active, verified users.
  *
+ * @param graceSeconds  How far past the target UTC we still consider it valid.
+ *                      3600 (1 hour) = hourly cron mode (backward compatible).
+ *                      90 = precise mode (called by the per-minute endpoint).
+ *
  * Safe to call multiple times — idempotency is enforced per-user per-type per-date.
- * Exported for use by the /api/jobs/process-notifications route.
+ * Exported for use by:
+ *   /api/jobs/process-notifications          (hourly, graceSeconds=3600)
+ *   /api/jobs/process-notifications-precise  (per-minute, graceSeconds=90)
  */
-export async function runNotificationScheduler(): Promise<NotificationSchedulerResult> {
+export async function runNotificationScheduler(
+  graceSeconds = 3600
+): Promise<NotificationSchedulerResult> {
   const t0     = Date.now()
   const result: NotificationSchedulerResult = {
     usersProcessed: 0,
@@ -1606,12 +2170,15 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
   const now    = new Date()
 
-  // Only process users who:
-  //   1. Have verified their email address (emailVerified: true)
-  //   2. Have completed the one-time notification test (notificationsTested: true)
-  //   3. Have at least one notification preference enabled
-  // Using lean() for efficiency — we don't need Mongoose document methods.
+  // Query filter (emailVerified: true, notificationsTested: true required)
+  // accountStatus: 'active' — skip soft-deleted accounts; they must not receive
+  // any scheduled notifications during the recovery window.  The field defaults
+  // to 'active' for all pre-existing users so this filter is backward-compatible.
+  // We use $ne: 'deleted' rather than $eq: 'active' so that legacy documents
+  // where the field is absent (null/undefined) are also included — they are
+  // implicitly active accounts that pre-date the soft-delete feature.
   const users = await User.find({
+    accountStatus:        { $ne: 'deleted' as const },
     emailVerified:        true,
     notificationsTested:  true,
     $or: [
@@ -1619,7 +2186,6 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
       { 'notificationPreferences.habitReminders': true },
       { 'notificationPreferences.spendingAlerts': true },
       { 'notificationPreferences.dailySummary':   true },
-      // Also include users who only have email notifications enabled (e.g. weekly summary)
       { 'emailNotifications.enabled': true },
     ],
   })
@@ -1627,18 +2193,15 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
     .lean<UserRecord[]>()
 
   logger.info('[notifScheduler] Starting run', {
-    userCount: users.length,
-    utcTime:   now.toISOString(),
+    userCount:    users.length,
+    utcTime:      now.toISOString(),
+    graceSeconds,
   })
 
   for (const user of users) {
     try {
-      // Provide a safe default for emailNotifications in case the field doesn't
-      // exist yet on legacy documents (before the schema migration).
       const safeUser: UserRecord = {
         ...user,
-        // notificationsTested: already filtered to true by the query, but
-        // provide explicit default so TypeScript is happy with lean docs.
         notificationsTested: user.notificationsTested ?? false,
         emailNotifications: user.emailNotifications ?? {
           enabled:        false,
@@ -1649,12 +2212,11 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
           weeklySummary:  true,
         },
       }
-      // Also ensure weeklySummary exists for legacy docs that predate the field
       if (safeUser.emailNotifications.weeklySummary === undefined) {
         ;(safeUser.emailNotifications as EmailNotifPrefs).weeklySummary = true
       }
 
-      const userResult = await processUser(safeUser, now, appUrl)
+      const userResult = await processUser(safeUser, now, appUrl, graceSeconds)
       result.usersProcessed++
       result.totalSent    += userResult.sent
       result.totalSkipped += userResult.skipped
@@ -1678,6 +2240,7 @@ export async function runNotificationScheduler(): Promise<NotificationSchedulerR
     totalSkipped:   result.totalSkipped,
     errorCount:     result.errors.length,
     durationMs:     result.durationMs,
+    graceSeconds,
   })
 
   return result

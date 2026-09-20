@@ -129,7 +129,9 @@ export async function requireAuth(): Promise<AuthUser> {
   // with its real message. Swallowing DB errors here caused the symptom of
   // "session missing or invalid" appearing for Atlas connection problems.
   await connectDB()
-  const user = await User.findById(session.userId).select('publicId name email').lean()
+  const user = await User.findById(session.userId)
+    .select('publicId name email accountStatus')
+    .lean<{ publicId: string; name: string; email: string; accountStatus?: string } | null>()
 
   if (!user) {
     // Session refers to a deleted or non-existent account (stale cookie).
@@ -161,6 +163,18 @@ export async function requireAuth(): Promise<AuthUser> {
     }
 
     throw new Error('UserNotFound')
+  }
+
+  // ── Soft-delete gate ──────────────────────────────────────────────────────
+  // If the account has been soft-deleted the session cookie is stale (we
+  // invalidate sessions in the delete-account route, but a cookie that was
+  // issued before deletion could still arrive here).  Treat it as if the
+  // account no longer exists so all protected routes return 401/redirect.
+  //
+  // accountStatus defaults to 'active' for legacy documents that pre-date
+  // the field, so the ?? 'active' fallback keeps existing accounts working.
+  if ((user.accountStatus ?? 'active') !== 'active') {
+    throw new Error('AccountDeleted')
   }
 
   return {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2 } from 'lucide-react'
+import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2, History } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
@@ -11,6 +11,11 @@ import { SkeletonCard } from '@/components/ui/Loading'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import type { User as UserType } from '@/types'
+import { DEFAULT_APPEARANCE } from '@/types'
+import { NotificationHistorySection } from '@/components/notifications/NotificationHistorySection'
+import { AppearanceSection } from '@/components/profile/AppearanceSection'
+import { useAppearance } from '@/hooks/useAppearance'
+import { prewarmAudio } from '@/lib/tonePlayer'
 
 const CURRENCIES = [
   { value: 'INR', label: '₹ INR — Indian Rupee'        },
@@ -65,6 +70,7 @@ type PushStatus = 'checking' | 'unsupported' | 'denied' | 'subscribed' | 'unsubs
 export function ProfileClient() {
   const router = useRouter()
   const { success, error: toastError } = useToast()
+  const { applyAppearance, setTimezone } = useAppearance()
 
   const [user,         setUser]        = useState<UserType | null>(null)
   const [loading,      setLoading]     = useState(true)
@@ -77,6 +83,9 @@ export function ProfileClient() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleting,     setDeleting]    = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deletePassword,    setDeletePassword]    = useState('')
+  const [showDeletePw,      setShowDeletePw]      = useState(false)
+  const [deleteError,       setDeleteError]       = useState<string | null>(null)
 
   // ── Notifications section open/closed state (persisted) ───────────────────
   const [notifOpen, setNotifOpen] = useState<boolean>(() => {
@@ -97,6 +106,25 @@ export function ProfileClient() {
     })
   }
 
+  // ── Notification history section open/closed state (persisted) ───────────
+  const [historyOpen, setHistoryOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      const stored = window.localStorage.getItem('lf_notif_history_open')
+      return stored === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  function toggleHistorySection() {
+    setHistoryOpen((prev) => {
+      const next = !prev
+      try { window.localStorage.setItem('lf_notif_history_open', String(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
+
   // ── Push notification state ───────────────────────────────────────────────
   const [pushStatus,  setPushStatus]  = useState<PushStatus>('checking')
   const [pushLoading, setPushLoading] = useState(false)
@@ -112,9 +140,19 @@ export function ProfileClient() {
       const data = await res.json()
       setUser(data.user)
       setProfileForm({ name: data.user.name, currency: data.user.currency, timezone: data.user.timezone })
+
+      // Sync server-stored appearance prefs into ThemeProvider (canonical source).
+      // This ensures the theme persists correctly after logout/login even if
+      // localStorage was cleared.
+      const serverPrefs = data.user.appearancePreferences ?? DEFAULT_APPEARANCE
+      applyAppearance(serverPrefs)
+      // Update timezone in ThemeProvider for correct Night Shift scheduling.
+      setTimezone(data.user.timezone ?? 'Asia/Kolkata')
+      // Pre-warm the AudioContext now that we have a confirmed user interaction.
+      prewarmAudio()
     } catch { toastError('Failed to load profile') }
     finally   { setLoading(false) }
-  }, [toastError])
+  }, [toastError, applyAppearance, setTimezone])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void fetchUser() }, [fetchUser])
@@ -297,12 +335,37 @@ export function ProfileClient() {
   }
 
   async function handleDeleteAccount() {
+    setDeleteError(null)
+    if (deleteConfirmText.trim() !== 'Delete my LifeFlow account') {
+      setDeleteError('Please type the confirmation phrase exactly as shown.')
+      return
+    }
+    if (!deletePassword) {
+      setDeleteError('Please enter your current password.')
+      return
+    }
     setDeleting(true)
     try {
-      const res = await fetch('/api/auth/me', { method: 'DELETE' })
-      if (!res.ok) throw new Error()
+      const res = await fetch('/api/auth/delete-account', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          password:      deletePassword,
+          confirmPhrase: deleteConfirmText.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setDeleteError(data.error ?? 'Failed to delete account. Please try again.')
+        return
+      }
+      // Session destroyed server-side — navigate to login
       router.push('/login')
-    } catch { toastError('Failed to delete account'); setDeleting(false) }
+    } catch {
+      setDeleteError('Network error. Please try again.')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   async function saveNotifPrefs(prefs: {
@@ -415,7 +478,7 @@ export function ProfileClient() {
       className="px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-4 max-w-2xl mx-auto"
     >
       {/* ── Profile hero ── */}
-      <motion.div variants={fadeUp} className="glass-elevated rounded-2xl p-6 flex items-center gap-5 relative overflow-hidden">
+      <motion.div variants={fadeUp} className="glass-elevated glass-catchlight rounded-2xl p-6 flex items-center gap-5 relative overflow-hidden">
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent pointer-events-none" />
         <div className="absolute -top-8 -right-8 w-32 h-32 bg-indigo-500/08 rounded-full blur-2xl pointer-events-none" />
         <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-500/15 border border-indigo-500/25 flex items-center justify-center text-[22px] font-bold text-indigo-600 flex-shrink-0 shadow-[0_4px_16px_rgba(99,102,241,0.15)]">
@@ -435,7 +498,7 @@ export function ProfileClient() {
       {/* ── LifeFlow ID ── */}
       <LifeFlowIdSection publicId={user.publicId} variants={fadeUp} />
 
-      {/* ── Account ── */}
+      {/* ── Account section ── */}
       <ProfileSection title="Account" icon={<User size={14} />} variants={fadeUp}>
         <div className="flex flex-col gap-4">
           <GlassInput label="Full Name" value={profileForm.name} onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))} leftIcon={<User size={13} />} />
@@ -451,6 +514,34 @@ export function ProfileClient() {
           <div className="flex justify-end">
             <GlassButton variant="primary" onClick={saveProfile} loading={savingProfile}>
               <Save size={13} /> Save Changes
+            </GlassButton>
+          </div>
+        </div>
+
+        {/* ── Account status (lifecycle) ─────────────────────────────────── */}
+        <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
+                Account status
+              </p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ background: (user.accountStatus ?? 'active') === 'active' ? '#10b981' : '#ef4444' }}
+                />
+                <span className="text-[12px] font-medium capitalize"
+                  style={{ color: (user.accountStatus ?? 'active') === 'active' ? '#059669' : '#dc2626' }}>
+                  {(user.accountStatus ?? 'active') === 'active' ? 'Active' : 'Scheduled for deletion'}
+                </span>
+              </div>
+            </div>
+            <GlassButton
+              variant="danger"
+              size="sm"
+              onClick={() => { setDeleteConfirmText(''); setDeletePassword(''); setDeleteError(null); setDeleteModalOpen(true) }}
+            >
+              <Trash2 size={12} /> Delete Account
             </GlassButton>
           </div>
         </div>
@@ -621,6 +712,27 @@ export function ProfileClient() {
         </div>
       </CollapsibleNotifications>
 
+      {/* ── Notification History (collapsible) ── */}
+      <CollapsibleSection
+        title="Notification History"
+        icon={<History size={14} />}
+        isOpen={historyOpen}
+        onToggle={toggleHistorySection}
+        variants={fadeUp}
+      >
+        <NotificationHistorySection
+          userEmail={user.email}
+          timezone={user.timezone ?? 'Asia/Kolkata'}
+        />
+      </CollapsibleSection>
+
+      {/* ── Appearance & Experience ── */}
+      <AppearanceSection
+        initialPrefs={user.appearancePreferences ?? DEFAULT_APPEARANCE}
+        timezone={user.timezone ?? 'Asia/Kolkata'}
+        variants={fadeUp}
+      />
+
       {/* ── Security ── */}
       <ProfileSection title="Security" icon={<Shield size={14} />} variants={fadeUp}>
         <div className="flex flex-col gap-3">
@@ -642,19 +754,6 @@ export function ProfileClient() {
               {action}
             </div>
           ))}
-        </div>
-      </ProfileSection>
-
-      {/* ── Danger zone ── */}
-      <ProfileSection title="Danger Zone" icon={<Trash2 size={14} className="text-red-500" />} danger variants={fadeUp}>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>Delete Account</p>
-            <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Permanently delete your account and all data</p>
-          </div>
-          <GlassButton variant="danger" size="sm" onClick={() => { setDeleteConfirmText(''); setDeleteModalOpen(true) }}>
-            <Trash2 size={12} /> Delete
-          </GlassButton>
         </div>
       </ProfileSection>
 
@@ -687,28 +786,84 @@ export function ProfileClient() {
       </Modal>
 
       {/* Delete account modal */}
-      <Modal isOpen={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Delete Account" size="sm">
+      <Modal isOpen={deleteModalOpen} onClose={() => !deleting && setDeleteModalOpen(false)} title="Delete Account" size="sm">
         <div className="flex flex-col gap-4">
-          <div className="glass-subtle rounded-xl p-3.5 border border-red-500/15">
-            <p className="text-[13px] text-red-500 font-semibold mb-1">⚠️ This action is irreversible</p>
-            <p className="text-[12px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-              All your notes, tasks, habits, expenses, and data will be permanently deleted.
+          {/* Warning */}
+          <div className="glass-subtle rounded-xl p-3.5 border border-amber-500/20"
+               style={{ background: 'rgba(255,248,230,0.70)' }}>
+            <p className="text-[13px] font-semibold mb-1" style={{ color: '#92400e' }}>
+              ⚠️ 30-day recovery window
+            </p>
+            <p className="text-[12px] leading-relaxed" style={{ color: '#78350f' }}>
+              Your account will be deactivated immediately. You will have{' '}
+              <strong>30 days</strong> to restore it. After that, your account and
+              all associated data will be permanently deleted.
             </p>
           </div>
+
+          {/* Password */}
+          <GlassInput
+            label="Current password"
+            type={showDeletePw ? 'text' : 'password'}
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+            leftIcon={<Lock size={13} />}
+            rightIcon={
+              <button
+                type="button"
+                onClick={() => setShowDeletePw((v) => !v)}
+                className="hover:opacity-70 transition-opacity"
+                style={{ color: 'var(--text-muted)' }}
+                aria-label={showDeletePw ? 'Hide password' : 'Show password'}
+              >
+                {showDeletePw ? <EyeOff size={13} /> : <Eye size={13} />}
+              </button>
+            }
+            placeholder="Enter your password"
+          />
+
+          {/* Confirmation phrase */}
           <div>
-            <label className="text-[12px] block mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              Type <span className="font-mono text-red-500">DELETE</span> to confirm
+            <label className="text-[12px] block mb-1.5 font-semibold uppercase tracking-wide"
+                   style={{ color: 'var(--text-muted)' }}>
+              Type to confirm
             </label>
+            <p className="text-[11px] mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+              Type{' '}
+              <span className="font-mono font-semibold text-red-500 select-all">
+                Delete my LifeFlow account
+              </span>
+            </p>
             <input
               className="glass-input w-full rounded-xl px-3.5 py-2.5 text-sm"
               value={deleteConfirmText}
-              onChange={(e) => setDeleteConfirmText(e.target.value)}
-              placeholder="DELETE"
+              onChange={(e) => { setDeleteConfirmText(e.target.value); setDeleteError(null) }}
+              placeholder="Delete my LifeFlow account"
+              autoComplete="off"
             />
           </div>
-          <div className="flex gap-2 justify-end">
-            <GlassButton variant="secondary" onClick={() => setDeleteModalOpen(false)}>Cancel</GlassButton>
-            <GlassButton variant="danger" onClick={handleDeleteAccount} loading={deleting} disabled={deleteConfirmText !== 'DELETE'}>Delete Account</GlassButton>
+
+          {/* Error */}
+          {deleteError && (
+            <p className="text-[12px] text-red-500 -mt-1">{deleteError}</p>
+          )}
+
+          <div className="flex gap-2 justify-end pt-1">
+            <GlassButton variant="secondary" onClick={() => setDeleteModalOpen(false)} disabled={deleting}>
+              Cancel
+            </GlassButton>
+            <GlassButton
+              variant="danger"
+              onClick={handleDeleteAccount}
+              loading={deleting}
+              disabled={
+                deleteConfirmText.trim() !== 'Delete my LifeFlow account' ||
+                !deletePassword ||
+                deleting
+              }
+            >
+              Delete Account
+            </GlassButton>
           </div>
         </div>
       </Modal>
@@ -749,7 +904,7 @@ function CollapsibleNotifications({
   return (
     <motion.div
       variants={variants}
-      className="glass rounded-2xl overflow-hidden"
+      className="glass-elevated rounded-2xl overflow-hidden"
     >
       {/* ── Header row — always visible ── */}
       <button
@@ -761,11 +916,10 @@ function CollapsibleNotifications({
         className={cn(
           'w-full flex items-center gap-2 px-5 py-[18px] text-left',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-inset',
-          'transition-colors hover:bg-black/[0.02] active:bg-black/[0.04]',
-          // When open, add the same bottom border that ProfileSection uses
+          'transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.03] active:bg-black/[0.04]',
           isOpen && 'border-b'
         )}
-        style={isOpen ? { borderColor: 'rgba(0,0,0,0.07)' } : {}}
+        style={isOpen ? { borderColor: 'var(--border)' } : {}}
       >
         <span style={{ color: 'var(--text-muted)' }}>
           <Bell size={14} />
@@ -809,6 +963,85 @@ function CollapsibleNotifications({
   )
 }
 
+/* ── CollapsibleSection — generic collapsible section ───────────────────────── */
+/**
+ * A generic collapsible section that mirrors CollapsibleNotifications but
+ * accepts a custom title and icon so it can be reused for Notification History
+ * and future sections without code duplication.
+ */
+function CollapsibleSection({
+  title,
+  icon,
+  isOpen,
+  onToggle,
+  children,
+  variants,
+}: {
+  title:    string
+  icon:     React.ReactNode
+  isOpen:   boolean
+  onToggle: () => void
+  children: React.ReactNode
+  variants?: import('framer-motion').Variants
+}) {
+  const panelId  = useId()
+  const headerId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  return (
+    <motion.div variants={variants} className="glass-elevated rounded-2xl overflow-hidden">
+      <button
+        type="button"
+        id={headerId}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        onClick={onToggle}
+        className={cn(
+          'w-full flex items-center gap-2 px-5 py-[18px] text-left',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-inset',
+          'transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.03] active:bg-black/[0.04]',
+          isOpen && 'border-b'
+        )}
+        style={isOpen ? { borderColor: 'var(--border)' } : {}}
+      >
+        <span style={{ color: 'var(--text-muted)' }}>{icon}</span>
+        <h3 className="text-[13px] font-semibold flex-1" style={{ color: 'var(--text-secondary)' }}>
+          {title}
+        </h3>
+        <motion.span
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+          style={{ color: 'var(--text-faint)', display: 'flex', alignItems: 'center' }}
+          aria-hidden="true"
+        >
+          <ChevronDown size={14} />
+        </motion.span>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            key="section-panel"
+            id={panelId}
+            role="region"
+            aria-labelledby={headerId}
+            ref={panelRef}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="px-5 pt-4 pb-5">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  )
+}
+
 /* ── LifeFlow ID ─────────────────────────────────────────────────────────────── */
 function LifeFlowIdSection({ publicId, variants }: { publicId: string; variants?: import('framer-motion').Variants }) {
   const [copied, setCopied] = useState(false)
@@ -832,10 +1065,10 @@ function LifeFlowIdSection({ publicId, variants }: { publicId: string; variants?
   }
 
   return (
-    <motion.div variants={variants} className="glass rounded-2xl p-5">
+    <motion.div variants={variants} className="glass-elevated rounded-2xl p-5">
       <div
         className="flex items-center gap-2 mb-4 pb-3"
-        style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+        style={{ borderBottom: '1px solid var(--border)' }}
       >
         <Fingerprint size={14} style={{ color: 'var(--text-muted)' }} />
         <h3 className="text-[13px] font-semibold" style={{ color: 'var(--text-secondary)' }}>
@@ -862,9 +1095,9 @@ function LifeFlowIdSection({ publicId, variants }: { publicId: string; variants?
             'flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium transition-all shrink-0',
             copied
               ? 'bg-emerald-500/12 border border-emerald-500/25 text-emerald-600'
-              : 'glass border border-black/[0.08] hover:bg-black/[0.04]'
+              : 'glass-subtle border hover:shadow-[var(--glass-hover-shadow)] transition-all duration-200'
           )}
-          style={!copied ? { color: 'var(--text-secondary)' } : {}}
+          style={!copied ? { borderColor: 'var(--border-strong)', color: 'var(--text-secondary)' } : {}}
           aria-label="Copy LifeFlow ID to clipboard"
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -882,7 +1115,7 @@ function ProfileSection({ title, icon, children, danger, variants }: {
   return (
     <motion.div
       variants={variants}
-      className={cn('glass rounded-2xl p-5', danger && 'border-red-500/12')}
+      className={cn('glass-elevated rounded-2xl p-5', danger && 'border-red-500/12')}
     >
       <div
         className="flex items-center gap-2 mb-4 pb-3"

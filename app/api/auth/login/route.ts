@@ -55,6 +55,40 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ── Soft-deleted account gate ────────────────────────────────────────────
+    // IMPORTANT: We check this AFTER password verification so we do NOT leak
+    // whether a given email has a deleted account to unauthenticated callers.
+    // An attacker who doesn't know the password gets a generic 401 and never
+    // reaches this branch.  Only the real account owner (who knows the correct
+    // password) sees the recovery screen.
+    if ((user.accountStatus ?? 'active') === 'deleted') {
+      const now = new Date()
+      const scheduledDeletion = user.scheduledPermanentDeletionAt
+
+      // If somehow the cleanup job hasn't run yet and we're past the window,
+      // treat the account as gone (avoids showing a "restore" option that would
+      // immediately fail on the restore endpoint).
+      if (!scheduledDeletion || now >= scheduledDeletion) {
+        return NextResponse.json(
+          { error: 'No account found with that email.', code: 'ACCOUNT_NOT_FOUND' },
+          { status: 404 }
+        )
+      }
+
+      logger.info('[login] Deleted account login attempt — showing recovery screen', {
+        userId: user._id.toString(),
+      })
+
+      return NextResponse.json(
+        {
+          code: 'ACCOUNT_DELETED',
+          deletedAt:                    user.deletedAt?.toISOString() ?? null,
+          scheduledPermanentDeletionAt: scheduledDeletion.toISOString(),
+        },
+        { status: 403 }
+      )
+    }
+
     // ── Email verification gate ──────────────────────────────────────────────
     // Existing users created before this feature was added will have
     // emailVerified=false (the Mongoose default). We treat any user whose

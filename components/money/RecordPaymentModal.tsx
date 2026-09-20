@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Check, IndianRupee, AlertCircle } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassTextarea } from '@/components/ui/GlassInput'
+import { SmartAmountInput } from '@/components/ui/SmartAmountInput'
+import { parseAmountExpression } from '@/lib/amountParser'
 import { useToast } from '@/components/ui/Toast'
 import { formatPaiseDisplay } from './types'
 import type { MoneyRecordData, MoneyPaymentData } from './types'
@@ -63,7 +65,8 @@ export function RecordPaymentModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const rupees = parseFloat(amount)
+    const parsed = parseAmountExpression(amount)
+    const rupees = parsed.value
     if (!rupees || rupees <= 0) {
       setValidationError('Please enter a valid amount.')
       return
@@ -159,14 +162,8 @@ export function RecordPaymentModal({
 
           {/* Sheet */}
           <motion.div
-            className="relative w-full sm:max-w-md rounded-t-[28px] sm:rounded-2xl overflow-hidden"
-            style={{
-              background: 'rgba(255,255,255,0.97)',
-              backdropFilter: 'blur(36px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-              border: '1px solid rgba(0,0,0,0.08)',
-              boxShadow: '0 16px 60px rgba(0,0,0,0.14)',
-            }}
+            className="glass-floating relative w-full sm:max-w-md rounded-t-[28px] sm:rounded-2xl overflow-hidden"
+            style={{ boxShadow: 'var(--glass-shadow-xl)' }}
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 32 }}
@@ -174,13 +171,13 @@ export function RecordPaymentModal({
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-9 h-1 rounded-full" style={{ background: 'rgba(0,0,0,0.12)' }} />
+              <div className="w-9 h-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
             </div>
 
             {/* Header */}
             <div
               className="flex items-center justify-between px-5 pt-4 sm:pt-5 pb-4"
-              style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}
+              style={{ borderBottom: '1px solid var(--border)' }}
             >
               <div>
                 <h2 className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -192,7 +189,7 @@ export function RecordPaymentModal({
               </div>
               <button
                 onClick={handleClose}
-                className="p-1.5 rounded-xl hover:bg-black/[0.05] transition-colors"
+                className="nav-hover p-1.5 rounded-xl transition-colors"
                 style={{ color: 'var(--text-muted)' }}
                 aria-label="Close"
               >
@@ -220,33 +217,15 @@ export function RecordPaymentModal({
               </div>
 
               {/* Amount */}
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-                  Amount
-                </label>
-                <div className="relative">
-                  <span
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    ₹
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    step="0.01"
-                    max={maxRupees}
-                    value={amount}
-                    onChange={(e) => { setAmount(e.target.value); setValidationError(null) }}
-                    placeholder="0.00"
-                    autoFocus
-                    required
-                    className="glass-input w-full rounded-xl text-sm pl-8 pr-3.5 py-3 text-base font-semibold"
-                    style={{ color: 'var(--text-primary)' }}
-                  />
-                </div>
-              </div>
+              <SmartAmountInput
+                label="Amount"
+                value={amount}
+                onChange={(raw) => { setAmount(raw); setValidationError(null) }}
+                currency={record.currency ?? 'INR'}
+                maxValue={maxRupees}
+                autoFocus
+                required
+              />
 
               <GlassInput
                 label="Payment Date"
@@ -292,7 +271,7 @@ export function RecordPaymentModal({
                 variant="primary"
                 fullWidth
                 loading={saving}
-                disabled={!amount || parseFloat(amount) <= 0}
+                disabled={!amount || (parseAmountExpression(amount).value ?? 0) <= 0}
               >
                 <Check size={14} />
                 {isEdit ? 'Update Payment' : 'Record Payment'}

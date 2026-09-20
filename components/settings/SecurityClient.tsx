@@ -380,7 +380,7 @@ export function SecurityClient() {
             {qrCodeDataUrl ? (
               <div className="flex justify-center mb-5">
                 <div className="rounded-2xl overflow-hidden p-3"
-                  style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.10)' }}>
+                  style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={qrCodeDataUrl} alt="2FA QR code" width={200} height={200}
                     className="block" />
@@ -389,7 +389,7 @@ export function SecurityClient() {
             ) : (
               <div className="flex justify-center mb-5">
                 <div className="w-[200px] h-[200px] rounded-2xl flex items-center justify-center"
-                  style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.08)' }}>
+                  style={{ background: 'var(--glass-subtle-bg)', border: '1px solid var(--border)' }}>
                   <p className="text-[12px] text-center px-4" style={{ color: 'var(--text-muted)' }}>
                     QR code unavailable — use the manual key below.
                   </p>
@@ -404,8 +404,8 @@ export function SecurityClient() {
               </p>
               <div className="flex items-center gap-2 rounded-xl px-3 py-2.5"
                 style={{
-                  background: 'rgba(0,0,0,0.04)',
-                  border: '1px solid rgba(0,0,0,0.10)',
+                  background: 'var(--glass-subtle-bg)',
+                  border: '1px solid var(--border)',
                   fontFamily: 'monospace',
                 }}>
                 <span className="flex-1 text-[13px] break-all select-all"
@@ -482,8 +482,8 @@ export function SecurityClient() {
                 <div key={i}
                   className="rounded-xl px-3 py-2 text-center font-mono text-[13px] select-all"
                   style={{
-                    background: 'rgba(0,0,0,0.04)',
-                    border: '1px solid rgba(0,0,0,0.08)',
+                    background: 'var(--glass-subtle-bg)',
+                    border: '1px solid var(--border)',
                     color: 'var(--text-primary)',
                     letterSpacing: '0.08em',
                   }}>
@@ -656,15 +656,7 @@ export function SecurityClient() {
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="rounded-2xl p-5"
-      style={{
-        background: 'rgba(255,255,255,0.72)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(0,0,0,0.07)',
-        boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-      }}
-    >
+    <div className="glass rounded-2xl p-5">
       {children}
     </div>
   )
@@ -679,7 +671,7 @@ function PanelCard({ children }: { children: React.ReactNode }) {
       transition={{ duration: 0.2 }}
       className="rounded-2xl p-5"
       style={{
-        background: 'rgba(255,255,255,0.72)',
+        background: 'var(--glass-regular-bg)',
         backdropFilter: 'blur(20px)',
         border: '1px solid rgba(37,99,235,0.18)',
         boxShadow: '0 2px 12px rgba(37,99,235,0.08)',

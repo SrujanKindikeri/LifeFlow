@@ -69,15 +69,17 @@ export async function GET() {
 
     for (const r of records) {
       const payments = paymentMap.get(r._id.toString()) ?? []
+      const rec = r as unknown as IMoneyRecord
       const balance = calcBalance(
-        (r as unknown as IMoneyRecord).originalAmountMinor,
+        rec.originalAmountMinor,
+        rec.additionalAmounts ?? [],
         payments.map((p) => p.amountMinor)
       )
 
-      const personName = (r as unknown as IMoneyRecord).person.name
+      const personName = rec.person.name
 
-      if ((r as unknown as IMoneyRecord).direction === 'given') {
-        givenTotalMinor    += balance.originalMinor
+      if (rec.direction === 'given') {
+        givenTotalMinor    += balance.totalMinor
         givenReceivedMinor += balance.paidMinor
         toCollectMinor     += balance.remainingMinor
 
@@ -86,7 +88,7 @@ export async function GET() {
         }
         personMap.get(personName)!.owesYouMinor += balance.remainingMinor
       } else {
-        borrowedTotalMinor  += balance.originalMinor
+        borrowedTotalMinor  += balance.totalMinor
         borrowedRepaidMinor += balance.paidMinor
         toPayMinor          += balance.remainingMinor
 

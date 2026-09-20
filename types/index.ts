@@ -1,5 +1,25 @@
 // Serialized versions of the Mongoose models (safe to pass to client components)
 
+export type AppTheme = 'light' | 'dark' | 'system'
+
+export interface AppearancePreferences {
+  theme: AppTheme
+  nightShiftEnabled: boolean
+  nightShiftStart: string  // "HH:MM" 24-hour format
+  nightShiftEnd: string    // "HH:MM" 24-hour format
+  turnToneEnabled: boolean
+  turnToneVolume: number   // 0–1
+}
+
+export const DEFAULT_APPEARANCE: AppearancePreferences = {
+  theme: 'light',
+  nightShiftEnabled: false,
+  nightShiftStart: '22:00',
+  nightShiftEnd: '07:00',
+  turnToneEnabled: true,
+  turnToneVolume: 0.5,
+}
+
 export interface User {
   _id: string
   publicId: string // LF-XXXXXXXX
@@ -35,6 +55,15 @@ export interface User {
   notificationsTested: boolean
   /** UTC ISO string when notificationsTested was set to true, or null. */
   notificationsTestedAt: string | null
+  /** Appearance & experience preferences — always present with safe defaults. */
+  appearancePreferences: AppearancePreferences
+  // ── Account lifecycle (soft-delete) ─────────────────────────────────────
+  /** "active" = normal; "deleted" = within 30-day recovery window. */
+  accountStatus: 'active' | 'deleted'
+  /** ISO string of soft-deletion timestamp, or null for active accounts. */
+  deletedAt: string | null
+  /** ISO string of scheduled permanent-deletion date, or null. */
+  scheduledPermanentDeletionAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -187,6 +216,62 @@ export interface Notification {
   type: 'habit' | 'task' | 'expense' | 'general' | 'reminder'
   read: boolean
   createdAt: string
+}
+
+export type NotificationDeliveryStatus = 'pending' | 'processing' | 'sent_to_smtp' | 'failed'
+
+export type ScheduledNotificationType =
+  | 'TASK_TOMORROW'
+  | 'TASK_INCOMPLETE_TODAY'
+  | 'TASK_DUE_SOON'
+  | 'HABIT_TOMORROW'
+  | 'HABIT_REMINDER'
+  | 'SPENDING_ALERT'
+  | 'DAILY_SUMMARY'
+  | 'WEEKLY_SUMMARY'
+  | 'MORNING_BRIEF'
+
+/**
+ * A serialised NotificationLog entry returned by GET /api/notifications/history.
+ * Contains the full delivery lifecycle plus a snapshot of what was actually sent.
+ * Excludes errorMessage (too sensitive for normal users) and all server secrets.
+ */
+export interface NotificationHistoryEntry {
+  _id: string
+  type: ScheduledNotificationType
+  /** Human-readable label, e.g. "Morning Daily Brief" */
+  typeLabel: string
+  /** ISO string of when this notification was scheduled to fire (user's local time → UTC) */
+  scheduledAt: string
+  /** ISO string of when it was handed to SMTP. Null if not yet sent. */
+  sentAt: string | null
+  status: NotificationDeliveryStatus
+  /** Short preview text, ≤200 chars */
+  contentPreview: string
+  /** The email subject that was sent. Null for pre-history records. */
+  emailSubject: string | null
+  /**
+   * Plain-text snapshot of the email body at send time (≤2000 chars).
+   * Used to display "what was sent" in the detail view without re-generating.
+   * Null for pre-history records or non-email notifications.
+   */
+  emailBodySnapshot: string | null
+  /** Logical calendar date this notification applies to (YYYY-MM-DD) */
+  forDate: string
+  /** ISO string of when the log record was created */
+  createdAt: string
+}
+
+export interface NotificationHistoryPage {
+  history: NotificationHistoryEntry[]
+  /** Total matching records across all pages */
+  total: number
+  /** Current page (1-indexed) */
+  page: number
+  /** Records per page */
+  limit: number
+  /** Whether there are more pages */
+  hasMore: boolean
 }
 
 // ─── Group Bill types ─────────────────────────────────────────────────────────

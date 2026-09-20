@@ -13,7 +13,7 @@ import { GlassButton } from '@/components/ui/GlassButton'
 import { useToast } from '@/components/ui/Toast'
 
 // ── Step types ─────────────────────────────────────────────────────────────────
-type Step = 'credentials' | 'email-not-verified' | '2fa'
+type Step = 'credentials' | 'email-not-verified' | '2fa' | 'account-deleted'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -25,6 +25,13 @@ export default function LoginPage() {
 
   // Stored from credentials step, used in email-not-verified step
   const [unverifiedEmail, setUnverifiedEmail] = useState('')
+
+  // Account-deleted recovery state
+  const [recoveryEmail,    setRecoveryEmail]    = useState('')
+  const [recoveryPassword, setRecoveryPassword] = useState('')
+  const [deletedAt,        setDeletedAt]        = useState<string | null>(null)
+  const [permanentAt,      setPermanentAt]      = useState<string | null>(null)
+  const [restoring,        setRestoring]        = useState(false)
 
   // 2FA state
   const [totpCode, setTotpCode]           = useState('')
@@ -62,6 +69,16 @@ export default function LoginPage() {
         if (json.code === 'EMAIL_NOT_VERIFIED') {
           setUnverifiedEmail(data.email.toLowerCase())
           setStep('email-not-verified')
+          return
+        }
+        if (json.code === 'ACCOUNT_DELETED') {
+          // Account is in the 30-day recovery window — show restore screen.
+          // We store the email+password so the user can restore without re-typing.
+          setRecoveryEmail(data.email.toLowerCase())
+          setRecoveryPassword(data.password)
+          setDeletedAt(json.deletedAt ?? null)
+          setPermanentAt(json.scheduledPermanentDeletionAt ?? null)
+          setStep('account-deleted')
           return
         }
         if (res.status === 429) {
@@ -161,6 +178,41 @@ export default function LoginPage() {
     }
   }
 
+  // ── Restore deleted account ────────────────────────────────────────────────
+  async function handleRestore() {
+    if (restoring) return
+    setRestoring(true)
+    try {
+      const res  = await fetch('/api/auth/restore-account', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: recoveryEmail, password: recoveryPassword }),
+      })
+      const json = await res.json()
+
+      if (!res.ok) {
+        if (res.status === 403 && json.code === 'RECOVERY_WINDOW_EXPIRED') {
+          error('The 30-day recovery window has expired. This account can no longer be restored.')
+          setStep('credentials')
+          return
+        }
+        if (res.status === 429) {
+          error(json.error ?? 'Too many attempts. Please try again later.')
+          return
+        }
+        error(json.error ?? 'Unable to restore account. Please try again.')
+        return
+      }
+
+      success('Your account has been restored. Welcome back!')
+      window.location.assign('/app/dashboard')
+    } catch {
+      error('Something went wrong. Please try again.')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   // ── Card wrapper ───────────────────────────────────────────────────────────
   return (
     <motion.div
@@ -170,14 +222,8 @@ export default function LoginPage() {
       className="w-full max-w-[400px]"
     >
       <div
-        className="relative rounded-[28px] overflow-hidden"
-        style={{
-          background: 'rgba(255,255,255,0.88)',
-          backdropFilter: 'blur(36px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(36px) saturate(1.8)',
-          border: '1px solid rgba(0,0,0,0.08)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)',
-        }}
+        className="glass-floating glass-catchlight relative rounded-[28px] overflow-hidden"
+        style={{ boxShadow: 'var(--glass-shadow-lg)' }}
       >
         <div className="absolute inset-x-0 top-0 h-px pointer-events-none"
           style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent)' }} />
@@ -345,6 +391,109 @@ export default function LoginPage() {
                   Back to Sign In
                 </GlassButton>
               </div>
+            </motion.div>
+          )}
+
+          {/* ── Account deleted / recovery step ──────────────────────────── */}
+          {step === 'account-deleted' && (
+            <motion.div
+              key="account-deleted"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ duration: 0.2 }}
+              className="p-8"
+            >
+              <div className="flex flex-col items-center mb-7">
+                <motion.div
+                  initial={{ scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1,   opacity: 1 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 400, damping: 20 }}
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5 text-[26px]"
+                  style={{
+                    background: 'rgba(239,68,68,0.08)',
+                    border: '1px solid rgba(239,68,68,0.20)',
+                  }}
+                >
+                  🗑️
+                </motion.div>
+                <h1 className="text-[20px] font-bold tracking-tight text-center mb-2"
+                  style={{ color: 'var(--text-primary)' }}>
+                  Account scheduled for deletion
+                </h1>
+                <p className="text-[13px] text-center" style={{ color: 'var(--text-muted)' }}>
+                  Your LifeFlow account is in the 30-day recovery window.
+                  You can restore it and keep all your data.
+                </p>
+              </div>
+
+              {/* Timeline info box */}
+              {(deletedAt || permanentAt) && (
+                <div className="rounded-xl mb-5 overflow-hidden"
+                  style={{
+                    background: 'rgba(254,252,232,0.8)',
+                    border: '1px solid rgba(234,179,8,0.30)',
+                  }}>
+                  <div className="px-4 py-3 flex flex-col gap-2">
+                    {deletedAt && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-[12px] font-semibold" style={{ color: '#92400e' }}>
+                          Account deleted
+                        </span>
+                        <span className="text-[12px]" style={{ color: '#78350f' }}>
+                          {new Date(deletedAt).toLocaleDateString('en-US', {
+                            year: 'numeric', month: 'long', day: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {permanentAt && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-[12px] font-semibold" style={{ color: '#92400e' }}>
+                          Permanent deletion
+                        </span>
+                        <span className="text-[12px] font-semibold" style={{ color: '#b91c1c' }}>
+                          {new Date(permanentAt).toLocaleDateString('en-US', {
+                            year: 'numeric', month: 'long', day: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <GlassButton
+                  variant="primary"
+                  fullWidth
+                  size="lg"
+                  loading={restoring}
+                  onClick={handleRestore}
+                >
+                  Restore My Account
+                </GlassButton>
+
+                <GlassButton
+                  variant="ghost"
+                  fullWidth
+                  size="md"
+                  onClick={() => {
+                    setStep('credentials')
+                    setRecoveryEmail('')
+                    setRecoveryPassword('')
+                  }}
+                  disabled={restoring}
+                >
+                  Back to Sign In
+                </GlassButton>
+              </div>
+
+              <p className="text-[11px] text-center mt-5 leading-relaxed"
+                style={{ color: 'var(--text-faint)' }}>
+                After the permanent deletion date, your account and all data
+                will be irreversibly deleted and cannot be recovered.
+              </p>
             </motion.div>
           )}
 

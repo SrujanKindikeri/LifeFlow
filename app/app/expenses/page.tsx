@@ -8,7 +8,7 @@ export default async function ExpensesPage() {
     await requireAuth()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    redirect(msg === 'UserNotFound' ? '/api/auth/clear-session' : '/login')
+    redirect((msg === 'UserNotFound' || msg === 'AccountDeleted') ? '/api/auth/clear-session' : '/login')
   }
 
   return (
