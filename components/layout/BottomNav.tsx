@@ -191,13 +191,25 @@ export function BottomNav() {
             <div
               className="overflow-y-auto overscroll-contain"
               style={{
+                /*
+                  flex: none — do NOT grow to fill the panel's maxHeight.
+                  The panel is height: auto (no explicit height set), so it
+                  shrink-wraps its content. flex: 1 would force the scroll
+                  container — and therefore the panel — to expand to maxHeight
+                  even when there is nothing to fill, creating blank space.
+                  Only apply max-height + overflow-y on the panel itself so
+                  small screens can still scroll the list.
+                */
+                flex: 'none',
                 WebkitOverflowScrolling: 'touch',
-                /* Thin scrollbar on platforms that show them */
                 scrollbarWidth: 'thin',
               }}
             >
-              {/* Nav items */}
-              <div className="py-1.5 px-1.5">
+              {/* Nav items
+                  py-1 = 4px top/bottom panel breathing room.
+                  flex flex-col ensures children stack as a column with no
+                  implicit inline-block gaps — critical for <a> elements. */}
+              <div className="flex flex-col py-1 px-1.5">
                 {moreNav.map((item) => {
                   const isActive = pathname === item.href
                   return (
@@ -211,19 +223,33 @@ export function BottomNav() {
                         isActive ? 'nav-active-pill' : 'nav-hover'
                       )}
                       style={{
-                        height: 40,
+                        /* 36 px rows: comfortable tap target, no wasted space.
+                           height + minHeight together override any UA stylesheet
+                           or line-height inflation. */
+                        height: 36,
+                        minHeight: 36,
+                        lineHeight: 1,
                         color: isActive ? 'var(--accent-text)' : 'var(--text-secondary)',
                       }}
                       aria-current={isActive ? 'page' : undefined}
                     >
-                      <item.icon
-                        size={16}
+                      {/* Fixed-width icon column keeps all labels left-aligned */}
+                      <span
                         style={{
-                          color: isActive ? 'var(--accent)' : 'var(--text-muted)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 18,
+                          height: 18,
                           flexShrink: 0,
                         }}
                         aria-hidden="true"
-                      />
+                      >
+                        <item.icon
+                          size={16}
+                          style={{ color: isActive ? 'var(--accent)' : 'var(--text-muted)' }}
+                        />
+                      </span>
                       <span
                         className="flex-1 text-[13px] font-medium leading-none whitespace-nowrap"
                       >
@@ -234,27 +260,37 @@ export function BottomNav() {
                 })}
               </div>
 
-              {/* Separator before Logout */}
+              {/* Separator before Logout — flush with items, no extra margin */}
               <div
-                className="mx-3"
+                className="mx-3 my-0.5"
                 style={{ height: 1, background: 'var(--border)' }}
               />
 
-              {/* Logout */}
-              <div className="py-1.5 px-1.5">
+              {/* Logout — same compact row height as nav items */}
+              <div className="flex flex-col py-1 px-1.5">
                 <button
                   onClick={() => { setMoreOpen(false); void handleLogout() }}
                   className="nav-hover-danger flex items-center gap-2.5 px-3 rounded-xl w-full transition-colors"
                   style={{
-                    height: 40,
+                    height: 36,
+                    minHeight: 36,
+                    lineHeight: 1,
                     color: 'var(--danger)',
                   }}
                 >
-                  <LogOut
-                    size={16}
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 18,
+                      height: 18,
+                      flexShrink: 0,
+                    }}
                     aria-hidden="true"
-                    style={{ flexShrink: 0, color: 'var(--danger)' }}
-                  />
+                  >
+                    <LogOut size={16} style={{ color: 'var(--danger)' }} />
+                  </span>
                   <span className="text-[13px] font-medium leading-none whitespace-nowrap">
                     Logout
                   </span>

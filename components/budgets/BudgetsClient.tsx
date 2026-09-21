@@ -12,6 +12,7 @@ import { Modal, ConfirmDialog } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { EXPENSE_CATEGORIES } from '@/lib/utils'
 import { formatPaise } from '@/lib/moneyCalculator'
+import { BudgetSummaryBar } from '@/components/budgets/BudgetSummaryBar'
 
 interface Budget {
   _id: string; category: string; amountMinor: number; amount: number; currency: string
@@ -109,6 +110,10 @@ export function BudgetsClient() {
 
   const overCount = budgets.filter((b) => b.overBudget).length
 
+  // Totals for the summary bar — sum the pre-calculated paise values from the API
+  const totalBudgetMinor = budgets.reduce((sum, b) => sum + b.amountMinor, 0)
+  const totalSpentMinor  = budgets.reduce((sum, b) => sum + b.spentMinor, 0)
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -126,6 +131,13 @@ export function BudgetsClient() {
           className="glass-input rounded-xl text-sm px-3 py-1.5 min-w-0" />
       </GlassCard>
 
+      {/* Overall budget summary — always shown (shows zeros while loading) */}
+      <BudgetSummaryBar
+        totalBudgetMinor={totalBudgetMinor}
+        totalSpentMinor={totalSpentMinor}
+        loading={loading}
+      />
+
       {overCount > 0 && (
         <GlassCard padding="sm" className="flex items-center gap-3" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.15)' }}>
           <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
@@ -136,7 +148,16 @@ export function BudgetsClient() {
       )}
 
       {loading ? (
-        <div className="flex flex-col gap-3">{[1,2,3].map((i)=><div key={i} className="glass rounded-2xl h-24 animate-pulse" style={{background:'rgba(0,0,0,0.04)'}}/>)}</div>
+        /* Skeleton grid — mirrors the live card grid layout */
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="glass rounded-2xl h-28 animate-pulse"
+              style={{ background: 'rgba(0,0,0,0.04)' }}
+            />
+          ))}
+        </div>
       ) : budgets.length === 0 ? (
         <GlassCard className="flex flex-col items-center gap-3 py-16 text-center">
           <BarChart2 size={40} style={{ color: 'var(--text-faint)' }} />
@@ -145,31 +166,36 @@ export function BudgetsClient() {
           <GlassButton variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => { setEditing(null); setModalOpen(true) }}>Set Budget</GlassButton>
         </GlassCard>
       ) : (
-        <div className="flex flex-col gap-3">
+        /* Responsive grid: 1 col on mobile, 2 cols on sm+ */
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <AnimatePresence>
             {budgets.map((b) => {
               const catInfo = EXPENSE_CATEGORIES.find((c) => c.value === b.category)
               return (
-                <motion.div key={b._id} layout initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
-                  <GlassCard padding="md" className={b.overBudget ? 'ring-1 ring-red-400/30' : ''}>
+                <motion.div key={b._id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex">
+                  <GlassCard padding="md" className={`w-full flex flex-col${b.overBudget ? ' ring-1 ring-red-400/30' : ''}`}>
+                    {/* Header: icon + name + actions */}
                     <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xl">{catInfo?.emoji ?? '📦'}</span>
-                        <div>
-                          <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{catInfo?.label ?? b.category}</p>
-                          {b.status === 'paused' && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.06)', color: 'var(--text-muted)' }}>Paused</span>}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-xl shrink-0">{catInfo?.emoji ?? '📦'}</span>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>{catInfo?.label ?? b.category}</p>
+                          {b.status === 'paused' && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.06)', color: 'var(--text-muted)' }}>Paused</span>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => { setEditing(b); setModalOpen(true) }} className="p-1.5 rounded-lg hover:bg-black/[0.05]" style={{ color: 'var(--text-muted)' }}><Pencil size={12}/></button>
-                        <button onClick={() => togglePause(b)} className="p-1.5 rounded-lg hover:bg-black/[0.05]" style={{ color: 'var(--text-faint)' }}>
-                          {b.status==='active' ? '⏸' : '▶'}
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        <button onClick={() => { setEditing(b); setModalOpen(true) }} className="p-1.5 rounded-lg hover:bg-black/[0.05]" style={{ color: 'var(--text-muted)' }} aria-label="Edit budget"><Pencil size={12} /></button>
+                        <button onClick={() => togglePause(b)} className="p-1.5 rounded-lg hover:bg-black/[0.05]" style={{ color: 'var(--text-faint)' }} aria-label={b.status === 'active' ? 'Pause budget' : 'Resume budget'}>
+                          {b.status === 'active' ? '⏸' : '▶'}
                         </button>
-                        <button onClick={() => setDeleteTarget(b)} className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: 'var(--danger)' }}><Trash2 size={12}/></button>
+                        <button onClick={() => setDeleteTarget(b)} className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: 'var(--danger)' }} aria-label="Delete budget"><Trash2 size={12} /></button>
                       </div>
                     </div>
 
-                    <div>
+                    {/* Progress section — pushed to bottom via mt-auto */}
+                    <div className="mt-auto">
                       <div className="flex justify-between text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>
                         <span>Spent: {formatPaise(b.spentMinor)}</span>
                         {b.overBudget
