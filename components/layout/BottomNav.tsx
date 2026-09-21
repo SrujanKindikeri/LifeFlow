@@ -140,28 +140,18 @@ export function BottomNav() {
               zIndex: 50,
 
               /* ── Size ──
-                Width is responsive:
-                  - 320-359px phones:  ~240px
-                  - 360-389px phones:  ~260px
-                  - 390-413px phones:  ~270px
-                  - 414px+ phones:     ~280px
-                  - 600px+ tablets:    ~300px
-                  - 768px+ tablets:    ~310px
-                min() ensures it never exceeds the available viewport width
-                minus a safe margin (so it never bleeds off screen).
+                width: fit-content lets the panel shrink-wrap its widest row
+                (longest label = "Financial Review").
+                max-width caps it so it never bleeds off the screen on any
+                phone: 100vw - 24px leaves a 12px visual margin on each side.
+                min-width prevents it collapsing too narrow on 320px devices.
               */
-              width: 'min(clamp(240px, 68vw, 310px), calc(100vw - 24px))',
-
-              /*
-                Max-height: use the dvh unit so mobile browser chrome
-                (address/tab bar) is excluded. Leave room for the bottom
-                nav + safe area + the 8px gap + 16px top breathing room.
-              */
-              maxHeight: 'calc(100dvh - var(--bottomnav-total-height, 56px) - 32px)',
+              width: 'fit-content',
+              minWidth: 180,
+              maxWidth: 'calc(100vw - 24px)',
 
               /* ── Layout ── */
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'block',
               overflow: 'hidden',   /* clip children to rounded corners */
 
               /* ── Shape ── */
@@ -192,15 +182,12 @@ export function BottomNav() {
               className="overflow-y-auto overscroll-contain"
               style={{
                 /*
-                  flex: none — do NOT grow to fill the panel's maxHeight.
-                  The panel is height: auto (no explicit height set), so it
-                  shrink-wraps its content. flex: 1 would force the scroll
-                  container — and therefore the panel — to expand to maxHeight
-                  even when there is nothing to fill, creating blank space.
-                  Only apply max-height + overflow-y on the panel itself so
-                  small screens can still scroll the list.
+                  overflow-y: auto on the container ensures the list scrolls
+                  on very small screens rather than overflowing the panel.
+                  max-height matches the panel's maxHeight so the scroll
+                  activates only when content exceeds the available space.
                 */
-                flex: 'none',
+                maxHeight: 'calc(100dvh - var(--bottomnav-total-height, 56px) - 32px)',
                 WebkitOverflowScrolling: 'touch',
                 scrollbarWidth: 'thin',
               }}
@@ -251,7 +238,7 @@ export function BottomNav() {
                         />
                       </span>
                       <span
-                        className="flex-1 text-[13px] font-medium leading-none whitespace-nowrap"
+                        className="text-[13px] font-medium leading-none whitespace-nowrap"
                       >
                         {item.label}
                       </span>
