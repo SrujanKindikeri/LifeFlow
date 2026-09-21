@@ -456,7 +456,7 @@ export function TransactionAnalysisModal({
           onChange={(e) => setDescription(e.target.value)}
         />
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <GlassInput
             label="Date *"
             type="date"

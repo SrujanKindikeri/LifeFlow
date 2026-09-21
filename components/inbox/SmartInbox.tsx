@@ -219,14 +219,14 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
 
               {/* Detected type */}
               <div className="p-3 rounded-xl" style={{ background: `${TYPE_COLORS[parsed.type]}10`, border: `1px solid ${TYPE_COLORS[parsed.type]}22` }}>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2" style={{ color: TYPE_COLORS[parsed.type] }}>
                     {TYPE_ICONS[parsed.type]}
                     <span className="font-semibold text-sm">{TYPE_LABELS[parsed.type]}</span>
                   </div>
                   {parsed.confidence === 'low' && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.15)', color: '#b45309' }}>
-                      Low confidence — please verify
+                      Low confidence — verify
                     </span>
                   )}
                 </div>
@@ -254,7 +254,7 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 {(parsed.type === 'task') && (
                   <>
                     <GlassInput label="Title" value={String(fields.title ?? '')} onChange={(e) => setField('title', e.target.value)} />
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <GlassInput label="Due Date" type="date" value={String(fields.dueDate ?? '')} onChange={(e) => setField('dueDate', e.target.value)} />
                     </div>
                   </>
@@ -267,7 +267,7 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 )}
                 {parsed.type === 'expense' && (
                   <>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <SmartAmountInput
                         label="Amount (₹)"
                         value={String(fields.amountExpr ?? '')}
@@ -281,7 +281,7 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 )}
                 {(parsed.type === 'money_given' || parsed.type === 'money_borrowed') && (
                   <>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <GlassInput label="Person" value={String(fields.person ?? '')} onChange={(e) => setField('person', e.target.value)} />
                       <SmartAmountInput
                         label="Amount (₹)"
@@ -298,11 +298,12 @@ export function SmartInbox({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 )}
               </div>
 
-              <div className="flex gap-2.5 justify-end">
+              {/* Action row — wraps on very narrow screens (320px) */}
+              <div className="flex flex-wrap gap-2 justify-end">
                 <GlassButton variant="ghost" size="sm" icon={<X size={13}/>} onClick={reset}>Back</GlassButton>
-                <GlassButton variant="secondary" size="sm" icon={<Edit3 size={13}/>} onClick={reset}>Edit Input</GlassButton>
-                <GlassButton variant="primary" size="sm" loading={saving} onClick={confirm}>
-                  Create {TYPE_LABELS[parsed.type]}
+                <GlassButton variant="secondary" size="sm" icon={<Edit3 size={13}/>} onClick={reset}>Edit</GlassButton>
+                <GlassButton variant="primary" size="sm" loading={saving} onClick={confirm} className="flex-1 sm:flex-none min-w-0">
+                  <span className="truncate">Create {TYPE_LABELS[parsed.type]}</span>
                 </GlassButton>
               </div>
             </motion.div>

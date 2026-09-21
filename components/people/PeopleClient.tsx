@@ -86,7 +86,7 @@ function ManualForm({ onSave, onBack, onClose, loading }: ManualFormProps) {
         error={nameError}
         autoFocus
       />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput
           label="Phone"
           value={form.phone}
@@ -363,7 +363,7 @@ function EditForm({ initial, onSave, onClose, loading }: EditFormProps) {
       />
       {!isLifeFlow && (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <GlassInput label="Phone" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+91 …" />
             <GlassInput label="Email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="…@example.com" />
           </div>
@@ -580,7 +580,7 @@ export function PeopleClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>People</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>People</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Your financial contacts directory</p>
         </div>
         <GlassButton variant="primary" icon={<Plus size={15} />} onClick={openAdd}>
@@ -722,7 +722,7 @@ export function PeopleClient() {
                           className="overflow-hidden"
                         >
                           <div
-                            className="pt-3 mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3"
+                            className="pt-3 mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3"
                             style={{ borderTop: '1px solid var(--border)' }}
                           >
                             {p.moneyGivenMinor > 0 && (

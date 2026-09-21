@@ -121,15 +121,15 @@ function GoalForm({
     <div className="flex flex-col gap-4">
       <GlassInput label="Title" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Read 10 books" required />
       <GlassTextarea label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Optional details…" rows={2} />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassSelect label="Category" value={form.category} onChange={(v) => set('category', v)} options={CATEGORIES} />
         <GlassInput label="Unit" value={form.unit} onChange={(e) => set('unit', e.target.value)} placeholder="books, km, ₹…" />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput label="Target" type="number" min={0} value={form.targetValue} onChange={(e) => set('targetValue', Number(e.target.value))} />
         <GlassInput label="Current Progress" type="number" min={0} value={form.currentValue} onChange={(e) => set('currentValue', Number(e.target.value))} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput label="Start Date" type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} />
         <GlassInput label="Target Date" type="date" value={form.targetDate} onChange={(e) => set('targetDate', e.target.value)} />
       </div>
@@ -252,7 +252,7 @@ export function GoalsClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Goals</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Goals</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Track your long-term ambitions</p>
         </div>
         <GlassButton variant="primary" icon={<Plus size={15} />} onClick={() => { setEditing(null); setModalOpen(true) }}>

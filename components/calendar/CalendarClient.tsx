@@ -83,14 +83,14 @@ export function CalendarClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Calendar</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Calendar</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Unified life timeline</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={prevMonth} className="p-2 rounded-xl glass hover:bg-black/[0.04] transition-colors" style={{ color: 'var(--text-muted)' }}><ChevronLeft size={16}/></button>
-          <span className="text-sm font-semibold min-w-[130px] text-center" style={{ color: 'var(--text-primary)' }}>
+          <span className="text-sm font-semibold min-w-[110px] text-center" style={{ color: 'var(--text-primary)' }}>
             {MONTHS[viewMonth]} {viewYear}
           </span>
           <button onClick={nextMonth} className="p-2 rounded-xl glass hover:bg-black/[0.04] transition-colors" style={{ color: 'var(--text-muted)' }}><ChevronRight size={16}/></button>

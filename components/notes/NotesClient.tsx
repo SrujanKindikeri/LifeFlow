@@ -304,7 +304,7 @@ export function NotesClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notes</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notes</h1>
           <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
             {notes.filter((n) => !n.archived).length} notes · Capture your thoughts
           </p>
@@ -317,7 +317,7 @@ export function NotesClient() {
       </div>
 
       {/* Search + filters */}
-      <div className="flex flex-col sm:flex-row gap-2.5">
+      <div className="flex flex-col md:flex-row gap-2.5">
         <div className="relative flex-1">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-faint)' }} />
           <input
@@ -337,38 +337,40 @@ export function NotesClient() {
           )}
         </div>
 
-        {/* Filter chips */}
-        <div className="flex gap-1.5 p-1 glass rounded-xl w-fit">
-          {(['all', 'pinned', 'archived'] as Filter[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-[12px] font-medium capitalize transition-all',
-                filter === f ? 'glass-segment-active text-white' : 'hover:bg-black/[0.04]'
-              )}
-              style={filter === f ? {} : { color: 'var(--text-muted)' }}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
+        {/* Filter chips + sort — stack below search on mobile, row on md+ */}
+        <div className="flex gap-2 flex-wrap md:flex-nowrap">
+          <div className="flex gap-1.5 p-1 glass rounded-xl w-fit">
+            {(['all', 'pinned', 'archived'] as Filter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-[12px] font-medium capitalize transition-all',
+                  filter === f ? 'glass-segment-active text-white' : 'hover:bg-black/[0.04]'
+                )}
+                style={filter === f ? {} : { color: 'var(--text-muted)' }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
 
-        <select
-          value={sort}
-          onChange={(e) => setSort(e.target.value as Sort)}
-          className="glass-input rounded-xl px-3.5 py-2 text-xs appearance-none"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-          <option value="updated">Recently Updated</option>
-        </select>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as Sort)}
+            className="glass-input rounded-xl px-3.5 py-2 text-xs appearance-none"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="updated">Recently Updated</option>
+          </select>
+        </div>
       </div>
 
       {/* Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
           {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : filteredNotes.length === 0 ? (
@@ -417,7 +419,7 @@ export function NotesClient() {
           </div>
           <div className="flex items-center justify-between pt-1">
             {!editingNote && <SaveDraftStatus status={draft.saveStatus} />}
-            <div className="flex gap-2 ml-auto">
+            <div className="flex flex-wrap gap-2 ml-auto">
               {!editingNote && (
                 <GlassButton variant="secondary" size="sm" onClick={() => draft.saveDraft()}>Save Draft</GlassButton>
               )}

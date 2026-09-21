@@ -379,16 +379,16 @@ export function SecurityClient() {
             {/* QR code */}
             {qrCodeDataUrl ? (
               <div className="flex justify-center mb-5">
-                <div className="rounded-2xl overflow-hidden p-3"
+                <div className="rounded-2xl overflow-hidden p-3 w-[min(216px,100%)]"
                   style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={qrCodeDataUrl} alt="2FA QR code" width={200} height={200}
-                    className="block" />
+                    className="block w-full h-auto" />
                 </div>
               </div>
             ) : (
               <div className="flex justify-center mb-5">
-                <div className="w-[200px] h-[200px] rounded-2xl flex items-center justify-center"
+                <div className="w-[min(200px,100%)] aspect-square rounded-2xl flex items-center justify-center"
                   style={{ background: 'var(--glass-subtle-bg)', border: '1px solid var(--border)' }}>
                   <p className="text-[12px] text-center px-4" style={{ color: 'var(--text-muted)' }}>
                     QR code unavailable — use the manual key below.

@@ -175,7 +175,7 @@ export function GoalForm({
         placeholder="Optional details…"
         rows={2}
       />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassSelect
           label="Category"
           value={form.category}
@@ -189,7 +189,7 @@ export function GoalForm({
           placeholder="books, km, ₹…"
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput
           label="Target"
           type="number"
@@ -205,7 +205,7 @@ export function GoalForm({
           onChange={(e) => set('currentValue', Number(e.target.value))}
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput
           label="Start Date"
           type="date"

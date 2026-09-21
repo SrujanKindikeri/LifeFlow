@@ -200,7 +200,7 @@ export function ExpensesClient() {
         <>
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Group Bills</h2>
+              <h2 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Group Bills</h2>
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
                 Split expenses with friends, family, or roommates
               </p>

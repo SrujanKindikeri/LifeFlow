@@ -162,7 +162,7 @@ export function ReceiptScanner({ onExpenseAdded }: { onExpenseAdded: () => void 
             </p>
 
             <GlassInput label="Merchant / Store" value={fields.merchant} onChange={(e) => setField('merchant', e.target.value)} placeholder="e.g. Big Bazaar" />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <SmartAmountInput label="Amount" value={fields.amount} onChange={(raw) => setField('amount', raw)} currency="INR" />
               <GlassInput label="Date" type="date" value={fields.date} onChange={(e) => setField('date', e.target.value)} />
             </div>

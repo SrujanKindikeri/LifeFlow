@@ -42,7 +42,7 @@ function BudgetForm({ initial, onSave, onClose, loading }: {
   return (
     <div className="flex flex-col gap-4">
       <GlassSelect label="Category" value={form.category} onChange={(v) => set('category', v)} options={CAT_OPTIONS} />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <SmartAmountInput
           label="Budget"
           value={form.amountExpr}
@@ -113,7 +113,7 @@ export function BudgetsClient() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Budgets</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Budgets</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Monthly spending limits by category</p>
         </div>
         <GlassButton variant="primary" icon={<Plus size={15} />} onClick={() => { setEditing(null); setModalOpen(true) }}>Set Budget</GlassButton>

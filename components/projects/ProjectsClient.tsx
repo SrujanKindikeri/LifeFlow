@@ -115,7 +115,7 @@ function ProjectForm({
         placeholder="What is this project about?"
         rows={2}
       />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassSelect
           label="Status"
           value={form.status}
@@ -271,7 +271,7 @@ function ProjectsTab() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 p-1 glass rounded-xl w-fit">
+      <div className="flex gap-1 p-1 glass rounded-xl overflow-x-auto">
         {['active', 'on_hold', 'completed', 'archived', 'all'].map((f) => (
           <button
             key={f}
@@ -490,7 +490,7 @@ export function ProjectsClient() {
     <div className="flex flex-col gap-6">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Projects</h1>
+        <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Projects</h1>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
           Manage your projects and goals in one place
         </p>

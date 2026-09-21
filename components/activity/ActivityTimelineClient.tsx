@@ -82,7 +82,7 @@ export function ActivityTimelineClient() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Activity</h1>
+        <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Activity</h1>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Your LifeFlow timeline</p>
       </div>
 

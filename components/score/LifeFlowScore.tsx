@@ -23,8 +23,18 @@ function ScoreRing({ score, max }: { score: number; max: number }) {
   const color = score >= 80 ? '#16a34a' : score >= 60 ? '#f59e0b' : '#ef4444'
 
   return (
-    <div className="relative w-24 h-24 flex-shrink-0">
-      <svg width="96" height="96" className="-rotate-90">
+    /*
+      Ring container: w-20 h-20 on narrow phones (80px), w-24 h-24 on sm+ (96px).
+      Keeping it slightly smaller on 320px prevents the ring from crowding the
+      text content next to it.
+    */
+    <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0">
+      <svg
+        width="100%"
+        height="100%"
+        viewBox="0 0 96 96"
+        className="-rotate-90"
+      >
         <circle cx="48" cy="48" r={r} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="6"/>
         <motion.circle
           cx="48" cy="48" r={r} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
@@ -35,7 +45,7 @@ function ScoreRing({ score, max }: { score: number; max: number }) {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <motion.span
-          className="text-2xl font-bold"
+          className="text-xl sm:text-2xl font-bold"
           style={{ color }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -53,10 +63,10 @@ function BreakdownRow({ label, points, max }: { label: string; points: number; m
   const pct = Math.round((points / max) * 100)
   const color = pct >= 80 ? '#16a34a' : pct >= 60 ? '#f59e0b' : '#ef4444'
   return (
-    <div>
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</span>
-        <span className="text-xs font-bold" style={{ color }}>{points}/{max}</span>
+    <div className="min-w-0">
+      <div className="flex justify-between items-center mb-1 gap-2 min-w-0">
+        <span className="text-xs font-medium truncate min-w-0" style={{ color: 'var(--text-secondary)' }}>{label}</span>
+        <span className="text-xs font-bold flex-shrink-0" style={{ color }}>{points}/{max}</span>
       </div>
       <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
         <motion.div
@@ -93,24 +103,31 @@ export function LifeFlowScore() {
 
   return (
     <GlassCard padding="md">
-      <div className="flex items-center gap-4">
+      {/* Ring + text row — flex with min-w-0 guard so text side never overflows */}
+      <div className="flex items-center gap-3 sm:gap-4 min-w-0">
         <ScoreRing score={data.score} max={data.maxScore} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>LifeFlow Score</h3>
-            <button onClick={() => setShowInfo(!showInfo)} className="p-0.5 rounded-md hover:bg-black/[0.05] transition-colors" style={{ color: 'var(--text-faint)' }}>
-              <Info size={12}/>
+          <div className="flex items-center gap-2 mb-1 min-w-0">
+            <h3 className="font-semibold text-sm truncate" style={{ color: 'var(--text-primary)' }}>LifeFlow Score</h3>
+            <button
+              onClick={() => setShowInfo(!showInfo)}
+              className="p-0.5 rounded-md hover:bg-black/[0.05] transition-colors flex-shrink-0"
+              style={{ color: 'var(--text-faint)' }}
+              aria-label={showInfo ? 'Hide score info' : 'Show score info'}
+            >
+              <Info size={12} aria-hidden="true" />
             </button>
           </div>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>
             {data.score >= 80 ? 'Excellent — keep it up!' : data.score >= 60 ? 'Good — small improvements ahead' : 'Room to grow'}
           </p>
           <button
             onClick={() => setExpanded((e) => !e)}
             className="flex items-center gap-1 text-xs mt-2 font-medium transition-colors hover:opacity-70"
             style={{ color: 'var(--accent-text)' }}
+            aria-expanded={expanded}
           >
-            How is this calculated? {expanded ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
+            How is this calculated? {expanded ? <ChevronUp size={11} aria-hidden="true" /> : <ChevronDown size={11} aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -118,7 +135,7 @@ export function LifeFlowScore() {
       <AnimatePresence>
         {showInfo && (
           <motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} className="overflow-hidden">
-            <p className="text-[11px] mt-3 leading-relaxed p-3 rounded-xl" style={{ background: 'rgba(0,0,0,0.03)', color: 'var(--text-muted)' }}>
+            <p className="text-[11px] mt-3 leading-relaxed p-3 rounded-xl break-words" style={{ background: 'rgba(0,0,0,0.03)', color: 'var(--text-muted)' }}>
               {data.note}
             </p>
           </motion.div>

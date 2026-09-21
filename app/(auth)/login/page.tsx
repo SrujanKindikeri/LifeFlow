@@ -237,7 +237,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 16 }}
               transition={{ duration: 0.2 }}
-              className="p-8"
+              className="auth-card-pad"
             >
               <div className="flex flex-col items-center mb-8">
                 <motion.div
@@ -339,7 +339,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
               transition={{ duration: 0.2 }}
-              className="p-8"
+              className="auth-card-pad"
             >
               <div className="flex flex-col items-center mb-8">
                 <motion.div
@@ -402,7 +402,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
               transition={{ duration: 0.2 }}
-              className="p-8"
+              className="auth-card-pad"
             >
               <div className="flex flex-col items-center mb-7">
                 <motion.div
@@ -505,7 +505,7 @@ export default function LoginPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
               transition={{ duration: 0.2 }}
-              className="p-8"
+              className="auth-card-pad"
             >
               <div className="flex flex-col items-center mb-8">
                 <motion.div

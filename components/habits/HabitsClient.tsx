@@ -191,7 +191,7 @@ export function HabitsClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Habits</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Habits</h1>
           <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{completedToday}/{habits.length} done today</p>
         </div>
         <GlassButton variant="primary" onClick={openCreate}>
@@ -207,12 +207,12 @@ export function HabitsClient() {
             { label: 'Today',        value: completedToday, unit: `/ ${habits.length}`,           icon: <Check  size={14} className="text-emerald-500 mx-auto mt-1" /> },
             { label: '30-day avg',   value: habits.length > 0 ? Math.round(habits.reduce((s, h) => s + h.completionRate, 0) / habits.length) : 0, unit: '%', icon: <Target size={14} className="text-indigo-500 mx-auto mt-1" /> },
           ].map(({ label, value, unit, icon }) => (
-            <div key={label} className="glass rounded-2xl p-4 text-center">
-              <div className="text-[22px] font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+            <div key={label} className="glass rounded-2xl p-2 sm:p-4 text-center">
+              <div className="text-[17px] sm:text-[22px] font-bold tabular-nums leading-tight" style={{ color: 'var(--text-primary)' }}>
                 {value}
-                <span className="text-[13px] font-normal ml-0.5" style={{ color: 'var(--text-muted)' }}>{unit}</span>
+                <span className="text-[11px] sm:text-[13px] font-normal ml-0.5" style={{ color: 'var(--text-muted)' }}>{unit}</span>
               </div>
-              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
+              <div className="text-[10px] sm:text-[11px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{label}</div>
               {icon}
             </div>
           ))}
@@ -346,7 +346,7 @@ export function HabitsClient() {
           </div>
           <GlassInput label="Habit Name" placeholder="e.g. Drink 8 glasses of water" value={form.name} onChange={(e) => { setForm((f) => ({ ...f, name: e.target.value })); if (!editingHabit) draft.triggerAutosave() }} />
           <GlassTextarea label="Description (optional)" placeholder="Why is this habit important?" rows={2} value={form.description} onChange={(e) => { setForm((f) => ({ ...f, description: e.target.value })); if (!editingHabit) draft.triggerAutosave() }} />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <GlassSelect label="Frequency" value={form.frequency} onChange={(v) => { setForm((f) => ({ ...f, frequency: v as 'daily' | 'weekly' })); if (!editingHabit) draft.triggerAutosave() }} options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }]} />
             <GlassInput label="Daily Target" type="number" min={1} max={100} value={String(form.target)} onChange={(e) => { setForm((f) => ({ ...f, target: parseInt(e.target.value) || 1 })); if (!editingHabit) draft.triggerAutosave() }} />
           </div>
@@ -430,11 +430,12 @@ function HabitCard({ habit, toggling, onToggle, onEdit, onDelete }: {
 
       {/* Actions + toggle */}
       <div className="flex items-center gap-1.5">
-        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity touch-visible">
           <button
             onClick={() => onEdit(habit)}
             className="p-1.5 rounded-lg hover:bg-black/[0.05] transition-colors"
             style={{ color: 'var(--text-faint)' }}
+            aria-label={`Edit ${habit.name}`}
           >
             <Edit3 size={12} />
           </button>
@@ -442,6 +443,7 @@ function HabitCard({ habit, toggling, onToggle, onEdit, onDelete }: {
             onClick={() => onDelete(habit)}
             className="p-1.5 rounded-lg hover:bg-red-500/10 hover:text-red-500 transition-colors"
             style={{ color: 'var(--text-faint)' }}
+            aria-label={`Delete ${habit.name}`}
           >
             <Trash2 size={12} />
           </button>

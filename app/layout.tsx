@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { ToastProvider } from '@/components/ui/Toast'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
@@ -10,9 +10,30 @@ export const metadata: Metadata = {
   icons: { icon: '/favicon.ico' },
 }
 
+/*
+  generateViewport is the correct Next.js 15+ / 16+ API for viewport configuration.
+  The old metadata.viewport field is deprecated and produces a build warning.
+  viewportFit:'cover' is critical — without it env(safe-area-inset-*) returns 0 on iOS.
+*/
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,      // allow pinch-to-zoom for accessibility
+  userScalable: true,   // required for WCAG 1.4.4 — never lock zoom
+  viewportFit: 'cover', // iOS safe-area support
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning is intentional and scoped to <html> only.
+    // The inline script below runs synchronously before React hydration and
+    // writes data-theme / data-night-shift onto <html>. The server renders
+    // neither attribute (it has no access to the user's localStorage), so
+    // React would otherwise report a mismatch. suppressHydrationWarning tells
+    // React to accept the client-modified attributes on this single element
+    // without erroring — the documented pattern for pre-hydration theme scripts.
+    // It does NOT suppress warnings anywhere else in the component tree.
+    <html lang="en" suppressHydrationWarning>
       {/*
         Inline script — runs synchronously before any React hydration.
         Reads the stored appearance preferences from localStorage and applies

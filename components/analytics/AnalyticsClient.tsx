@@ -85,7 +85,7 @@ function GlassTooltip({ active, payload, label }: {
 function AnalyticsSkeleton() {
   return (
     <div className="flex flex-col gap-5 animate-pulse">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[...Array(4)].map((_, i) => <div key={i} className="glass rounded-2xl p-4 h-24" />)}
       </div>
       <div className="glass rounded-2xl p-5 h-64" />
@@ -164,7 +164,7 @@ export function AnalyticsClient() {
       {/* Header row */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Analytics</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Analytics</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Understand where your money goes.</p>
         </div>
 
@@ -194,7 +194,7 @@ export function AnalyticsClient() {
 
       {/* Month navigator — only for personal analytics */}
       {section === 'personal' && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
             Personal Spending Analytics
           </p>
@@ -206,7 +206,7 @@ export function AnalyticsClient() {
             >
               <ChevronLeft size={16} />
             </button>
-            <span className="text-sm font-medium px-2 min-w-[130px] text-center" style={{ color: 'var(--text-primary)' }}>
+            <span className="text-sm font-medium px-2 min-w-[110px] text-center" style={{ color: 'var(--text-primary)' }}>
               {monthLabel}
             </span>
             <button
@@ -291,7 +291,7 @@ function PersonalAnalytics({
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
       >
         <SummaryCard
           label="Total This Month"
@@ -526,7 +526,7 @@ function GroupAnalytics({ data }: { data: GroupAnalyticsData | null }) {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {statRows.map(({ label, value, icon, note, accent }) => (
           <div key={label} className="glass rounded-2xl p-4">
             <div className="flex items-center gap-1.5 mb-2" style={{ color: 'var(--text-muted)' }}>

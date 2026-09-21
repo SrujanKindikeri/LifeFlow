@@ -16,15 +16,15 @@ function StatPill({
   label, value, sub,
 }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="glass-subtle rounded-xl p-3 text-center">
-      <p className="text-[10px] font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--text-faint)' }}>
+    <div className="glass-subtle rounded-xl p-2 sm:p-3 text-center">
+      <p className="text-[9px] sm:text-[10px] font-medium uppercase tracking-wide mb-1 truncate" style={{ color: 'var(--text-faint)' }}>
         {label}
       </p>
-      <p className="text-[15px] font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+      <p className="text-[13px] sm:text-[15px] font-bold tabular-nums leading-tight" style={{ color: 'var(--text-primary)' }}>
         {value}
       </p>
       {sub && (
-        <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{sub}</p>
+        <p className="text-[9px] sm:text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{sub}</p>
       )}
     </div>
   )
@@ -88,7 +88,7 @@ export function WeeklyReview({ data, currency = 'INR' }: Props) {
               ) : (
                 <>
                   {/* Stats grid */}
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     <StatPill
                       label="Tasks"
                       value={`${data.tasks.completed} / ${data.tasks.total}`}
@@ -104,7 +104,7 @@ export function WeeklyReview({ data, currency = 'INR' }: Props) {
                       value={formatCurrency(data.spending, currency)}
                     />
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     <StatPill
                       label="Notes"
                       value={String(data.notesCreated)}

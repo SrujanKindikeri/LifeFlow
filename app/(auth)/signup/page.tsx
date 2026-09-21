@@ -67,7 +67,7 @@ function SignupForm() {
           style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent)' }}
         />
 
-        <div className="p-8">
+        <div className="auth-card-pad">
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
             <motion.div

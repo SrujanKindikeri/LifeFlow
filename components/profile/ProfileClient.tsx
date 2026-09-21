@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2, History } from 'lucide-react'
+import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2, History, Camera } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation'
 import type { User as UserType } from '@/types'
 import { DEFAULT_APPEARANCE } from '@/types'
 import { NotificationHistorySection } from '@/components/notifications/NotificationHistorySection'
+import { ProfilePhotoUploadModal } from '@/components/profile/ProfilePhotoUploadModal'
 import { AppearanceSection } from '@/components/profile/AppearanceSection'
 import { useAppearance } from '@/hooks/useAppearance'
 import { prewarmAudio } from '@/lib/tonePlayer'
@@ -86,6 +87,9 @@ export function ProfileClient() {
   const [deletePassword,    setDeletePassword]    = useState('')
   const [showDeletePw,      setShowDeletePw]      = useState(false)
   const [deleteError,       setDeleteError]       = useState<string | null>(null)
+
+  // ── Avatar / profile photo ────────────────────────────────────────────────
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false)
 
   // ── Notifications section open/closed state (persisted) ───────────────────
   const [notifOpen, setNotifOpen] = useState<boolean>(() => {
@@ -478,22 +482,125 @@ export function ProfileClient() {
       className="px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-4 max-w-2xl mx-auto"
     >
       {/* ── Profile hero ── */}
-      <motion.div variants={fadeUp} className="glass-elevated glass-catchlight rounded-2xl p-6 flex items-center gap-5 relative overflow-hidden">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent pointer-events-none" />
-        <div className="absolute -top-8 -right-8 w-32 h-32 bg-indigo-500/08 rounded-full blur-2xl pointer-events-none" />
-        <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-500/15 border border-indigo-500/25 flex items-center justify-center text-[22px] font-bold text-indigo-600 flex-shrink-0 shadow-[0_4px_16px_rgba(99,102,241,0.15)]">
-          {initials}
+      <motion.div
+        variants={fadeUp}
+        className="glass-elevated glass-catchlight rounded-2xl relative overflow-hidden"
+      >
+        {/* Decorative glows — wrapped in aria-hidden so they are NOT direct
+            children of .glass-catchlight. The .glass-catchlight > * rule sets
+            position:relative on every direct child, which overrides absolute
+            positioning and adds ~320px of invisible height above the content. */}
+        <div aria-hidden="true" className="pointer-events-none select-none">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+          <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500/06 rounded-full blur-3xl" />
+          <div className="absolute -bottom-8 -left-8 w-28 h-28 bg-violet-500/05 rounded-full blur-2xl" />
         </div>
-        <div className="min-w-0">
-          <h2 className="text-[18px] font-bold truncate" style={{ color: 'var(--text-primary)' }}>{user.name}</h2>
-          <p className="text-[13px] truncate" style={{ color: 'var(--text-muted)' }}>{user.email}</p>
-          <div className="flex items-center gap-1.5 mt-2">
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-600">
-              {user.publicId}
-            </span>
+
+        <div className="relative p-5 sm:p-6">
+          {/* ── Desktop: horizontal ── Mobile: vertical-centered ── */}
+          <div className="flex flex-col sm:flex-row items-center sm:items-center gap-5">
+
+            {/* Avatar with camera button */}
+            <div className="relative flex-shrink-0 self-center sm:self-auto">
+              {/* Avatar circle */}
+              <button
+                onClick={() => setAvatarModalOpen(true)}
+                aria-label="Change profile photo"
+                className="block focus-ring rounded-full group"
+              >
+                <div
+                  className="w-20 h-20 sm:w-[72px] sm:h-[72px] rounded-full overflow-hidden flex items-center justify-center transition-all duration-200 group-hover:ring-2 group-hover:ring-indigo-500/40 group-hover:ring-offset-1"
+                  style={
+                    user.avatar
+                      ? { border: '2px solid rgba(99,102,241,0.25)' }
+                      : {
+                          background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.14) 100%)',
+                          border: '2px solid rgba(99,102,241,0.22)',
+                          boxShadow: '0 4px 16px rgba(99,102,241,0.15)',
+                        }
+                  }
+                >
+                  {user.avatar ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={user.avatar}
+                      alt={`${user.name} profile photo`}
+                      className="w-full h-full object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <span
+                      className="text-[24px] font-bold select-none"
+                      style={{ color: 'var(--accent)' }}
+                    >
+                      {initials}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              {/* Camera badge */}
+              <button
+                onClick={() => setAvatarModalOpen(true)}
+                aria-label="Edit profile photo"
+                className="absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all duration-200 hover:scale-110 focus-ring"
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: '2px solid var(--glass-panel-bg)',
+                }}
+              >
+                <Camera size={12} />
+              </button>
+            </div>
+
+            {/* Identity info */}
+            <div className="min-w-0 flex-1 text-center sm:text-left">
+              {/* Name — primary, prominent */}
+              <h2
+                className="text-[20px] sm:text-[22px] font-bold leading-tight"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {user.name}
+              </h2>
+
+              {/* Email — secondary */}
+              <p
+                className="text-[13px] mt-0.5 truncate"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {user.email}
+              </p>
+
+              {/* LifeFlow ID badge */}
+              <div className="flex items-center justify-center sm:justify-start gap-1.5 mt-2.5">
+                <span
+                  className="inline-flex items-center gap-1.5 text-[10px] font-mono font-semibold tracking-widest px-2.5 py-1 rounded-full"
+                  style={{
+                    background: 'rgba(99,102,241,0.08)',
+                    border: '1px solid rgba(99,102,241,0.20)',
+                    color: 'var(--accent)',
+                  }}
+                >
+                  <Fingerprint size={9} />
+                  {user.publicId}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </motion.div>
+
+      {/* ── Profile photo modal ── */}
+      <ProfilePhotoUploadModal
+        isOpen={avatarModalOpen}
+        onClose={() => setAvatarModalOpen(false)}
+        avatar={user.avatar}
+        initials={initials}
+        onSave={(newAvatar) => {
+          setUser((prev) => prev ? { ...prev, avatar: newAvatar ?? undefined } : prev)
+        }}
+      />
 
       {/* ── LifeFlow ID ── */}
       <LifeFlowIdSection publicId={user.publicId} variants={fadeUp} />
@@ -507,7 +614,7 @@ export function ProfileClient() {
             <span className="text-[13px] flex-1 truncate" style={{ color: 'var(--text-muted)' }}>{user.email}</span>
             <span className="text-[10px]" style={{ color: 'var(--text-faint)' }}>Cannot change</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <GlassSelect label="Currency" value={profileForm.currency} onChange={(v) => setProfileForm((f) => ({ ...f, currency: v }))} options={CURRENCIES} />
             <GlassSelect label="Timezone" value={profileForm.timezone} onChange={(v) => setProfileForm((f) => ({ ...f, timezone: v }))} options={TIMEZONES} />
           </div>

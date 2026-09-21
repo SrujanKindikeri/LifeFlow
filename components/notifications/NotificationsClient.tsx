@@ -113,7 +113,7 @@ export function NotificationsClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notifications</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notifications</h1>
           <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
             {unreadCount > 0 ? `${unreadCount} unread` : 'You\'re all caught up'}
           </p>
@@ -133,7 +133,7 @@ export function NotificationsClient() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap" style={{ boxShadow: 'inset 0 1px 0 var(--glass-catchlight)' }}>
+      <div className="flex gap-1 p-1 glass rounded-xl w-fit max-w-full overflow-x-auto flex-wrap" style={{ boxShadow: 'inset 0 1px 0 var(--glass-catchlight)' }}>
         {tabs.map(({ key, label }) => (
           <button
             key={key}
@@ -223,10 +223,11 @@ function NotificationItem({ notification: n, onMarkRead, onDelete }: {
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0 touch-visible">
         <button
           onClick={() => onMarkRead(n._id, n.read)}
           title={n.read ? 'Mark unread' : 'Mark read'}
+          aria-label={n.read ? 'Mark as unread' : 'Mark as read'}
           className="p-1.5 rounded-lg nav-hover hover:text-indigo-500 transition-colors"
           style={{ color: 'var(--text-faint)' }}
         >
@@ -235,6 +236,7 @@ function NotificationItem({ notification: n, onMarkRead, onDelete }: {
         <button
           onClick={() => onDelete(n._id)}
           title="Delete"
+          aria-label="Delete notification"
           className="p-1.5 rounded-lg nav-hover-danger hover:text-red-500 transition-colors"
           style={{ color: 'var(--text-faint)' }}
         >

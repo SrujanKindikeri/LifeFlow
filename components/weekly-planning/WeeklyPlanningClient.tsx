@@ -62,7 +62,7 @@ export function WeeklyPlanningClient() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Weekly Planning</h1>
+        <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Weekly Planning</h1>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>{curr.label}</p>
       </div>
 
@@ -72,7 +72,7 @@ export function WeeklyPlanningClient() {
           <div className="w-1.5 h-5 rounded-full" style={{ background: 'var(--text-faint)' }} />
           <h2 className="font-semibold text-sm" style={{ color: 'var(--text-secondary)' }}>Last Week — {prev.label}</h2>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {[
             { label: 'Tasks Done', value: `${prev.tasksCompleted}/${prev.totalTasks}`, sub: `${taskRate}% rate`, color: taskRate >= 70 ? '#16a34a' : '#f59e0b' },
             { label: 'Habits', value: `${prev.habitConsistency}%`, sub: 'consistency', color: prev.habitConsistency >= 70 ? '#16a34a' : '#f59e0b' },

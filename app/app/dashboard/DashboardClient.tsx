@@ -346,15 +346,15 @@ export function DashboardClient({ data }: Props) {
                   View all <ArrowRight size={10} />
                 </Link>
               </div>
-              <div className="grid grid-cols-3 gap-3 mb-5">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5">
                 {[
                   { label: 'Today', value: data.spending.today },
                   { label: 'This week', value: data.spending.week },
                   { label: 'This month', value: data.spending.month },
                 ].map(({ label, value }) => (
-                  <div key={label} className="glass-subtle rounded-xl p-3 text-center">
-                    <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
-                    <p className="text-[15px] font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>{formatCurrency(value)}</p>
+                  <div key={label} className="glass-subtle rounded-xl p-2 sm:p-3 text-center">
+                    <p className="text-[10px] sm:text-[11px] mb-1 truncate" style={{ color: 'var(--text-muted)' }}>{label}</p>
+                    <p className="text-[13px] sm:text-[15px] font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>{formatCurrency(value)}</p>
                   </div>
                 ))}
               </div>
@@ -544,7 +544,45 @@ export function DashboardClient({ data }: Props) {
 
   return (
     <>
-      <div className="px-4 sm:px-6 lg:px-8 py-5 lg:py-8 max-w-6xl mx-auto space-y-4">
+      {/*
+        Dashboard content wrapper.
+        - w-full + min-w-0:    prevents this flex child from exceeding parent width.
+        - max-w-6xl mx-auto:   centres on wide monitors; on phones max-w-6xl is
+                               wider than the viewport so content fills full width.
+        - px-4 sm:px-5 lg:px-8: 16px mobile → 20px sm → 32px desktop padding.
+          On a 390px phone: usable card width = 390 - 32 = 358px  ✓
+          On a 320px phone: usable card width = 320 - 32 = 288px  ✓
+        - overflow-x:hidden:   catch-all guard so no card can widen the page.
+      */}
+      <div
+        className="w-full min-w-0 px-4 sm:px-5 lg:px-8 py-4 sm:py-5 lg:py-8 max-w-6xl mx-auto space-y-3 sm:space-y-4"
+        style={{ overflowX: 'hidden' }}
+      >
+
+        {/* ── MOBILE GREETING — shown only on phones/tablets where the
+              desktop header is hidden ─────────────────────────────── */}
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          className="lg:hidden min-w-0"
+        >
+          {/*
+            The greeting uses break-words so a very long name wraps cleanly
+            on 320px rather than overflowing. font-size is clamped to stay
+            readable at every width: 17px on 320px, 20px at 390px+.
+          */}
+          <h1
+            className="font-bold leading-tight break-words"
+            style={{
+              color: 'var(--text-primary)',
+              fontSize: 'clamp(16px, 4.5vw, 20px)',
+            }}
+          >
+            Good {getTimeGreeting()}{data.user.name ? `, ${data.user.name.split(' ')[0]}` : ''} 👋
+          </h1>
+          <p className="text-xs sm:text-sm mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{getDateLabel()}</p>
+        </motion.div>
 
         {/* ── DESKTOP HEADER ─────────────────────────────────────────── */}
         <motion.div
@@ -614,10 +652,11 @@ export function DashboardClient({ data }: Props) {
               <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/14 to-transparent" />
             </div>
 
-            <div className="relative flex flex-col sm:flex-row sm:items-center gap-5">
-              {/* Progress ring */}
-              <div className="flex items-center gap-4">
-                <div className="relative w-20 h-20 shrink-0">
+          <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
+              {/* Progress ring + stats row */}
+              <div className="flex items-center gap-3 sm:gap-4">
+                {/* Ring — slightly smaller on phones to leave room for text */}
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0">
                   <svg className="w-full h-full -rotate-90" viewBox="0 0 80 80">
                     <defs>
                       <linearGradient id="progressGrad" x1="0" y1="0" x2="1" y2="1">
@@ -691,18 +730,20 @@ export function DashboardClient({ data }: Props) {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.38, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
-          className="grid grid-cols-1 lg:grid-cols-3 gap-4"
+          className="grid grid-cols-1 md:grid-cols-3 gap-4 min-w-0"
         >
-          <div className="lg:col-span-2">
+          {/* Briefing takes 2/3 on md+, full width on mobile */}
+          <div className="md:col-span-2 min-w-0">
             <DailyBriefing userName={data.user.name} />
           </div>
-          <div>
+          {/* Score takes 1/3 on md+, full width on mobile */}
+          <div className="min-w-0">
             <LifeFlowScore />
           </div>
         </motion.div>
 
         {/* ── DYNAMIC SECTIONS (ordered by user preference) ────────── */}
-        <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">
+        <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4 min-w-0">
 
           {/* Render sections in order, tasks+habits always in a grid */}
           {orderedSectionIds.map((id, idx) => {
@@ -717,7 +758,7 @@ export function DashboardClient({ data }: Props) {
               if (idx !== gridIdx) return null
               if (!showTasksHabitsGrid) return null
               return (
-                <motion.div key="tasks-habits-grid" variants={fadeUp} className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:items-start">
+                <motion.div key="tasks-habits-grid" variants={fadeUp} className="grid grid-cols-1 md:grid-cols-2 gap-4 md:items-start min-w-0">
                   {sectionVisible['tasks'] !== false && renderSection('tasks')}
                   {sectionVisible['habits'] !== false && renderSection('habits')}
                 </motion.div>
@@ -781,7 +822,7 @@ export function DashboardClient({ data }: Props) {
                   <Sparkles size={14} className="text-violet-400" />
                   <h2 className="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>Insights</h2>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                   {data.insights.map((insight, i) => (
                     <motion.div
                       key={i}
@@ -842,16 +883,29 @@ export function DashboardClient({ data }: Props) {
       </div>
 
       {/* ── MOBILE FAB ─────────────────────────────────────────────── */}
+      {/*
+        Position the FAB above the bottom nav bar, accounting for:
+        - --bottomnav-total-height = --bottomnav-height + safe-area-inset-bottom
+          (defined in globals.css — already includes the iPhone home indicator)
+        - 12px buffer so it floats comfortably above the bar
+
+        Using --bottomnav-total-height instead of manually inlining the calc()
+        keeps the FAB in sync if --bottomnav-height ever changes.
+      */}
       <motion.button
         initial={{ opacity: 0, scale: 0 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ delay: 0.5, type: 'spring', stiffness: 400, damping: 22 }}
         onClick={() => setQuickAdd('task')}
-        className="lg:hidden fixed bottom-[calc(var(--bottomnav-height,68px)+14px)] right-4 z-40 rounded-2xl bg-indigo-500 shadow-[0_8px_24px_rgba(99,102,241,0.4)] flex items-center justify-center border border-indigo-400/30 hover:bg-indigo-400 active:scale-95 transition-all"
-        style={{ width: 52, height: 52 }}
+        className="more-sheet-hide-fab lg:hidden fixed right-4 z-40 rounded-2xl bg-indigo-500 shadow-[0_8px_24px_rgba(99,102,241,0.4)] flex items-center justify-center border border-indigo-400/30 hover:bg-indigo-400 active:scale-95 transition-all"
+        style={{
+          width: 52,
+          height: 52,
+          bottom: 'calc(var(--bottomnav-total-height, 56px) + 12px)',
+        }}
         aria-label="Quick add"
       >
-        <Plus size={22} className="text-white" />
+        <Plus size={22} className="text-white" aria-hidden="true" />
       </motion.button>
 
       {/* ── QUICK ADD MODAL ─────────────────────────────────────────── */}

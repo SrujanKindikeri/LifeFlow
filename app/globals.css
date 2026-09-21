@@ -157,8 +157,18 @@
 
   /* ── Layout ── */
   --sidebar-width:           252px;
+  /*
+    --topbar-height: the visual content row height of the mobile top bar (56px).
+    The bar's total rendered height on notched devices is larger because
+    env(safe-area-inset-top) is added as padding-top on the bar element itself.
+  */
   --topbar-height:           56px;
-  --bottomnav-height:        68px;
+  /*
+    --bottomnav-height: the visual (icon+label) row height of the bottom nav.
+    This does NOT include env(safe-area-inset-bottom) — that is handled
+    separately in the nav's own paddingBottom and in pb-mobile-nav.
+  */
+  --bottomnav-height:        56px;
 
   /* ── Nav item hover background ── */
   --nav-hover-bg:            rgba(0, 0, 0, 0.04);
@@ -204,31 +214,82 @@ html, body {
     • centre:       bright white nebula (keeps overall look clean)
   This means glass panels over different areas of the page naturally
   absorb slightly different tints — producing content-adaptive colour.
+
+  NOTE: background-attachment:fixed is a GPU-composited layer on desktop
+  but on iOS Safari it is NOT supported inside overflow:scroll containers.
+  We default to 'scroll' (which looks good on mobile) and only use 'fixed'
+  on devices that can actually handle it (non-touch, hover-capable devices).
 */
 .app-bg {
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(ellipse 65% 55% at 4%   0%,   rgba(59, 130, 246, 0.07)  0%, transparent 62%),
     radial-gradient(ellipse 55% 45% at 96% 100%, rgba(139,  92, 246, 0.055) 0%, transparent 62%),
     radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(255, 255, 255, 0.85) 0%, transparent 72%),
     radial-gradient(ellipse 30% 25% at 80%  20%,  rgba(37,  99, 235, 0.03)  0%, transparent 50%),
     var(--bg-base);
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+
+/* Only apply fixed background-attachment on non-touch desktop (where it actually works) */
+@media (hover: hover) and (pointer: fine) {
+  .app-bg {
+    background-attachment: fixed;
+  }
+}
+
+/*
+  App shell minimum height — cascading vh fallbacks:
+    100vh   → all browsers (includes mobile browser chrome)
+    100svh  → Small Viewport Height — Chrome 108+, Safari 15.4+; excludes
+              browser chrome when shown
+    100dvh  → Dynamic Viewport Height — Chrome 108+, Firefox 101+;
+              resizes in real-time as browser chrome appears/disappears
+  We cascade fallback → preferred: the browser uses the last value it understands.
+*/
+.app-shell-min-h {
+  min-height: 100vh;    /* fallback: all browsers */
+  min-height: 100svh;   /* better: excludes static browser chrome */
+  min-height: 100dvh;   /* best:   dynamic, real-time */
 }
 
 /* Auth page */
 .auth-bg {
   min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+  overflow-y: auto;
   background:
     radial-gradient(ellipse 70% 60% at 50% 35%, rgba(59, 130, 246, 0.07)  0%, transparent 65%),
     radial-gradient(ellipse 45% 40% at 15% 80%, rgba(139, 92, 246, 0.04)  0%, transparent 55%),
     radial-gradient(ellipse 45% 40% at 85% 10%, rgba(37,  99, 235, 0.04)  0%, transparent 55%),
     var(--bg-base);
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .auth-bg {
+    background-attachment: fixed;
+  }
+}
+
+/*
+  Auth card inner body — responsive padding.
+  Used on all step <div> elements inside auth cards.
+  At ≤374px we reduce to p-5 (1.25rem) to keep content usable.
+*/
+.auth-card-pad {
+  padding: 2rem; /* p-8 */
+}
+@media (max-width: 374px) {
+  .auth-card-pad {
+    padding: 1.25rem; /* p-5 */
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -868,7 +929,10 @@ textarea.bg-transparent::placeholder {
     radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(20,  22,  40, 0.70) 0%, transparent 72%),
     radial-gradient(ellipse 30% 25% at 80%  20%,  rgba(37,  99, 235, 0.04) 0%, transparent 50%),
     var(--bg-base);
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-theme="dark"] .app-bg { background-attachment: fixed; }
 }
 
 /* Dark auth background */
@@ -878,7 +942,10 @@ textarea.bg-transparent::placeholder {
     radial-gradient(ellipse 45% 40% at 15% 80%, rgba(139,  92, 246, 0.07) 0%, transparent 55%),
     radial-gradient(ellipse 45% 40% at 85% 10%, rgba(37,   99, 235, 0.06) 0%, transparent 55%),
     var(--bg-base);
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-theme="dark"] .auth-bg { background-attachment: fixed; }
 }
 
 /* Dark glass input */
@@ -1048,7 +1115,12 @@ textarea.bg-transparent::placeholder {
     radial-gradient(ellipse 55% 45% at 96% 100%, rgba(180,  80, 20, 0.04) 0%, transparent 62%),
     radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(255, 245, 228, 0.65) 0%, transparent 72%),
     var(--bg-base);
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+@media (hover: hover) and (pointer: fine) {
+  :not([data-theme="dark"])[data-night-shift="true"] .app-bg {
+    background-attachment: fixed;
+  }
 }
 
 /* Dark night shift ambient */
@@ -1058,7 +1130,12 @@ textarea.bg-transparent::placeholder {
     radial-gradient(ellipse 55% 45% at 96% 100%, rgba(60,  30,  5, 0.08) 0%, transparent 62%),
     radial-gradient(ellipse 45% 40% at 50%  50%,  rgba(28,  18,  5, 0.50) 0%, transparent 72%),
     var(--bg-base);
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-theme="dark"][data-night-shift="true"] .app-bg {
+    background-attachment: fixed;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -1085,4 +1162,491 @@ textarea.bg-transparent::placeholder {
     --glass-floating-blur:   26px;
     --glass-panel-blur:      24px;
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TABLET LAYOUT — 768px–1023px (md breakpoint)
+   This range uses the mobile navigation (top bar + bottom nav) but has
+   enough horizontal space to benefit from 2-column content layouts.
+   The sidebar is hidden; content area gets extra breathing room.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Tablet-optimised sidebar width (used when sidebar IS visible, i.e. lg+) */
+@media (min-width: 1024px) and (max-width: 1280px) {
+  :root {
+    --sidebar-width: 220px;
+  }
+}
+
+/* At xl+ give sidebar a little more room */
+@media (min-width: 1440px) {
+  :root {
+    --sidebar-width: 268px;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   RESPONSIVE GLOBAL FIXES
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/*
+  Prevent iOS Safari from zooming into inputs on focus.
+  iOS zooms when font-size < 16px — setting 16px here avoids that
+  without changing the visual size (components can override via Tailwind classes).
+  Only targets the .glass-input class so raw inputs styled differently
+  are not affected unexpectedly.
+*/
+.glass-input {
+  font-size: 16px;
+}
+
+/* On tablets+ we can safely go back to the design's intended 14px */
+@media (min-width: 768px) {
+  .glass-input {
+    font-size: 14px;
+  }
+}
+
+/*
+  Prevent horizontal overflow at the document level.
+  We rely on min-w-0 guards throughout the flex tree rather than a
+  blanket overflow-x:hidden which masks real layout bugs.  The rule below
+  is a safety-net for stray absolute/fixed children only.
+*/
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/*
+  App shell — prevent any flex child from causing the page to be wider
+  than the viewport. Every direct flex child must have min-w-0 in markup;
+  this provides an additional CSS-level guard.
+*/
+.app-bg {
+  overflow-x: hidden;
+}
+
+/*
+  Ensure the main content column never exceeds the viewport width.
+  This prevents stray wide cards / charts from creating horizontal scroll.
+*/
+.app-bg > div > main {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/*
+  Any element that is wider than the viewport should not create a scrollbar.
+  Using max-width: 100% as a global guard for images, videos and SVGs.
+*/
+img, video, svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/*
+  Touch-action: make sure interactive elements do not accidentally
+  block scroll on mobile touch devices.
+*/
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+
+/*
+  Minimum touch target size for interactive controls on mobile.
+  44×44 px is the Apple HIG recommendation for touchable areas.
+  Use .touch-target as a wrapper around icons in navigation items —
+  it enlarges the hit area without distorting the visual layout.
+  IMPORTANT: do NOT nest .touch-target inside a flex column that
+  already has fixed height — it will bloat the container.
+*/
+.touch-target {
+  min-width:  44px;
+  min-height: 44px;
+  display:    inline-flex;
+  align-items:     center;
+  justify-content: center;
+}
+
+/*
+  Safe-area utilities — all four edges.
+  These pad *inside* an element so content is not obscured by
+  device notches, Dynamic Island, Home indicator, or rounded corners.
+*/
+.safe-top    { padding-top:    env(safe-area-inset-top,    0px); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-left   { padding-left:   env(safe-area-inset-left,   0px); }
+.safe-right  { padding-right:  env(safe-area-inset-right,  0px); }
+
+/*
+  pb-mobile-nav — bottom padding for page content on mobile.
+  Equals the bottom-nav bar height plus any iOS Home indicator inset
+  plus a small visual buffer (16px).  On desktop (lg+) this class is
+  not applied — the lg:pb-8 Tailwind class handles that instead.
+
+  We use a CSS custom property so it can be used in calc() elsewhere
+  (e.g. the FAB button's bottom offset).
+
+  --bottomnav-total-height is the full rendered height of the bottom nav
+  including safe-area. Use this for FAB positioning and any calc() that
+  needs to sit exactly above the physical bottom of the bar.
+*/
+:root {
+  --mobile-nav-pad: calc(
+    var(--bottomnav-height, 56px)
+    + env(safe-area-inset-bottom, 0px)
+    + 16px
+  );
+
+  /* Total rendered nav height (bar + safe area). Used by FAB etc. */
+  --bottomnav-total-height: calc(
+    var(--bottomnav-height, 56px)
+    + env(safe-area-inset-bottom, 0px)
+  );
+}
+
+.pb-mobile-nav {
+  padding-bottom: var(--mobile-nav-pad);
+}
+
+/*
+  On very small viewports (320px–374px) only tighten CSS custom-property
+  spacing tokens.  Do NOT override Tailwind utility classes with !important
+  here — that approach is too broad and breaks components unexpectedly.
+*/
+@media (max-width: 374px) {
+  :root {
+    --space-card:  14px;
+    --space-inner: 10px;
+  }
+
+  /*
+    On 320px screens, force 1-column for any 2-column grids that
+    would produce columns narrower than ~130px. We target the
+    grid-cols-2 Tailwind class only inside the app content area.
+  */
+  .app-bg .grid-cols-2:not(.force-2col) {
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+  Momentum-scroll utility — enables iOS Safari rubber-band scrolling
+  inside overflow:scroll / overflow:auto containers.
+*/
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/*
+  Mobile-safe flex row — prevents children from overflowing on 320px.
+  Use on any horizontal flex row containing variable-width items.
+*/
+.flex-row-safe {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/*
+  Scrollable container utility — use when a block of content may overflow
+  horizontally on narrow screens but should keep the table/chart intact.
+*/
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Ensure the scrollable area doesn't have a visible scrollbar on mobile
+     to maintain the clean glass aesthetic (scroll is still functional). */
+  scrollbar-width: thin;
+}
+
+/*
+  Sidebar navigation subtle scrollbar.
+  Applied to the scrollable <nav> inside the desktop sidebar.
+
+  Goals:
+    • Scrolling works normally when content overflows the viewport height.
+    • On Firefox: uses the native thin-mode scrollbar (2-4 px track).
+    • On WebKit/Blink: hides the default thick scrollbar and replaces it
+      with a narrow 4 px translucent thumb that only appears when the
+      user is scrolling or hovering over the nav region.
+    • The scrollbar blends with the glass surface and does NOT create an
+      ugly opaque gutter on the right edge of the sidebar.
+*/
+.sidebar-nav-scroll {
+  /* Firefox: thin native scrollbar with themed colours */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+/* WebKit (Chrome, Safari, Edge): narrow custom scrollbar */
+.sidebar-nav-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-nav-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+.sidebar-nav-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  /* Only visible when actually scrolling — achieved by opacity transition */
+  transition: background 0.2s ease;
+}
+.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* Dark mode: adjust thumb colour to stay subtle on dark glass */
+[data-theme="dark"] .sidebar-nav-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+[data-theme="dark"] .sidebar-nav-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.10);
+}
+[data-theme="dark"] .sidebar-nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+/*
+  Responsive table helper — wraps tables in a horizontally-scrollable
+  container so they don't overflow on narrow screens.
+*/
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+/* ── Hover-only actions: always visible on touch-primary devices ── */
+/*
+  Elements with group-hover-opacity patterns need to be visible on touch
+  devices because hover doesn't fire reliably.
+  The @media (hover: none) query targets devices with no precise pointer.
+*/
+@media (hover: none) {
+  .group .touch-visible {
+    opacity: 1 !important;
+  }
+}
+
+/* ── Bottom-sheet utility: slides up from bottom on mobile ──────────────── */
+/*
+  Used for filter panels and date pickers on narrow screens.
+  Displayed as a regular block on md+ viewports.
+*/
+.mobile-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 45;
+  border-radius: 24px 24px 0 0;
+  max-height: 80dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media (min-width: 768px) {
+  .mobile-sheet {
+    position: static;
+    border-radius: var(--radius-lg);
+    max-height: none;
+  }
+}
+
+/* ── Card grid utilities ──────────────────────────────────────────────────── */
+/*
+  Responsive card grids — use these utility classes on container divs.
+  They produce 1 → 2 → 3 → 4 column layouts as the viewport grows.
+*/
+.grid-cards-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .grid-cards-2 { grid-template-columns: repeat(2, 1fr); }
+}
+
+.grid-cards-3 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .grid-cards-3 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 1024px) {
+  .grid-cards-3 { grid-template-columns: repeat(3, 1fr); }
+}
+
+.grid-cards-4 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .grid-cards-4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 768px) {
+  .grid-cards-4 { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1024px) {
+  .grid-cards-4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ── Tab bar overflow: allow horizontal scroll for wide tab sets ─────────── */
+.tabs-scrollable {
+  display: flex;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;       /* Firefox */
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
+.tabs-scrollable::-webkit-scrollbar { display: none; }  /* Chrome/Safari */
+
+/* ── Responsive typography helpers ───────────────────────────────────────── */
+/* Use these when you want text to scale gracefully. */
+.text-responsive-xl {
+  font-size: clamp(1.25rem, 3.5vw, 1.875rem);
+  line-height: 1.25;
+  font-weight: 700;
+}
+.text-responsive-lg {
+  font-size: clamp(1rem, 2.5vw, 1.375rem);
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+/* ── Sidebar icon-only compact mode (768–1023px) ─────────────────────────── */
+/*
+  When the sidebar is shown in icon-only mode on the md range or when the
+  user collapses it on larger screens, nav labels are hidden and only icons
+  are shown.  The sidebar shrinks to 64px.
+*/
+.sidebar-compact {
+  --sidebar-width: 64px;
+}
+.sidebar-compact .sidebar-label {
+  display: none;
+}
+.sidebar-compact .sidebar-group-label {
+  display: none;
+}
+.sidebar-compact .sidebar-logo-text {
+  display: none;
+}
+.sidebar-compact .sidebar-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.sidebar-compact .sidebar-badge {
+  display: none;
+}
+
+/* ── Page layout helpers ──────────────────────────────────────────────────── */
+/*
+  Standard page wrapper. Handles horizontal padding across all viewports
+  and caps the content width for very wide monitors.
+*/
+.page-container {
+  width: 100%;
+  max-width: 72rem;   /* ~1152px — suits most content */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left:  1rem;          /* px-4  (mobile)  */
+  padding-right: 1rem;
+}
+@media (min-width: 640px) {
+  .page-container {
+    padding-left:  1.5rem;      /* px-6  (sm)      */
+    padding-right: 1.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  .page-container {
+    padding-left:  2rem;        /* px-8  (lg)      */
+    padding-right: 2rem;
+  }
+}
+
+/* ── Sidebar offset — main content left padding on desktop ───────────────── */
+/*
+  Applied to the main content column in app/app/layout.tsx.
+
+  The desktop sidebar is position:fixed so it is removed from document flow.
+  This class pushes the main column right by exactly the sidebar's current
+  rendered width so no content is hidden behind the sidebar.
+
+  • Mobile (< 1024 px):  sidebar is hidden → no offset needed.
+  • Desktop (≥ 1024 px): padding-left = current sidebar rendered width.
+*/
+.sidebar-offset {
+  padding-left: 0;
+}
+@media (min-width: 1024px) {
+  .sidebar-offset {
+    padding-left: var(--sidebar-width, 252px);
+  }
+}
+
+/* ── Wide desktop max-width ───────────────────────────────────────────────── */
+/* Dashboard and analytics can use a wider container on 1440p+ screens */
+@media (min-width: 1440px) {
+  .max-w-6xl { max-width: 80rem; }
+  .max-w-5xl { max-width: 68rem; }
+}
+
+/* ── Filter row wrapping ──────────────────────────────────────────────────── */
+/*
+  Filter bars (category chips, date range) wrap gracefully on narrow screens.
+*/
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+@media (min-width: 768px) {
+  .filter-row {
+    flex-wrap: nowrap;
+  }
+}
+
+/* ── Action button row: wrap on 320px ────────────────────────────────────── */
+/*
+  Prevents cramped 3+ button rows on 320px modal bottoms.
+  Use this class on the footer div of modals/forms.
+*/
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  justify-content: flex-end;
+}
+@media (min-width: 480px) {
+  .action-row {
+    flex-wrap: nowrap;
+  }
+}
+
+/* ── Mobile More sheet: hide FAB while open ──────────────────────────────── */
+/*
+  When the More bottom sheet is open, BottomNav sets data-more-open="true"
+  on <body>. The FAB in DashboardClient uses z-40 and is .lg:hidden fixed.
+  Hiding it via CSS keeps BottomNav and DashboardClient decoupled — no
+  shared state or prop drilling needed.
+
+  The sheet sits at z-50, so the FAB (z-40) would show through the
+  transparent backdrop otherwise. We set opacity:0 + pointer-events:none
+  so it fades out smoothly without any layout shift.
+*/
+body[data-more-open="true"] .more-sheet-hide-fab {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }

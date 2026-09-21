@@ -80,7 +80,7 @@ export function FinancialReviewClient() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Financial Review</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Financial Review</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Monthly money summary</p>
         </div>
         <div className="flex items-center gap-2">
@@ -93,7 +93,7 @@ export function FinancialReviewClient() {
       {/* Personal Spending */}
       <section>
         <h2 className="text-sm font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--text-muted)' }}>Personal Spending</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           <StatCard icon={<Wallet size={16}/>} label="Total Spent" value={formatPaise(data.personal.totalMinor)} sub={`${data.personal.transactionCount} transactions`} color="#3b82f6" />
           <StatCard icon={<TrendingDown size={16}/>} label="Daily Average" value={formatPaise(data.personal.avgDailyMinor)} color="#8b5cf6" />
           {data.personal.topCategory && (
@@ -168,7 +168,7 @@ export function FinancialReviewClient() {
       {/* Money Tracker */}
       <section>
         <h2 className="text-sm font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--text-muted)' }}>Money Tracker</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard icon={<TrendingUp size={16}/>} label="Collected" value={formatPaise(data.money.collectedMinor)} color="#16a34a" />
           <StatCard icon={<TrendingDown size={16}/>} label="Paid Back" value={formatPaise(data.money.paidMinor)} color="#ef4444" />
           <StatCard icon={<TrendingUp size={16}/>} label="Outstanding Given" value={formatPaise(data.money.givenOutstandingMinor)} sub="Others owe you" color="#10b981" />
@@ -187,7 +187,7 @@ export function FinancialReviewClient() {
       {/* Subscriptions */}
       <section>
         <h2 className="text-sm font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--text-muted)' }}>Subscriptions</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatCard icon={<CreditCard size={16}/>} label="Subscription Cost" value={formatPaise(data.subscriptions.costMinor)} sub="Due this month" color="#8b5cf6" />
         </div>
       </section>

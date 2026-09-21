@@ -10,9 +10,5 @@ export default async function ProfilePage() {
     redirect((msg === 'UserNotFound' || msg === 'AccountDeleted') ? '/api/auth/clear-session' : '/login')
   }
 
-  return (
-    <div className="px-4 sm:px-6 py-6 max-w-2xl mx-auto">
-      <ProfileClient />
-    </div>
-  )
+  return <ProfileClient />
 }

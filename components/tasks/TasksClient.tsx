@@ -190,7 +190,7 @@ export function TasksClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Tasks</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Tasks</h1>
           <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
             {tasks.filter((t) => !t.completed).length === 0 ? 'All done! 🎉' : `${tasks.filter((t) => !t.completed).length} remaining`}
           </p>
@@ -271,11 +271,11 @@ export function TasksClient() {
         <div className="flex flex-col gap-4">
           <GlassInput label="Task" placeholder="What needs to be done?" value={form.title} onChange={(e) => { setForm((f) => ({ ...f, title: e.target.value })); if (!editingTask) draft.triggerAutosave() }} />
           <GlassTextarea label="Description (optional)" placeholder="Add more details…" rows={3} value={form.description} onChange={(e) => { setForm((f) => ({ ...f, description: e.target.value })); if (!editingTask) draft.triggerAutosave() }} />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <GlassInput label="Due Date" type="date" value={form.dueDate} onChange={(e) => { setForm((f) => ({ ...f, dueDate: e.target.value })); if (!editingTask) draft.triggerAutosave() }} />
             <GlassInput label="Due Time" type="time" value={form.dueTime} onChange={(e) => { setForm((f) => ({ ...f, dueTime: e.target.value })); if (!editingTask) draft.triggerAutosave() }} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <GlassSelect label="Priority" value={form.priority} onChange={(v) => { setForm((f) => ({ ...f, priority: v as TaskFormData['priority'] })); if (!editingTask) draft.triggerAutosave() }} options={[{ value: 'low', label: '🟢 Low' }, { value: 'medium', label: '🟡 Medium' }, { value: 'high', label: '🔴 High' }]} />
             <GlassSelect label="Recurring" value={form.recurring} onChange={(v) => { setForm((f) => ({ ...f, recurring: v as TaskFormData['recurring'] })); if (!editingTask) draft.triggerAutosave() }} options={[{ value: 'none', label: 'One-time' }, { value: 'daily', label: '🔁 Daily' }, { value: 'weekly', label: '📅 Weekly' }, { value: 'monthly', label: '🗓️ Monthly' }]} />
           </div>

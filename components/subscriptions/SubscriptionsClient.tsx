@@ -158,7 +158,7 @@ function SubForm({
         required
       />
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <SmartAmountInput
           label="Amount"
           value={form.amountExpr}
@@ -173,7 +173,7 @@ function SubForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput
           label="Next Billing Date"
           type="date"
@@ -188,7 +188,7 @@ function SubForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <GlassInput
           label="Payment Method"
           value={form.paymentMethod ?? ''}
@@ -350,7 +350,7 @@ export function SubscriptionsClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
             Subscriptions
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
@@ -367,15 +367,15 @@ export function SubscriptionsClient() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {[
           { label: 'Monthly Cost', value: formatPaise(summary.monthlyTotalMinor) },
           { label: 'Yearly Cost',  value: formatPaise(summary.yearlyTotalMinor)  },
           { label: 'Active',       value: String(summary.activeCount)            },
         ].map((s) => (
           <GlassCard key={s.label} padding="sm" className="text-center">
-            <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{s.value}</p>
-            <p className="text-xs mt-0.5"    style={{ color: 'var(--text-muted)'    }}>{s.label}</p>
+            <p className="text-sm sm:text-lg font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>{s.value}</p>
+            <p className="text-[10px] sm:text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{s.label}</p>
           </GlassCard>
         ))}
       </div>

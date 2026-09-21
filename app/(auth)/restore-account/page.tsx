@@ -89,7 +89,7 @@ function InvalidState() {
   const router = useRouter()
   return (
     <Card>
-      <div className="p-8">
+      <div className="auth-card-pad">
         <div className="flex flex-col items-center mb-8">
           <motion.div
             initial={{ scale: 0.7, opacity: 0 }}
@@ -141,7 +141,7 @@ function ExpiredState() {
   const router = useRouter()
   return (
     <Card>
-      <div className="p-8">
+      <div className="auth-card-pad">
         <div className="flex flex-col items-center mb-8">
           <motion.div
             initial={{ scale: 0.7, opacity: 0 }}
@@ -192,7 +192,7 @@ function GoneState() {
   const router = useRouter()
   return (
     <Card>
-      <div className="p-8">
+      <div className="auth-card-pad">
         <div className="flex flex-col items-center mb-8">
           <motion.div
             initial={{ scale: 0.7, opacity: 0 }}
@@ -448,7 +448,7 @@ function RestoreAccountContent() {
 
   return (
     <Card>
-      <div className="p-8">
+      <div className="auth-card-pad">
         {/* ── Icon + branding ──────────────────────────────────────────── */}
         <div className="flex flex-col items-center mb-8">
           <motion.div

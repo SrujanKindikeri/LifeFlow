@@ -78,7 +78,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {/* Toast container */}
       <div
         className="fixed right-4 z-[200] flex flex-col gap-2 pointer-events-none max-w-xs w-full"
-        style={{ bottom: 'calc(var(--bottomnav-height, 68px) + 12px)' }}
+        style={{ bottom: 'calc(var(--bottomnav-height, 56px) + env(safe-area-inset-bottom, 0px) + 12px)' }}
         aria-live="polite"
         aria-label="Notifications"
       >

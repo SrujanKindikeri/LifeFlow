@@ -150,7 +150,7 @@ function ContributionModal({ goal, onAdded }: { goal: SGoal; onClose: ()=>void; 
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Saved: {formatPaise(goal.savedMinor)} of {formatPaise(goal.targetAmountMinor)}</p>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <SmartAmountInput label="Amount" value={amount} onChange={(raw) => setAmount(raw)} currency="INR" />
         <GlassInput label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
@@ -252,7 +252,7 @@ export function SavingsClient() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Savings Goals</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Savings Goals</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Save towards specific targets</p>
         </div>
         <GlassButton variant="primary" icon={<Plus size={15} />} onClick={() => { setEditing(null); setModalOpen(true) }}>New Goal</GlassButton>

@@ -647,7 +647,7 @@ export function PersonalExpensesClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Personal Spending</h1>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Personal Spending</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Your individual expenses</p>
         </div>
         <GlassButton variant="primary" onClick={openCreate} className="gap-1.5">
@@ -658,18 +658,18 @@ export function PersonalExpensesClient() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {[
           { label: 'Today',      value: todayTotal,  icon: <Calendar size={14} />,   color: 'text-sky-400'     },
           { label: 'This Week',  value: weekTotal,   icon: <TrendingUp size={14} />, color: 'text-violet-400'  },
           { label: 'This Month', value: monthTotal,  icon: <Wallet size={14} />,     color: 'text-emerald-400' },
         ].map(({ label, value, icon, color }) => (
-          <div key={label} className="glass rounded-2xl p-3 sm:p-4">
-            <div className={cn('flex items-center gap-1.5 mb-1.5', color)}>
+          <div key={label} className="glass rounded-2xl p-2 sm:p-4">
+            <div className={cn('flex items-center gap-1 sm:gap-1.5 mb-1 sm:mb-1.5', color)}>
               {icon}
-              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{label}</span>
+              <span className="text-[10px] sm:text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>{label}</span>
             </div>
-            <p className="text-base sm:text-lg font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+            <p className="text-sm sm:text-base lg:text-lg font-bold tabular-nums" style={{ color: 'var(--text-primary)' }}>
               {formatCurrency(value)}
             </p>
           </div>
@@ -949,7 +949,7 @@ export function PersonalExpensesClient() {
           </div>
 
           {/* Date + Payment Method */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Date</label>

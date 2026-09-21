@@ -120,7 +120,7 @@ export function DraftsClient() {
       {/* ── Page header ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
             Drafts
           </h1>
           <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
