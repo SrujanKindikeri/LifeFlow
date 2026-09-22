@@ -64,6 +64,11 @@ export interface User {
   deletedAt: string | null
   /** ISO string of scheduled permanent-deletion date, or null. */
   scheduledPermanentDeletionAt: string | null
+  // ── Email OTP Two-Factor Authentication ──────────────────────────────────
+  /** Whether Email OTP 2FA is active for this account. */
+  emailOtpEnabled: boolean
+  /** ISO string of when Email 2FA was enabled, or null. */
+  twoFactorEnabledAt: string | null
   createdAt: string
   updatedAt: string
 }

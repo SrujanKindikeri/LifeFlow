@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
@@ -10,10 +10,11 @@ import { Mail, Lock, Eye, EyeOff, ShieldCheck, KeyRound } from 'lucide-react'
 import { loginSchema, type LoginInput } from '@/lib/validations'
 import { GlassInput } from '@/components/ui/GlassInput'
 import { GlassButton } from '@/components/ui/GlassButton'
+import { OtpInput } from '@/components/ui/OtpInput'
 import { useToast } from '@/components/ui/Toast'
 
 // ── Step types ─────────────────────────────────────────────────────────────────
-type Step = 'credentials' | 'email-not-verified' | '2fa' | 'account-deleted'
+type Step = 'credentials' | 'email-not-verified' | '2fa' | '2fa-email' | 'account-deleted'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -33,13 +34,53 @@ export default function LoginPage() {
   const [permanentAt,      setPermanentAt]      = useState<string | null>(null)
   const [restoring,        setRestoring]        = useState(false)
 
-  // 2FA state
+  // 2FA TOTP state
   const [totpCode, setTotpCode]           = useState('')
   const [totpLoading, setTotpLoading]     = useState(false)
   const [showRecovery, setShowRecovery]   = useState(false)
   const [recoveryCode, setRecoveryCode]   = useState('')
 
-  // Resend state
+  // 2FA Email OTP state
+  const [emailOtpCode,    setEmailOtpCode]    = useState('')
+  const [emailOtpLoading, setEmailOtpLoading] = useState(false)
+  const [emailOtpError,   setEmailOtpError]   = useState<string | null>(null)
+  const [emailMasked,     setEmailMasked]     = useState('')
+  const [emailOtpExpiresAt, setEmailOtpExpiresAt] = useState<string | null>(null)
+  const [emailResending,  setEmailResending]  = useState(false)
+  const [emailResendCooldown, setEmailResendCooldown] = useState(0)
+  const emailResendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Countdown for email OTP
+  const [emailOtpCountdown, setEmailOtpCountdown] = useState(0)
+
+  function startEmailResendCooldown() {
+    setEmailResendCooldown(60)
+    if (emailResendTimerRef.current) clearInterval(emailResendTimerRef.current)
+    emailResendTimerRef.current = setInterval(() => {
+      setEmailResendCooldown((v) => {
+        if (v <= 1) { clearInterval(emailResendTimerRef.current!); return 0 }
+        return v - 1
+      })
+    }, 1000)
+  }
+
+  function startEmailOtpCountdown(expiresAt: string) {
+    setEmailOtpExpiresAt(expiresAt)
+    function tick() {
+      const diff = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+      setEmailOtpCountdown(diff)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    // store for cleanup — attach to ref re-used below
+    emailResendTimerRef.current = id
+  }
+
+  function formatCountdown(secs: number) {
+    return `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
+  }
+
+  // Resend state (for email verification resend)
   const [resending, setResending]         = useState(false)
 
   const { register, handleSubmit, formState: { errors }, getValues } = useForm<LoginInput>({
@@ -91,6 +132,22 @@ export default function LoginPage() {
 
       // Server signals that TOTP is required
       if (json.twoFactorRequired) {
+        if (json.twoFactorMethod === 'email_otp') {
+          // Email OTP 2FA — go to dedicated OTP screen
+          setEmailMasked(json.maskedEmail ?? '')
+          setEmailOtpCode('')
+          setEmailOtpError(null)
+          if (json.maskedEmail) {
+            // Start a 10-minute countdown (600 s) if expiresAt not provided
+            startEmailOtpCountdown(
+              json.otpExpiresAt ?? new Date(Date.now() + 10 * 60 * 1000).toISOString()
+            )
+          }
+          startEmailResendCooldown()
+          setStep('2fa-email')
+          return
+        }
+        // TOTP / Google Authenticator
         setStep('2fa')
         info('Enter the 6-digit code from your authenticator app.')
         return
@@ -178,9 +235,101 @@ export default function LoginPage() {
     }
   }
 
+  // ── Step: Email OTP 2FA ────────────────────────────────────────────────────
+  async function onVerifyEmailOtp() {
+    if (emailOtpCode.length !== 6) {
+      setEmailOtpError('Please enter the 6-digit verification code.')
+      return
+    }
+    setEmailOtpLoading(true)
+    setEmailOtpError(null)
+    try {
+      const res  = await fetch('/api/auth/2fa/email/login-verify', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ otp: emailOtpCode }),
+      })
+      const json = await res.json()
+
+      if (!res.ok) {
+        if (res.status === 429) {
+          setEmailOtpError(json.error ?? 'Too many attempts. Please try again later.')
+          return
+        }
+        if (json.code === 'OTP_MAX_ATTEMPTS') {
+          setEmailOtpError('Too many incorrect attempts. Please log in again.')
+          setTimeout(() => { setStep('credentials'); setEmailOtpCode(''); setEmailOtpError(null) }, 2500)
+          return
+        }
+        if (json.code === 'OTP_EXPIRED') {
+          setEmailOtpError('Code expired. Click "Resend code" to get a new one.')
+          setEmailOtpCode('')
+          return
+        }
+        if (json.code === 'OTP_INVALID' && typeof json.attemptsLeft === 'number') {
+          setEmailOtpError(
+            json.attemptsLeft === 1
+              ? 'Incorrect code. 1 attempt remaining.'
+              : `Incorrect code. ${json.attemptsLeft} attempts remaining.`
+          )
+          setEmailOtpCode('')
+          return
+        }
+        if (res.status === 401 && json.error?.toLowerCase().includes('session')) {
+          setEmailOtpError('Session expired. Please log in again.')
+          setTimeout(() => setStep('credentials'), 1800)
+          return
+        }
+        setEmailOtpError(json.error ?? 'Verification failed. Please try again.')
+        setEmailOtpCode('')
+        return
+      }
+
+      success('Welcome back!')
+      window.location.assign('/app/dashboard')
+    } catch {
+      setEmailOtpError('Something went wrong. Please try again.')
+    } finally {
+      setEmailOtpLoading(false)
+    }
+  }
+
+  async function handleEmailResend() {
+    if (emailResendCooldown > 0 || emailResending) return
+    setEmailResending(true)
+    setEmailOtpError(null)
+    try {
+      const res  = await fetch('/api/auth/2fa/email/resend', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ purpose: '2fa_login' }),
+      })
+      const json = await res.json()
+
+      if (!res.ok) {
+        if (res.status === 429 || json.code === 'OTP_COOLDOWN') {
+          error(json.error ?? 'Please wait before requesting another code.')
+          return
+        }
+        error(json.error ?? 'Failed to resend code. Please try again.')
+        return
+      }
+
+      setEmailOtpCode('')
+      if (json.otpExpiresAt) {
+        if (emailResendTimerRef.current) clearInterval(emailResendTimerRef.current)
+        startEmailOtpCountdown(json.otpExpiresAt)
+      }
+      startEmailResendCooldown()
+    } catch {
+      error('Failed to resend code. Please try again.')
+    } finally {
+      setEmailResending(false)
+    }
+  }
+
   // ── Restore deleted account ────────────────────────────────────────────────
-  async function handleRestore() {
-    if (restoring) return
+  async function handleRestore() {    if (restoring) return
     setRestoring(true)
     try {
       const res  = await fetch('/api/auth/restore-account', {
@@ -590,6 +739,115 @@ export default function LoginPage() {
                     setTotpCode('')
                     setRecoveryCode('')
                     setShowRecovery(false)
+                  }}
+                >
+                  ← Back to Sign In
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Email OTP 2FA step ─────────────────────────────────────────── */}
+          {step === '2fa-email' && (
+            <motion.div
+              key="2fa-email"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ duration: 0.2 }}
+              className="auth-card-pad"
+            >
+              <div className="flex flex-col items-center mb-6">
+                <motion.div
+                  initial={{ scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1,   opacity: 1 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 400, damping: 20 }}
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5"
+                  style={{
+                    background: 'rgba(37,99,235,0.10)',
+                    border: '1px solid rgba(37,99,235,0.20)',
+                    color: '#2563eb',
+                  }}
+                >
+                  <ShieldCheck size={26} />
+                </motion.div>
+                <h1 className="text-[20px] font-bold tracking-tight text-center mb-1"
+                  style={{ color: 'var(--text-primary)' }}>
+                  Verify your identity
+                </h1>
+                <p className="text-[13px] text-center mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Two-factor authentication is enabled for your LifeFlow account.
+                </p>
+                {emailMasked && (
+                  <p className="text-[13px] text-center" style={{ color: 'var(--text-secondary)' }}>
+                    We sent a verification code to{' '}
+                    <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {emailMasked}
+                    </span>
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <OtpInput
+                  value={emailOtpCode}
+                  onChange={(v) => { setEmailOtpCode(v); setEmailOtpError(null) }}
+                  disabled={emailOtpLoading}
+                  hasError={!!emailOtpError}
+                  onSubmit={emailOtpCode.length === 6 ? onVerifyEmailOtp : undefined}
+                />
+
+                {emailOtpError && (
+                  <p className="text-[12px] text-center" style={{ color: '#dc2626' }} role="alert">
+                    {emailOtpError}
+                  </p>
+                )}
+
+                {emailOtpCountdown > 0 ? (
+                  <p className="text-[12px] text-center" style={{ color: 'var(--text-muted)' }}>
+                    Code expires in{' '}
+                    <span className="font-mono font-semibold">{formatCountdown(emailOtpCountdown)}</span>
+                  </p>
+                ) : (
+                  <p className="text-[12px] text-center" style={{ color: '#dc2626' }}>
+                    Code expired — click &ldquo;Resend code&rdquo; to get a new one.
+                  </p>
+                )}
+
+                <GlassButton
+                  variant="primary"
+                  fullWidth
+                  size="lg"
+                  loading={emailOtpLoading}
+                  disabled={emailOtpCode.length !== 6 || emailOtpCountdown === 0}
+                  onClick={onVerifyEmailOtp}
+                >
+                  Verify &amp; Sign In
+                </GlassButton>
+
+                <button
+                  type="button"
+                  className="w-full text-center text-[13px] transition-colors py-1 disabled:opacity-40"
+                  style={{ color: 'var(--accent)' }}
+                  onClick={handleEmailResend}
+                  disabled={emailResendCooldown > 0 || emailResending}
+                >
+                  {emailResending
+                    ? 'Sending…'
+                    : emailResendCooldown > 0
+                      ? `Resend code (${emailResendCooldown}s)`
+                      : 'Resend code'}
+                </button>
+
+                <button
+                  type="button"
+                  className="w-full text-center text-[12px] transition-colors py-1"
+                  style={{ color: 'var(--text-muted)' }}
+                  onClick={() => {
+                    setStep('credentials')
+                    setEmailOtpCode('')
+                    setEmailOtpError(null)
+                    if (emailResendTimerRef.current) clearInterval(emailResendTimerRef.current)
                   }}
                 >
                   ← Back to Sign In

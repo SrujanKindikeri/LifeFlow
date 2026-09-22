@@ -4,7 +4,10 @@ import { connectDB } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { loginSchema } from '@/lib/validations'
 import User from '@/models/User'
-import { checkLoginLimit, getClientIp } from '@/lib/auth/rate-limit'
+import { checkLoginLimit, checkEmailOtpLoginSendLimit, getClientIp } from '@/lib/auth/rate-limit'
+import { generateEmailOtp, EMAIL_OTP_VALID_MINUTES, EMAIL_OTP_MAX_ATTEMPTS } from '@/lib/auth/otp'
+import { getNotificationService } from '@/lib/notifications'
+import { buildTwoFaLoginOtpEmail, maskEmail } from '@/lib/auth/email-templates'
 import logger from '@/lib/logger'
 
 // Max age for the 2FA pending window (5 minutes)
@@ -105,13 +108,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── 2FA challenge ────────────────────────────────────────────────────────
+    // ── TOTP / Google Authenticator 2FA challenge ────────────────────────────
     if (user.twoFactorEnabled) {
-      // Issue a short-lived pending session instead of a full session.
-      // The client must complete the TOTP step at /api/auth/verify-2fa.
+      // Issue a short-lived pending session. Client completes at /api/auth/verify-2fa.
       const session = await getSession()
-
-      // Clear any previous pending state and never carry over a real session
       session.isLoggedIn         = false
       session.userId             = ''
       session.name               = ''
@@ -121,12 +121,81 @@ export async function POST(req: NextRequest) {
       session.twoFactorPendingAt = Date.now()
       await session.save()
 
-      logger.info('[login] 2FA challenge issued', { userId: user._id.toString() })
+      logger.info('[login] TOTP 2FA challenge issued', { userId: user._id.toString() })
+
+      return NextResponse.json(
+        { twoFactorRequired: true, twoFactorMethod: 'totp', message: 'Please enter your authenticator code.' },
+        { status: 200 }
+      )
+    }
+
+    // ── Email OTP 2FA challenge ───────────────────────────────────────────────
+    if (user.emailOtpEnabled) {
+      // Generate and email a 6-digit OTP, then issue a pending session.
+      // Client completes at /api/auth/2fa/email/login-verify.
+
+      const otpRateResult = checkEmailOtpLoginSendLimit(ip, user._id.toString())
+      if (otpRateResult.allowed) {
+        // Generate exactly ONE OTP
+        const { otp, otpHash } = generateEmailOtp()
+        const now              = new Date()
+        const otpExpiresAt     = new Date(now.getTime() + EMAIL_OTP_VALID_MINUTES * 60 * 1000)
+
+        user.emailOtpHash        = otpHash
+        user.emailOtpExpiresAt   = otpExpiresAt
+        user.emailOtpAttempts    = 0
+        user.emailOtpMaxAttempts = EMAIL_OTP_MAX_ATTEMPTS
+        user.emailOtpSentAt      = now
+        user.emailOtpPurpose     = '2fa_login'
+        await user.save()
+
+        logger.info('[2FA] verification challenge created', { userId: user._id.toString(), purpose: '2fa_login' })
+
+        try {
+          const notifier = await getNotificationService()
+          const { subject, html, text } = buildTwoFaLoginOtpEmail({
+            toName: user.name, toEmail: user.email,
+            otp, validMinutes: EMAIL_OTP_VALID_MINUTES,
+          })
+          const result = await notifier.send({ to: user.email, subject, html, text })
+          if (result.ok) {
+            logger.info('[2FA] OTP email sent', { userId: user._id.toString(), purpose: '2fa_login' })
+          } else {
+            logger.error('[2FA] OTP email delivery failed', {
+              userId: user._id.toString(), purpose: '2fa_login', emailError: result.error,
+            })
+          }
+        } catch (emailErr) {
+          logger.error('[2FA] OTP email error', {
+            userId: user._id.toString(),
+            errorMessage: emailErr instanceof Error ? emailErr.message : String(emailErr),
+          })
+        }
+      } else {
+        logger.info('[login] Email OTP send rate limited — pending session issued, user must resend', {
+          userId: user._id.toString(),
+        })
+      }
+
+      // Issue pending session regardless of whether OTP email was sent
+      const session = await getSession()
+      session.isLoggedIn         = false
+      session.userId             = ''
+      session.name               = ''
+      session.email              = ''
+      session.twoFactorPending   = true
+      session.pendingUserId      = user._id.toString()
+      session.twoFactorPendingAt = Date.now()
+      await session.save()
+
+      logger.info('[login] Email OTP 2FA challenge issued', { userId: user._id.toString() })
 
       return NextResponse.json(
         {
           twoFactorRequired: true,
-          message: 'Please enter your authenticator code.',
+          twoFactorMethod:   'email_otp',
+          maskedEmail:       maskEmail(user.email),
+          message:           'Please enter the verification code sent to your email.',
         },
         { status: 200 }
       )

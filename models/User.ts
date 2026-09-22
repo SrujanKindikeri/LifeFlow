@@ -120,6 +120,35 @@ export interface IUser extends Document {
    */
   accountRestoreExpiresAt: Date | null
 
+  // ── Account recovery OTP (step 2 of password → OTP → restore) ────────────
+  /**
+   * SHA-256 hash of the 6-digit OTP sent to the user's email after a
+   * successful password verification during account recovery.
+   * Never store the raw OTP.  Cleared on successful verification or expiry.
+   */
+  accountRecoveryOtpHash: string | null
+  /**
+   * UTC expiry of the recovery OTP — valid for 10 minutes after generation.
+   * Set to null when no OTP is pending or after it has been consumed.
+   */
+  accountRecoveryOtpExpiresAt: Date | null
+  /**
+   * Number of incorrect OTP attempts for the current recovery OTP.
+   * Reset to 0 whenever a fresh OTP is generated.
+   * If this reaches accountRecoveryOtpMaxAttempts the OTP is invalidated
+   * and the user must request a new one.
+   */
+  accountRecoveryOtpAttempts: number
+  /**
+   * Maximum number of incorrect OTP attempts before invalidation (default 5).
+   */
+  accountRecoveryOtpMaxAttempts: number
+  /**
+   * ISO timestamp of when the most recent recovery OTP was generated.
+   * Used to enforce the 60-second resend cooldown on the client/server.
+   */
+  accountRecoveryOtpSentAt: Date | null
+
   // ── TOTP / Google Authenticator ───────────────────────────────────────────
   /** Whether TOTP 2FA is active for this account */
   twoFactorEnabled: boolean
@@ -137,6 +166,53 @@ export interface IUser extends Document {
    * An entry is removed from the array once used.
    */
   twoFactorRecoveryCodeHashes: string[]
+
+  // ── Email OTP Two-Factor Authentication ───────────────────────────────────
+  /**
+   * Whether Email OTP 2FA is active for this account.
+   * When true, a 6-digit OTP is emailed on each login attempt.
+   * Completely independent from twoFactorEnabled (TOTP).
+   */
+  emailOtpEnabled: boolean
+  /**
+   * UTC timestamp when Email OTP 2FA was enabled for this account.
+   * Set on successful OTP verification during the enable flow.
+   * Cleared when 2FA is disabled.
+   */
+  twoFactorEnabledAt: Date | null
+  /**
+   * SHA-256 hash of the current pending login/enable/disable OTP.
+   * Only the hash is stored — the raw OTP is sent by email only.
+   * Cleared on successful use, expiry, or max-attempt exhaustion.
+   */
+  emailOtpHash: string | null
+  /**
+   * UTC timestamp after which the pending OTP is invalid.
+   * Set to emailOtpSentAt + 10 minutes.
+   */
+  emailOtpExpiresAt: Date | null
+  /**
+   * Number of incorrect OTP attempts for the current pending OTP.
+   * Reset to 0 whenever a fresh OTP is generated.
+   * If this reaches emailOtpMaxAttempts the OTP is invalidated.
+   */
+  emailOtpAttempts: number
+  /**
+   * Maximum number of incorrect attempts before invalidation.
+   * Default 5 — matches accountRecoveryOtpMaxAttempts.
+   */
+  emailOtpMaxAttempts: number
+  /**
+   * UTC timestamp when the most recent OTP was sent.
+   * Used to enforce the 60-second resend cooldown server-side.
+   */
+  emailOtpSentAt: Date | null
+  /**
+   * Purpose of the pending OTP.
+   * Prevents cross-purpose OTP reuse (e.g. a login OTP cannot enable 2FA).
+   * Values: "2fa_enable" | "2fa_login" | "2fa_disable"
+   */
+  emailOtpPurpose: '2fa_enable' | '2fa_login' | '2fa_disable' | null
 
   // ── Account lifecycle (soft-delete) ──────────────────────────────────────
   /**
@@ -289,6 +365,34 @@ const UserSchema = new Schema<IUser>(
       default: null,
     },
 
+    // ── Account recovery OTP ─────────────────────────────────────────────────
+    // Generated after successful password verification during account recovery.
+    // Only the SHA-256 hash is stored; the raw 6-digit OTP goes only to the
+    // user's email and is immediately discarded. Cleared on use or expiry.
+    accountRecoveryOtpHash: {
+      type:    String,
+      default: null,
+      index:   true,
+      sparse:  true,
+    },
+    accountRecoveryOtpExpiresAt: {
+      type:    Date,
+      default: null,
+    },
+    accountRecoveryOtpAttempts: {
+      type:    Number,
+      default: 0,
+      min:     0,
+    },
+    accountRecoveryOtpMaxAttempts: {
+      type:    Number,
+      default: 5,
+    },
+    accountRecoveryOtpSentAt: {
+      type:    Date,
+      default: null,
+    },
+
     // ── TOTP / Google Authenticator ─────────────────────────────────────────
     twoFactorEnabled: {
       type: Boolean,
@@ -305,6 +409,47 @@ const UserSchema = new Schema<IUser>(
     twoFactorRecoveryCodeHashes: {
       type: [String],
       default: [],
+    },
+
+    // ── Email OTP Two-Factor Authentication ──────────────────────────────────
+    // Completely independent from twoFactorEnabled (TOTP / Google Authenticator).
+    // When emailOtpEnabled is true, a 6-digit OTP is emailed on every login.
+    // Only the SHA-256 hash of the OTP is stored here; the raw OTP goes only
+    // into the email body and is discarded immediately after sending.
+    emailOtpEnabled: {
+      type:    Boolean,
+      default: false,
+      index:   true,   // fast filter in login route
+    },
+    twoFactorEnabledAt: {
+      type:    Date,
+      default: null,
+    },
+    emailOtpHash: {
+      type:    String,
+      default: null,
+    },
+    emailOtpExpiresAt: {
+      type:    Date,
+      default: null,
+    },
+    emailOtpAttempts: {
+      type:    Number,
+      default: 0,
+      min:     0,
+    },
+    emailOtpMaxAttempts: {
+      type:    Number,
+      default: 5,
+    },
+    emailOtpSentAt: {
+      type:    Date,
+      default: null,
+    },
+    emailOtpPurpose: {
+      type:    String,
+      enum:    ['2fa_enable', '2fa_login', '2fa_disable', null],
+      default: null,
     },
 
     // ── Account lifecycle (soft-delete) ──────────────────────────────────────

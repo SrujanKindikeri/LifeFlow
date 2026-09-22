@@ -401,3 +401,223 @@ export function checkRestoreTokenAttemptLimit(tokenHash: string): RateLimitResul
     windowMs: 15 * 60 * 1000,
   })
 }
+
+// ─── Account-recovery OTP limiters ───────────────────────────────────────────
+
+/**
+ * Rate limit for POST /api/auth/restore-account/request-otp — OTP generation.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-token cooldown — 1 OTP request per 60 seconds per restore-token hash.
+ *      Prevents rapid OTP-hammering even if the password step was just passed.
+ *   2. Per-token daily cap — max 10 OTP requests per recovery session.
+ *      Once exhausted the user must restart from the password step.
+ *   3. Per-IP hourly cap — 10 requests per hour across all recovery attempts.
+ *      Secondary defence against distributed abuse.
+ *
+ * Keyed on the restore-token hash (not userId) because it is the trust anchor
+ * for the whole recovery session and is already rate-limited elsewhere.
+ *
+ * NOTE: does NOT share the restore-token attempt bucket — that bucket is
+ * reserved exclusively for OTP verify calls so it can't be drained by
+ * password submissions or token preflight checks.
+ */
+export function checkRecoveryOtpRequestLimit(
+  ip: string,
+  tokenHash: string,
+): RateLimitResult {
+  // ── 1. Per-token 60-second cooldown ───────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `recovery-otp:cooldown:${tokenHash}`,
+    limit:    1,
+    windowMs: 60 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-token daily cap (max 10 OTPs per recovery attempt) ─────────────
+  const daily = checkRateLimit({
+    key:      `recovery-otp:daily:${tokenHash}`,
+    limit:    10,
+    windowMs: 24 * 60 * 60 * 1000,
+  })
+  if (!daily.allowed) return daily
+
+  // ── 3. Per-IP hourly cap ──────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `recovery-otp:ip:${ip}`,
+    limit:    10,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+/**
+ * Rate limit for POST /api/auth/restore-account/request-otp — password attempts.
+ *
+ * Separate from the OTP-generation cooldown and the OTP-verify attempt bucket.
+ * Allows up to 10 password attempts per 15-minute window per restore-token hash.
+ * The OTP-verify bucket (checkRecoveryOtpVerifyAttemptLimit) is completely
+ * independent so that password retries do not drain the OTP attempt budget.
+ */
+export function checkRecoveryPasswordAttemptLimit(tokenHash: string): RateLimitResult {
+  return checkRateLimit({
+    key:      `recovery-pw:attempt:${tokenHash}`,
+    limit:    10,
+    windowMs: 15 * 60 * 1000,
+  })
+}
+
+/**
+ * Rate limit for POST /api/auth/restore-account/verify-otp — OTP verification.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-token OTP-verify attempt cap — max 10 guesses per restore-token hash
+ *      per 15-minute window.  The DB-level accountRecoveryOtpAttempts counter
+ *      (capped at 5) is the authoritative security control; this rate limiter
+ *      is only a secondary flood guard that prevents excessive DB writes from a
+ *      rapid request storm.  It is deliberately higher than the DB cap so that
+ *      it never fires before the DB cap does.
+ *   2. Per-IP hourly cap — 20 verify calls per IP per hour.
+ *      Secondary defence against distributed brute-force.
+ *
+ * IMPORTANT: uses a dedicated key (`recovery-otp-verify:attempt:…`) that is
+ * completely separate from `restore-token:attempt:…` so that page refreshes
+ * (which call validate-restore-token) and password submissions (which call
+ * request-otp) cannot drain this budget.
+ */
+export function checkRecoveryOtpVerifyAttemptLimit(
+  ip: string,
+  tokenHash: string,
+): RateLimitResult {
+  // ── 1. Per-token OTP-verify flood guard ───────────────────────────────────
+  const attempts = checkRateLimit({
+    key:      `recovery-otp-verify:attempt:${tokenHash}`,
+    limit:    10,
+    windowMs: 15 * 60 * 1000,
+  })
+  if (!attempts.allowed) return attempts
+
+  // ── 2. Per-IP hourly cap ──────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `recovery-otp-verify:ip:${ip}`,
+    limit:    20,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+/**
+ * @deprecated Use checkRecoveryOtpVerifyAttemptLimit instead.
+ * Retained for any callers that reference the old name — will be removed in a
+ * future cleanup.
+ */
+export function checkRecoveryOtpVerifyLimit(
+  ip: string,
+  tokenHash: string,
+): RateLimitResult {
+  return checkRecoveryOtpVerifyAttemptLimit(ip, tokenHash)
+}
+
+// ─── Email OTP 2FA limiters ───────────────────────────────────────────────────
+
+/**
+ * Rate limit for Email OTP 2FA OTP generation (enable / disable / resend).
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-userId 60-second cooldown — prevents rapid-fire OTP requests.
+ *      Checked AFTER successful password verification so failed passwords
+ *      don't consume the cooldown window.
+ *   2. Per-userId hourly cap — max 10 OTP requests per hour per account.
+ *   3. Per-IP hourly cap — 20 requests per IP per hour across all accounts.
+ *
+ * @param ip     — client IP from getClientIp()
+ * @param userId — authenticated user's MongoDB _id string
+ */
+export function checkEmailOtpRequestLimit(ip: string, userId: string): RateLimitResult {
+  // ── 1. Per-user 60-second cooldown ────────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `email-otp:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 60 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-user hourly cap ─────────────────────────────────────────────────
+  const hourly = checkRateLimit({
+    key:      `email-otp:hourly:${userId}`,
+    limit:    10,
+    windowMs: 60 * 60 * 1000,
+  })
+  if (!hourly.allowed) return hourly
+
+  // ── 3. Per-IP hourly cap ───────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `email-otp:ip:${ip}`,
+    limit:    20,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+/**
+ * Rate limit for Email OTP 2FA OTP verification attempts (enable / disable / login).
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-userId attempt flood guard — max 10 guesses per 15 minutes.
+ *      The DB-level emailOtpAttempts counter (capped at 5) is the authoritative
+ *      security control; this is a secondary flood guard to prevent excessive
+ *      DB writes from a rapid request storm.
+ *   2. Per-IP hourly cap — 30 verify calls per IP per hour.
+ *
+ * @param ip     — client IP from getClientIp()
+ * @param userId — pending/authenticated user's MongoDB _id string
+ */
+export function checkEmailOtpVerifyLimit(ip: string, userId: string): RateLimitResult {
+  // ── 1. Per-user attempt flood guard ───────────────────────────────────────
+  const attempts = checkRateLimit({
+    key:      `email-otp-verify:attempt:${userId}`,
+    limit:    10,
+    windowMs: 15 * 60 * 1000,
+  })
+  if (!attempts.allowed) return attempts
+
+  // ── 2. Per-IP hourly cap ───────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `email-otp-verify:ip:${ip}`,
+    limit:    30,
+    windowMs: 60 * 60 * 1000,
+  })
+}
+
+/**
+ * Rate limit for the Email OTP 2FA login OTP generation step in the login route.
+ *
+ * Mirrors checkEmailOtpRequestLimit but keyed differently so login OTP generation
+ * and profile-based enable/disable OTP generation have independent buckets.
+ *
+ * Guards:
+ *   1. Per-userId 60-second cooldown
+ *   2. Per-userId hourly cap (10/hr)
+ *   3. Per-IP hourly cap (20/hr)
+ */
+export function checkEmailOtpLoginSendLimit(ip: string, userId: string): RateLimitResult {
+  // ── 1. Per-user 60-second cooldown ────────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `email-otp-login:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 60 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-user hourly cap ─────────────────────────────────────────────────
+  const hourly = checkRateLimit({
+    key:      `email-otp-login:hourly:${userId}`,
+    limit:    10,
+    windowMs: 60 * 60 * 1000,
+  })
+  if (!hourly.allowed) return hourly
+
+  // ── 3. Per-IP hourly cap ───────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `email-otp-login:ip:${ip}`,
+    limit:    20,
+    windowMs: 60 * 60 * 1000,
+  })
+}

@@ -2680,3 +2680,397 @@ export function buildAccountRestoredEmail(opts: AccountRestoredEmailOptions): {
 
   return { subject, html, text }
 }
+
+// ─── Email masking utility ────────────────────────────────────────────────────
+
+/**
+ * Mask an email address for safe display in recovery UIs.
+ *
+ * Rules:
+ *   • Keep the first 2 characters of the local part.
+ *   • Replace everything between those 2 chars and the '@' with asterisks.
+ *   • For very short local parts (≤ 3 chars) keep first + last char only,
+ *     replacing the middle with a single '*' so the result is still ≥ 3 chars.
+ *   • The domain portion is never masked.
+ *
+ * Examples:
+ *   kindikeris@gmail.com  → ki*********@gmail.com
+ *   abc@gmail.com         → a*c@gmail.com
+ *   ab@mail.com           → a*@mail.com
+ *   a@mail.com            → a@mail.com   (nothing to mask)
+ */
+export function maskEmail(email: string): string {
+  const atIdx = email.indexOf('@')
+  if (atIdx <= 0) return email          // malformed — return as-is
+
+  const local  = email.slice(0, atIdx)
+  const domain = email.slice(atIdx)     // includes '@'
+
+  if (local.length <= 1) return email   // single char — nothing to mask
+  if (local.length === 2) return `${local[0]}*${domain}`
+  if (local.length === 3) return `${local[0]}*${local[2]}${domain}`
+
+  // 4+ chars: keep first 2, mask the rest
+  const visible = local.slice(0, 2)
+  const masked  = '*'.repeat(local.length - 2)
+  return `${visible}${masked}${domain}`
+}
+
+// ─── Account recovery OTP email ───────────────────────────────────────────────
+
+export interface AccountRecoveryOtpEmailOptions {
+  toName: string
+  /** The registered email address — also the recipient. */
+  toEmail: string
+  /** Raw 6-digit OTP to display in the email.  Never log this value. */
+  otp: string
+  /** OTP validity in minutes (typically 10). */
+  validMinutes: number
+}
+
+/**
+ * Transactional email containing the 6-digit OTP for the second step of
+ * account recovery (password → OTP → restore).
+ *
+ * Security notes:
+ *   • The otp value is rendered only inside the HTML/text body and is never
+ *     stored or logged by this function.
+ *   • The caller is responsible for NOT logging the otp after calling this.
+ *   • The masked email shown in the subject/body is derived from toEmail
+ *     inside this function — the full address is never displayed to a
+ *     third-party observer of the email content.
+ */
+export function buildAccountRecoveryOtpEmail(opts: AccountRecoveryOtpEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, toEmail, otp, validMinutes } = opts
+  const firstName   = toName.split(' ')[0] ?? toName
+  const maskedEmail = maskEmail(toEmail)
+
+  const subject = `LifeFlow account recovery verification`
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 8px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'SF Pro Text','Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      Verify your email
+    </h2>
+    <p style="margin:0 0 16px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Hi ${escapeHtml(firstName)},
+    </p>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      Someone is attempting to restore your ${BRAND_NAME} account.
+      We received a request to verify your identity before restoring access.
+    </p>
+
+    <!-- OTP display box -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
+                   padding:24px 18px;text-align:center;">
+          <p style="margin:0 0 8px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:12px;font-weight:600;color:#64748b;
+                    text-transform:uppercase;letter-spacing:0.08em;">
+            Your verification code
+          </p>
+          <p style="margin:0;
+                    font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',
+                                 'Courier New',monospace;
+                    font-size:38px;font-weight:700;color:#0f172a;
+                    letter-spacing:0.22em;line-height:1.1;">
+            ${escapeHtml(otp)}
+          </p>
+          <p style="margin:10px 0 0;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:12px;color:#94a3b8;line-height:1.5;">
+            Expires in ${escapeHtml(String(validMinutes))} minutes
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <!-- Info / warning box -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 20px;">
+      <tr>
+        <td style="background:#fefce8;border:1px solid #fde047;border-radius:10px;
+                   padding:14px 16px;">
+          <p style="margin:0;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:13px;color:#78350f;line-height:1.65;">
+            <strong>&#9888;&nbsp; Do not share this code.</strong>
+            ${BRAND_NAME} will never ask you for this code.
+            If you did not request account recovery, you can safely ignore this email —
+            your account will not be restored without this code.
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#94a3b8;line-height:1.65;">
+      This code was sent to
+      <strong style="color:#64748b;">${escapeHtml(maskedEmail)}</strong>
+      and is valid for ${escapeHtml(String(validMinutes))} minutes.
+      It can only be used once.
+    </p>
+  `)
+
+  const text =
+    `LifeFlow account recovery verification\n\n` +
+    `Hi ${firstName},\n\n` +
+    `Someone is attempting to restore your ${BRAND_NAME} account.\n\n` +
+    `Your verification code is: ${otp}\n\n` +
+    `This code expires in ${validMinutes} minutes and can only be used once.\n\n` +
+    `Do not share this code with anyone.\n` +
+    `${BRAND_NAME} will never ask you for this code.\n\n` +
+    `If you did not request account recovery, you can safely ignore this email.\n` +
+    `Your account will not be restored without this code.\n\n` +
+    `— The ${BRAND_NAME} Team`
+
+  return { subject, html, text }
+}
+
+// ─── Email OTP 2FA shared helper ─────────────────────────────────────────────
+
+/**
+ * Build the shared inner HTML block used by all three Email OTP 2FA emails
+ * (enable, login, disable / security verification).
+ *
+ * @param headingText  — e.g. "Your LifeFlow 2FA verification code"
+ * @param bodyText     — sentence shown above the OTP box
+ * @param otp          — raw 6-digit OTP string.  Never log this value.
+ * @param validMinutes — OTP lifetime (always 10 in production)
+ * @param maskedEmail  — already-masked address, e.g. "ki*********@gmail.com"
+ */
+function buildOtpInnerHtml(
+  headingText: string,
+  bodyText: string,
+  otp: string,
+  validMinutes: number,
+  maskedEmail: string,
+): string {
+  return `
+    <h2 style="margin:0 0 8px;
+               font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',
+                            'SF Pro Text','Segoe UI',Arial,sans-serif;
+               font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.3px;">
+      ${escapeHtml(headingText)}
+    </h2>
+    <p style="margin:0 0 20px;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:15px;color:#334155;line-height:1.65;">
+      ${escapeHtml(bodyText)}
+    </p>
+
+    <!-- OTP display box -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 24px;">
+      <tr>
+        <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
+                   padding:24px 18px;text-align:center;">
+          <p style="margin:0 0 8px;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:12px;font-weight:600;color:#64748b;
+                    text-transform:uppercase;letter-spacing:0.08em;">
+            Your verification code
+          </p>
+          <p style="margin:0;
+                    font-family:'SF Mono','Fira Code','Fira Mono','Roboto Mono',
+                                 'Courier New',monospace;
+                    font-size:38px;font-weight:700;color:#0f172a;
+                    letter-spacing:0.22em;line-height:1.1;">
+            ${escapeHtml(otp)}
+          </p>
+          <p style="margin:10px 0 0;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:12px;color:#94a3b8;line-height:1.5;">
+            Expires in ${escapeHtml(String(validMinutes))} minutes &bull; Single use
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <!-- Warning box -->
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+           style="margin:0 0 20px;">
+      <tr>
+        <td style="background:#fefce8;border:1px solid #fde047;border-radius:10px;
+                   padding:14px 16px;">
+          <p style="margin:0;
+                    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                                 'Segoe UI',Arial,sans-serif;
+                    font-size:13px;color:#78350f;line-height:1.65;">
+            <strong>&#9888;&nbsp; Never share this code.</strong>
+            ${BRAND_NAME} will never ask you for this code.
+            If this wasn&rsquo;t you, secure your account immediately.
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0;
+              font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+                           'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#94a3b8;line-height:1.65;">
+      This code was sent to
+      <strong style="color:#64748b;">${escapeHtml(maskedEmail)}</strong>
+      and is valid for ${escapeHtml(String(validMinutes))} minutes.
+      It can only be used once.
+    </p>
+  `
+}
+
+// ─── 2FA enable OTP email ─────────────────────────────────────────────────────
+
+export interface TwoFaOtpEmailOptions {
+  toName: string
+  /** The registered email address — also the recipient. */
+  toEmail: string
+  /** Raw 6-digit OTP.  Put in email only; discard after.  Never log. */
+  otp: string
+  /** OTP validity in minutes (always 10). */
+  validMinutes: number
+}
+
+/**
+ * Email OTP 2FA enable flow — sent when the user requests to enable Email 2FA
+ * after successfully verifying their account password.
+ *
+ * Subject: "Your LifeFlow 2FA verification code"
+ */
+export function buildTwoFaEnableOtpEmail(opts: TwoFaOtpEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, toEmail, otp, validMinutes } = opts
+  const firstName   = toName.split(' ')[0] ?? toName
+  const maskedEmail = maskEmail(toEmail)
+
+  const subject = `Your ${BRAND_NAME} 2FA verification code`
+
+  const html = wrapHtml(
+    buildOtpInnerHtml(
+      'Enable two-factor authentication',
+      `Hi ${firstName}, use the code below to complete enabling Email 2FA on your ${BRAND_NAME} account.`,
+      otp,
+      validMinutes,
+      maskedEmail,
+    )
+  )
+
+  const text =
+    `Your ${BRAND_NAME} 2FA verification code\n\n` +
+    `Hi ${firstName},\n\n` +
+    `Use the code below to enable Email two-factor authentication on your ${BRAND_NAME} account.\n\n` +
+    `Your verification code is: ${otp}\n\n` +
+    `This code expires in ${validMinutes} minutes and can only be used once.\n\n` +
+    `Never share this code. ${BRAND_NAME} will never ask you for it.\n` +
+    `If this wasn't you, someone may be trying to modify your account settings.\n\n` +
+    `— The ${BRAND_NAME} Team`
+
+  return { subject, html, text }
+}
+
+// ─── 2FA login OTP email ──────────────────────────────────────────────────────
+
+/**
+ * Email OTP 2FA login flow — sent after correct password when emailOtpEnabled=true.
+ *
+ * Subject: "Your LifeFlow login verification code"
+ */
+export function buildTwoFaLoginOtpEmail(opts: TwoFaOtpEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, toEmail, otp, validMinutes } = opts
+  const firstName   = toName.split(' ')[0] ?? toName
+  const maskedEmail = maskEmail(toEmail)
+
+  const subject = `Your ${BRAND_NAME} login verification code`
+
+  const html = wrapHtml(
+    buildOtpInnerHtml(
+      'Verify your identity',
+      `Hi ${firstName}, someone is signing in to your ${BRAND_NAME} account. Use the code below to complete sign-in.`,
+      otp,
+      validMinutes,
+      maskedEmail,
+    )
+  )
+
+  const text =
+    `Your ${BRAND_NAME} login verification code\n\n` +
+    `Hi ${firstName},\n\n` +
+    `Someone is signing in to your ${BRAND_NAME} account.\n\n` +
+    `Your verification code is: ${otp}\n\n` +
+    `This code expires in ${validMinutes} minutes and can only be used once.\n\n` +
+    `Never share this code. ${BRAND_NAME} will never ask you for it.\n` +
+    `If this wasn't you, change your password immediately.\n\n` +
+    `— The ${BRAND_NAME} Team`
+
+  return { subject, html, text }
+}
+
+// ─── 2FA disable / security verification OTP email ───────────────────────────
+
+/**
+ * Email OTP 2FA disable flow — sent when the user requests to disable Email 2FA
+ * after successfully verifying their account password.
+ *
+ * Subject: "Your LifeFlow security verification code"
+ */
+export function buildTwoFaDisableOtpEmail(opts: TwoFaOtpEmailOptions): {
+  subject: string
+  html: string
+  text: string
+} {
+  const { toName, toEmail, otp, validMinutes } = opts
+  const firstName   = toName.split(' ')[0] ?? toName
+  const maskedEmail = maskEmail(toEmail)
+
+  const subject = `Your ${BRAND_NAME} security verification code`
+
+  const html = wrapHtml(
+    buildOtpInnerHtml(
+      'Disable two-factor authentication',
+      `Hi ${firstName}, use the code below to confirm disabling Email 2FA on your ${BRAND_NAME} account.`,
+      otp,
+      validMinutes,
+      maskedEmail,
+    )
+  )
+
+  const text =
+    `Your ${BRAND_NAME} security verification code\n\n` +
+    `Hi ${firstName},\n\n` +
+    `Use the code below to confirm disabling Email two-factor authentication on your ${BRAND_NAME} account.\n\n` +
+    `Your verification code is: ${otp}\n\n` +
+    `This code expires in ${validMinutes} minutes and can only be used once.\n\n` +
+    `Never share this code. ${BRAND_NAME} will never ask you for it.\n` +
+    `If this wasn't you, your account may be at risk — change your password immediately.\n\n` +
+    `— The ${BRAND_NAME} Team`
+
+  return { subject, html, text }
+}

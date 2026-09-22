@@ -7,7 +7,7 @@ import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
-import { SkeletonCard } from '@/components/ui/Loading'
+import { Skeleton } from '@/components/ui/Loading'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import type { User as UserType } from '@/types'
@@ -15,6 +15,7 @@ import { DEFAULT_APPEARANCE } from '@/types'
 import { NotificationHistorySection } from '@/components/notifications/NotificationHistorySection'
 import { ProfilePhotoUploadModal } from '@/components/profile/ProfilePhotoUploadModal'
 import { AppearanceSection } from '@/components/profile/AppearanceSection'
+import { TwoFactorSection } from '@/components/profile/TwoFactorSection'
 import { useAppearance } from '@/hooks/useAppearance'
 import { prewarmAudio } from '@/lib/tonePlayer'
 
@@ -66,16 +67,36 @@ type PushStatus = 'checking' | 'unsupported' | 'denied' | 'subscribed' | 'unsubs
   return output
 }
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * Minimal identity data passed from the server component (already fetched by
+ * requireAuth() so no extra DB query is needed).  Used to render the profile
+ * hero immediately — before the full /api/auth/me response arrives.
+ */
+export interface InitialUser {
+  name:     string
+  email:    string
+  publicId: string
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function ProfileClient() {
+export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
   const router = useRouter()
   const { success, error: toastError } = useToast()
   const { applyAppearance, setTimezone } = useAppearance()
 
   const [user,         setUser]        = useState<UserType | null>(null)
+  // Secondary data (form fields, prefs, etc.) is still loading — but the hero
+  // is visible immediately from initialUser, so we only skeleton the sections
+  // below the hero, not the whole page.
   const [loading,      setLoading]     = useState(true)
-  const [profileForm,  setProfileForm] = useState({ name: '', currency: 'INR', timezone: 'Asia/Kolkata' })
+  const [profileForm,  setProfileForm] = useState({
+    name:     initialUser.name,
+    currency: 'INR',
+    timezone: 'Asia/Kolkata',
+  })
   const [savingProfile,setSavingProfile]=useState(false)
   const [pwForm,       setPwForm]      = useState({ currentPassword: '', newPassword: '', confirmNewPassword: '' })
   const [showPw,       setShowPw]      = useState({ current: false, new: false, confirm: false })
@@ -438,16 +459,18 @@ export function ProfileClient() {
     weeklySummary:  true,
   }
 
-  // ── Render guards ─────────────────────────────────────────────────────────
+  // ── Derived values — available immediately from initialUser ─────────────
+  // When the full user hasn't loaded yet, fall back to initialUser for the
+  // hero section so name / email / LifeFlow ID render with zero delay.
+  const displayName    = user?.name     ?? initialUser.name
+  const displayEmail   = user?.email    ?? initialUser.email
+  const displayId      = user?.publicId ?? initialUser.publicId
+  const displayAvatar  = user?.avatar   // undefined until /api/auth/me resolves — intentional
+  const initials       = displayName.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase()
 
-  if (loading) {
-    return (
-      <div className="px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-4 max-w-2xl mx-auto">
-        {[...Array(3)].map((_, i) => <SkeletonCard key={i} />)}
-      </div>
-    )
-  }
-  if (!user) {
+  // ── Render guard — only for catastrophic fetch failure ───────────────────
+  // (loading skeleton is handled inline below — we never show a blank page)
+  if (!loading && !user) {
     return (
       <div className="text-center py-16 px-4">
         <p className="mb-4" style={{ color: 'var(--text-muted)' }}>Failed to load profile.</p>
@@ -455,8 +478,6 @@ export function ProfileClient() {
       </div>
     )
   }
-
-  const initials = user.name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase()
 
   // ── Push UI helpers ───────────────────────────────────────────────────────
 
@@ -511,7 +532,7 @@ export function ProfileClient() {
                 <div
                   className="w-20 h-20 sm:w-[72px] sm:h-[72px] rounded-full overflow-hidden flex items-center justify-center transition-all duration-200 group-hover:ring-2 group-hover:ring-indigo-500/40 group-hover:ring-offset-1"
                   style={
-                    user.avatar
+                    displayAvatar
                       ? { border: '2px solid rgba(99,102,241,0.25)' }
                       : {
                           background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.14) 100%)',
@@ -520,11 +541,11 @@ export function ProfileClient() {
                         }
                   }
                 >
-                  {user.avatar ? (
+                  {displayAvatar ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={user.avatar}
-                      alt={`${user.name} profile photo`}
+                      src={displayAvatar}
+                      alt={`${displayName} profile photo`}
                       className="w-full h-full object-cover"
                       draggable={false}
                     />
@@ -561,7 +582,7 @@ export function ProfileClient() {
                 className="text-[20px] sm:text-[22px] font-bold leading-tight"
                 style={{ color: 'var(--text-primary)' }}
               >
-                {user.name}
+                {displayName}
               </h2>
 
               {/* Email — secondary */}
@@ -569,7 +590,7 @@ export function ProfileClient() {
                 className="text-[13px] mt-0.5 truncate"
                 style={{ color: 'var(--text-muted)' }}
               >
-                {user.email}
+                {displayEmail}
               </p>
 
               {/* LifeFlow ID badge */}
@@ -583,7 +604,7 @@ export function ProfileClient() {
                   }}
                 >
                   <Fingerprint size={9} />
-                  {user.publicId}
+                  {displayId}
                 </span>
               </div>
             </div>
@@ -595,7 +616,7 @@ export function ProfileClient() {
       <ProfilePhotoUploadModal
         isOpen={avatarModalOpen}
         onClose={() => setAvatarModalOpen(false)}
-        avatar={user.avatar}
+        avatar={displayAvatar}
         initials={initials}
         onSave={(newAvatar) => {
           setUser((prev) => prev ? { ...prev, avatar: newAvatar ?? undefined } : prev)
@@ -603,55 +624,71 @@ export function ProfileClient() {
       />
 
       {/* ── LifeFlow ID ── */}
-      <LifeFlowIdSection publicId={user.publicId} variants={fadeUp} />
+      <LifeFlowIdSection publicId={displayId} variants={fadeUp} />
 
       {/* ── Account section ── */}
       <ProfileSection title="Account" icon={<User size={14} />} variants={fadeUp}>
-        <div className="flex flex-col gap-4">
-          <GlassInput label="Full Name" value={profileForm.name} onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))} leftIcon={<User size={13} />} />
-          <div className="flex items-center gap-3 glass-subtle rounded-xl px-3.5 py-2.5">
-            <Mail size={13} style={{ color: 'var(--text-faint)' }} />
-            <span className="text-[13px] flex-1 truncate" style={{ color: 'var(--text-muted)' }}>{user.email}</span>
-            <span className="text-[10px]" style={{ color: 'var(--text-faint)' }}>Cannot change</span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <GlassSelect label="Currency" value={profileForm.currency} onChange={(v) => setProfileForm((f) => ({ ...f, currency: v }))} options={CURRENCIES} />
-            <GlassSelect label="Timezone" value={profileForm.timezone} onChange={(v) => setProfileForm((f) => ({ ...f, timezone: v }))} options={TIMEZONES} />
-          </div>
-          <div className="flex justify-end">
-            <GlassButton variant="primary" onClick={saveProfile} loading={savingProfile}>
-              <Save size={13} /> Save Changes
-            </GlassButton>
-          </div>
-        </div>
-
-        {/* ── Account status (lifecycle) ─────────────────────────────────── */}
-        <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
-                Account status
-              </p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span
-                  className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ background: (user.accountStatus ?? 'active') === 'active' ? '#10b981' : '#ef4444' }}
-                />
-                <span className="text-[12px] font-medium capitalize"
-                  style={{ color: (user.accountStatus ?? 'active') === 'active' ? '#059669' : '#dc2626' }}>
-                  {(user.accountStatus ?? 'active') === 'active' ? 'Active' : 'Scheduled for deletion'}
-                </span>
-              </div>
+        {loading ? (
+          <div className="flex flex-col gap-4">
+            <Skeleton className="h-10 w-full rounded-xl" />
+            <Skeleton className="h-10 w-full rounded-xl" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Skeleton className="h-10 rounded-xl" />
+              <Skeleton className="h-10 rounded-xl" />
             </div>
-            <GlassButton
-              variant="danger"
-              size="sm"
-              onClick={() => { setDeleteConfirmText(''); setDeletePassword(''); setDeleteError(null); setDeleteModalOpen(true) }}
-            >
-              <Trash2 size={12} /> Delete Account
-            </GlassButton>
+            <div className="flex justify-end">
+              <Skeleton className="h-8 w-28 rounded-xl" />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <GlassInput label="Full Name" value={profileForm.name} onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))} leftIcon={<User size={13} />} />
+            <div className="flex items-center gap-3 glass-subtle rounded-xl px-3.5 py-2.5">
+              <Mail size={13} style={{ color: 'var(--text-faint)' }} />
+              <span className="text-[13px] flex-1 truncate" style={{ color: 'var(--text-muted)' }}>{displayEmail}</span>
+              <span className="text-[10px]" style={{ color: 'var(--text-faint)' }}>Cannot change</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <GlassSelect label="Currency" value={profileForm.currency} onChange={(v) => setProfileForm((f) => ({ ...f, currency: v }))} options={CURRENCIES} />
+              <GlassSelect label="Timezone" value={profileForm.timezone} onChange={(v) => setProfileForm((f) => ({ ...f, timezone: v }))} options={TIMEZONES} />
+            </div>
+            <div className="flex justify-end">
+              <GlassButton variant="primary" onClick={saveProfile} loading={savingProfile}>
+                <Save size={13} /> Save Changes
+              </GlassButton>
+            </div>
+          </div>
+        )}
+
+        {/* ── Account status (lifecycle) — only when full data is loaded ── */}
+        {!loading && user && (
+          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
+                  Account status
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span
+                    className="inline-block w-1.5 h-1.5 rounded-full"
+                    style={{ background: (user.accountStatus ?? 'active') === 'active' ? '#10b981' : '#ef4444' }}
+                  />
+                  <span className="text-[12px] font-medium capitalize"
+                    style={{ color: (user.accountStatus ?? 'active') === 'active' ? '#059669' : '#dc2626' }}>
+                    {(user.accountStatus ?? 'active') === 'active' ? 'Active' : 'Scheduled for deletion'}
+                  </span>
+                </div>
+              </div>
+              <GlassButton
+                variant="danger"
+                size="sm"
+                onClick={() => { setDeleteConfirmText(''); setDeletePassword(''); setDeleteError(null); setDeleteModalOpen(true) }}
+              >
+                <Trash2 size={12} /> Delete Account
+              </GlassButton>
+            </div>
+          </div>
+        )}
       </ProfileSection>
 
       {/* ── Notifications (collapsible) ── */}
@@ -660,33 +697,47 @@ export function ProfileClient() {
         onToggle={toggleNotifSection}
         variants={fadeUp}
       >
-        <div className="flex flex-col gap-3">
-
-          {/* ── In-app / push categories ── */}
-          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-faint)' }}>
-            Push &amp; In-app
-          </p>
-          {([
-            { key: 'taskReminders',  label: 'Task reminders',  desc: 'Reminders for upcoming and overdue tasks' },
-            { key: 'habitReminders', label: 'Habit reminders', desc: 'Daily reminders to complete your habits'  },
-            { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Alerts when spending exceeds thresholds' },
-            { key: 'dailySummary',   label: 'Daily summary',   desc: 'Morning summary of your day ahead'       },
-          ] as { key: keyof UserType['notificationPreferences']; label: string; desc: string }[]).map(({ key, label, desc }) => (
-            <div key={key} className="flex items-center justify-between gap-4 py-1">
-              <div>
-                <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>{label}</p>
-                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+        {loading || !user ? (
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-4 w-24 rounded-lg" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center justify-between gap-4 py-1">
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <Skeleton className="h-3.5 w-32 rounded-lg" />
+                  <Skeleton className="h-3 w-48 rounded-lg" />
+                </div>
+                <Skeleton className="w-11 h-6 rounded-full flex-shrink-0" />
               </div>
-              <Toggle
-                checked={user.notificationPreferences[key]}
-                onChange={(v) => {
-                  const updated = { ...user.notificationPreferences, [key]: v }
-                  setUser((u) => u ? { ...u, notificationPreferences: updated } : u)
-                  saveNotifPrefs({ notificationPreferences: updated })
-                }}
-              />
-            </div>
-          ))}
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+
+            {/* ── In-app / push categories ── */}
+            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-faint)' }}>
+              Push &amp; In-app
+            </p>
+            {([
+              { key: 'taskReminders',  label: 'Task reminders',  desc: 'Reminders for upcoming and overdue tasks' },
+              { key: 'habitReminders', label: 'Habit reminders', desc: 'Daily reminders to complete your habits'  },
+              { key: 'spendingAlerts', label: 'Spending alerts',  desc: 'Alerts when spending exceeds thresholds' },
+              { key: 'dailySummary',   label: 'Daily summary',   desc: 'Morning summary of your day ahead'       },
+            ] as { key: keyof UserType['notificationPreferences']; label: string; desc: string }[]).map(({ key, label, desc }) => (
+              <div key={key} className="flex items-center justify-between gap-4 py-1">
+                <div>
+                  <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>{label}</p>
+                  <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+                </div>
+                <Toggle
+                  checked={user.notificationPreferences[key]}
+                  onChange={(v) => {
+                    const updated = { ...user.notificationPreferences, [key]: v }
+                    setUser((u) => u ? { ...u, notificationPreferences: updated } : u)
+                    saveNotifPrefs({ notificationPreferences: updated })
+                  }}
+                />
+              </div>
+            ))}
 
           {/* ── Browser push notifications row — always rendered, status-aware ── */}
           <div className="flex items-center justify-between gap-4 py-1 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -817,6 +868,7 @@ export function ProfileClient() {
             )}
           </div>
         </div>
+        )}
       </CollapsibleNotifications>
 
       {/* ── Notification History (collapsible) ── */}
@@ -827,40 +879,82 @@ export function ProfileClient() {
         onToggle={toggleHistorySection}
         variants={fadeUp}
       >
-        <NotificationHistorySection
-          userEmail={user.email}
-          timezone={user.timezone ?? 'Asia/Kolkata'}
-        />
+        {!loading && user ? (
+          <NotificationHistorySection
+            userEmail={user.email}
+            timezone={user.timezone ?? 'Asia/Kolkata'}
+          />
+        ) : (
+          <div className="flex flex-col gap-2 py-1">
+            <Skeleton className="h-3.5 w-40 rounded-lg" />
+            <Skeleton className="h-3 w-56 rounded-lg" />
+          </div>
+        )}
       </CollapsibleSection>
 
       {/* ── Appearance & Experience ── */}
-      <AppearanceSection
-        initialPrefs={user.appearancePreferences ?? DEFAULT_APPEARANCE}
-        timezone={user.timezone ?? 'Asia/Kolkata'}
-        variants={fadeUp}
-      />
+      {!loading && user ? (
+        <AppearanceSection
+          initialPrefs={user.appearancePreferences ?? DEFAULT_APPEARANCE}
+          timezone={user.timezone ?? 'Asia/Kolkata'}
+          variants={fadeUp}
+        />
+      ) : (
+        <motion.div variants={fadeUp} className="glass-elevated rounded-2xl overflow-hidden" aria-hidden="true">
+          <div className="flex items-center gap-2 px-5 py-[18px]">
+            <Skeleton className="w-3.5 h-3.5 rounded" />
+            <Skeleton className="h-3.5 w-36 rounded-lg" />
+          </div>
+        </motion.div>
+      )}
 
       {/* ── Security ── */}
       <ProfileSection title="Security" icon={<Shield size={14} />} variants={fadeUp}>
         <div className="flex flex-col gap-3">
-          {[
-            {
-              label: 'Password', desc: 'Change your account password',
-              action: <GlassButton variant="secondary" size="sm" onClick={() => setPwModalOpen(true)}><Lock size={12} /> Change</GlassButton>
-            },
-            {
-              label: 'Sign out', desc: 'End your current session',
-              action: <GlassButton variant="secondary" size="sm" onClick={handleLogout}><LogOut size={12} /> Logout</GlassButton>
-            },
-          ].map(({ label, desc, action }) => (
-            <div key={label} className="flex items-center justify-between gap-4 py-1">
-              <div>
-                <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>{label}</p>
-                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{desc}</p>
-              </div>
-              {action}
+          {/* Password row */}
+          <div className="flex items-center justify-between gap-4 py-1">
+            <div>
+              <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>Password</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Change your account password</p>
             </div>
-          ))}
+            <GlassButton variant="secondary" size="sm" onClick={() => setPwModalOpen(true)}>
+              <Lock size={12} /> Change
+            </GlassButton>
+          </div>
+
+          {/* Divider */}
+          <div className="h-px" style={{ background: 'var(--border-subtle)' }} />
+
+          {/* Two-Factor Authentication row */}
+          {!loading && user && (
+            <TwoFactorSection
+              emailOtpEnabled={user.emailOtpEnabled ?? false}
+              onStatusChange={(enabled) => setUser((u) => u ? { ...u, emailOtpEnabled: enabled } : u)}
+            />
+          )}
+          {loading && (
+            <div className="flex items-center justify-between gap-4 py-1">
+              <div className="flex flex-col gap-1.5">
+                <Skeleton className="h-3.5 w-44 rounded-lg" />
+                <Skeleton className="h-3 w-56 rounded-lg" />
+              </div>
+              <Skeleton className="h-7 w-20 rounded-xl" />
+            </div>
+          )}
+
+          {/* Divider */}
+          <div className="h-px" style={{ background: 'var(--border-subtle)' }} />
+
+          {/* Sign out row */}
+          <div className="flex items-center justify-between gap-4 py-1">
+            <div>
+              <p className="text-[13px]" style={{ color: 'var(--text-primary)' }}>Sign out</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>End your current session</p>
+            </div>
+            <GlassButton variant="secondary" size="sm" onClick={handleLogout}>
+              <LogOut size={12} /> Logout
+            </GlassButton>
+          </div>
         </div>
       </ProfileSection>
 

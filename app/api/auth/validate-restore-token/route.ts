@@ -9,7 +9,10 @@
  * ───────────────
  * • The raw token is hashed (SHA-256) before any DB lookup — the plaintext
  *   is never stored or logged.
- * • Rate-limited per token hash (5 attempts / 15 min) to prevent brute-force.
+ * • Rate-limited per IP (30 requests/hr) to prevent enumeration scanning.
+ *   The per-token attempt bucket is intentionally NOT consumed here — this
+ *   endpoint is a read-only preflight and must not drain the OTP-verify
+ *   attempt budget that the user needs on the OTP screen.
  * • Returns an identical generic 400 for every invalid state (not found,
  *   expired, already used, account gone) so callers cannot distinguish
  *   between them.  The only distinction exposed is EXPIRED vs INVALID so
@@ -20,7 +23,7 @@
  *
  * RESPONSES
  * ─────────
- * 200  { valid: true,  name: string, scheduledPermanentDeletionAt: string }
+ * 200  { valid: true,  name: string, deletedAt: string, scheduledPermanentDeletionAt: string }
  * 400  { valid: false, code: 'INVALID_TOKEN' }   — missing / malformed / used / not found
  * 400  { valid: false, code: 'TOKEN_EXPIRED' }   — token found but past its expiry
  * 410  { valid: false, code: 'ACCOUNT_GONE' }    — recovery window has fully closed
@@ -32,7 +35,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/db'
 import User from '@/models/User'
 import { hashToken } from '@/lib/auth/crypto'
-import { checkRestoreTokenAttemptLimit, checkRateLimit, getClientIp } from '@/lib/auth/rate-limit'
+import { checkRateLimit, getClientIp } from '@/lib/auth/rate-limit'
 import logger from '@/lib/logger'
 
 /** Returned for every invalid / unusable token state — uniform to prevent info leakage. */
@@ -74,24 +77,12 @@ export async function GET(req: NextRequest) {
       return INVALID_TOKEN_RESPONSE
     }
 
-    // ── Per-token-hash rate limit ─────────────────────────────────────────────
-    const tokenLimit = checkRestoreTokenAttemptLimit(tokenHash)
-    if (!tokenLimit.allowed) {
-      logger.warn('[validate-restore-token] Rate limit exceeded for token hash prefix', {
-        tokenHashPrefix: tokenHash.substring(0, 8),
-      })
-      return NextResponse.json(
-        { error: 'Too many attempts. Please try again later.' },
-        { status: 429 }
-      )
-    }
-
     // ── DB lookup ─────────────────────────────────────────────────────────────
     await connectDB()
 
     const user = await User.findOne({
       accountRestoreTokenHash: tokenHash,
-    }).select('name accountStatus accountRestoreExpiresAt scheduledPermanentDeletionAt')
+    }).select('name accountStatus accountRestoreExpiresAt scheduledPermanentDeletionAt deletedAt')
 
     // Token not found (never existed, already used, or cleared) → INVALID
     if (!user) {
@@ -144,6 +135,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       valid:                        true,
       name:                         user.name,
+      deletedAt:                    user.deletedAt?.toISOString() ?? null,
       scheduledPermanentDeletionAt: user.scheduledPermanentDeletionAt.toISOString(),
     })
   } catch (error) {

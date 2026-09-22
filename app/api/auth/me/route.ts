@@ -37,10 +37,40 @@ function serializeUser(user: Partial<IUser> & { _id: { toString(): string }; cre
     accountStatus:                user.accountStatus ?? 'active',
     deletedAt:                    user.deletedAt?.toISOString() ?? null,
     scheduledPermanentDeletionAt: user.scheduledPermanentDeletionAt?.toISOString() ?? null,
+    emailOtpEnabled:              user.emailOtpEnabled ?? false,
+    twoFactorEnabledAt:           user.twoFactorEnabledAt?.toISOString() ?? null,
     createdAt:                    user.createdAt.toISOString(),
     updatedAt:                    user.updatedAt.toISOString(),
   }
 }
+
+// Fields fetched for the profile page GET.
+// Excludes security token fields (emailVerification*, passwordReset*,
+// accountRestore*, twoFactor*) that ProfileClient never reads — omitting
+// them reduces the response payload noticeably for typical user documents.
+// The avatar (potentially a large base64 data URL) is intentionally kept so
+// the profile photo renders without a second round-trip.
+// emailOtpEnabled is included so the Security section can show correct 2FA status.
+const PROFILE_GET_PROJECTION = [
+  'publicId',
+  'name',
+  'email',
+  'avatar',
+  'currency',
+  'timezone',
+  'notificationPreferences',
+  'emailNotifications',
+  'notificationsTested',
+  'notificationsTestedAt',
+  'appearancePreferences',
+  'accountStatus',
+  'deletedAt',
+  'scheduledPermanentDeletionAt',
+  'emailOtpEnabled',
+  'twoFactorEnabledAt',
+  'createdAt',
+  'updatedAt',
+].join(' ')
 
 // GET /api/auth/me — return the current user
 export async function GET() {
@@ -51,7 +81,9 @@ export async function GET() {
     }
 
     await connectDB()
-    const userDoc = await User.findById(session.userId).select('-passwordHash').lean<IUser>()
+    const userDoc = await User.findById(session.userId)
+      .select(PROFILE_GET_PROJECTION)
+      .lean<IUser>()
     if (!userDoc) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
