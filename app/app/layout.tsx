@@ -1,8 +1,9 @@
-import { Sidebar }       from '@/components/layout/Sidebar'
-import { BottomNav }     from '@/components/layout/BottomNav'
-import { AppHeader }     from '@/components/layout/AppHeader'
-import { CommandPalette }from '@/components/ui/CommandPalette'
-import { PushRegistrar } from '@/components/notifications/PushRegistrar'
+import { Sidebar }           from '@/components/layout/Sidebar'
+import { BottomNav }          from '@/components/layout/BottomNav'
+import { AppHeader }          from '@/components/layout/AppHeader'
+import { CommandPalette }     from '@/components/ui/CommandPalette'
+import { PushRegistrar }      from '@/components/notifications/PushRegistrar'
+import { InactivityMonitor }  from '@/components/providers/InactivityMonitor'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -64,6 +65,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Silently registers the service worker for push notifications */}
       <PushRegistrar />
+
+      {/*
+        Client-side inactivity guard.  Redirects to /login with a toast if the
+        user has been idle for SESSION_IDLE_TIMEOUT_MINUTES.  The server enforces
+        the same limit independently; this component is a UX aid only.
+      */}
+      <InactivityMonitor />
     </>
   )
 }

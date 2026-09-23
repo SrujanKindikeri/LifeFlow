@@ -169,6 +169,7 @@ export async function POST(req: NextRequest) {
     session.twoFactorPending   = false
     session.pendingUserId      = undefined
     session.twoFactorPendingAt = undefined
+    session.lastActiveAt       = Date.now() // inactivity timer starts at successful 2FA
     await session.save()
 
     logger.info('[verify-2fa] 2FA verified, session created', {

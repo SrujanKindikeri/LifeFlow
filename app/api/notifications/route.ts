@@ -26,7 +26,11 @@ function serialize(n: {
 // GET /api/notifications
 export async function GET(req: NextRequest) {
   try {
-    const { userId } = await requireAuth()
+    // skipActivityUpdate=true: notification polling is a background request.
+    // It must NOT reset the inactivity timer — an idle user whose browser tab
+    // is open with the notification badge polling every 60 s should still be
+    // logged out after 1 hour of not actually using the application.
+    const { userId } = await requireAuth({ skipActivityUpdate: true })
     await connectDB()
 
     const { searchParams } = new URL(req.url)

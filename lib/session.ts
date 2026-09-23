@@ -1,8 +1,34 @@
 import { getIronSession, IronSession, SessionOptions } from 'iron-session'
 import { cookies } from 'next/headers'
-import { getServerEnv } from '@/lib/env'
+import { getServerEnv, serverEnv } from '@/lib/env'
 import { connectDB } from '@/lib/db'
 import logger from '@/lib/logger'
+
+// ─── Inactivity timeout constants ─────────────────────────────────────────────
+
+/**
+ * How long a session may be idle before it is rejected by the server.
+ * Reads SESSION_IDLE_TIMEOUT_MINUTES at runtime; defaults to 60 minutes.
+ * A value of 0 disables the inactivity check entirely.
+ */
+export function getIdleTimeoutMs(): number {
+  const minutes = serverEnv.SESSION_IDLE_TIMEOUT_MINUTES
+  return minutes > 0 ? minutes * 60 * 1000 : 0
+}
+
+/**
+ * Activity update throttle: only write a refreshed lastActiveAt cookie when the
+ * previous value is older than this threshold.  This avoids a session.save() on
+ * every single API request while still keeping the timestamp fresh enough that
+ * a genuinely active user is never wrongly expired.
+ *
+ * Set to 5 minutes — with a 60-minute timeout this means at most one extra
+ * cookie write per 5 minutes of activity, and the worst-case clock skew is
+ * only 5 minutes (still 55 minutes of true idle time before expiry).
+ */
+const ACTIVITY_UPDATE_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
+
+// ─── Session data shape ───────────────────────────────────────────────────────
 
 export interface SessionData {
   userId: string
@@ -35,7 +61,22 @@ export interface SessionData {
    * Allows us to expire the pending session after a short window.
    */
   twoFactorPendingAt?: number
+
+  /**
+   * Unix timestamp (ms) of the last meaningful authenticated request.
+   *
+   * Set when a full session is established (login / 2FA completion) and
+   * refreshed on every authenticated API request, subject to the
+   * ACTIVITY_UPDATE_THRESHOLD_MS throttle to avoid unnecessary writes.
+   *
+   * The server uses this to enforce the SESSION_IDLE_TIMEOUT_MINUTES limit.
+   * Background polling routes (e.g. /api/notifications) intentionally bypass
+   * activity updates so they cannot keep an otherwise-idle session alive.
+   */
+  lastActiveAt?: number
 }
+
+// ─── AuthUser shape ───────────────────────────────────────────────────────────
 
 /**
  * The shape returned by requireAuth().
@@ -53,6 +94,8 @@ export interface AuthUser {
    */
   lifeFlowId: string
 }
+
+// ─── Session options ──────────────────────────────────────────────────────────
 
 /**
  * Returns an IronSession options object with SESSION_SECRET validated at
@@ -78,16 +121,54 @@ export function getSessionOptions(): SessionOptions {
         (process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://') ?? false),
       httpOnly: true,
       sameSite: 'lax',
+      // The cookie TTL is kept at 7 days. Inactivity enforcement is done
+      // in application logic via lastActiveAt, NOT via cookie expiry, because
+      // a sliding-window maxAge would require re-issuing the cookie on every
+      // request. The 7-day hard cap means a completely abandoned session still
+      // expires eventually even if the inactivity check is somehow bypassed.
       maxAge: 60 * 60 * 24 * 7, // 7 days
     },
   }
 }
+
+// ─── Low-level session accessor ───────────────────────────────────────────────
 
 export async function getSession(): Promise<IronSession<SessionData>> {
   const cookieStore = await cookies()
   const session = await getIronSession<SessionData>(cookieStore, getSessionOptions())
   return session
 }
+
+// ─── Activity helper ──────────────────────────────────────────────────────────
+
+/**
+ * Refresh lastActiveAt in the session cookie when the previous value is older
+ * than ACTIVITY_UPDATE_THRESHOLD_MS.  If the session is not authenticated, or
+ * the timestamp is already fresh, this is a no-op (no cookie write).
+ *
+ * Call this from authenticated API routes that represent genuine user activity.
+ * Do NOT call it from background polling routes (e.g. /api/notifications).
+ *
+ * @param session - A live iron-session instance already loaded from the cookie.
+ */
+export async function updateSessionActivity(
+  session: IronSession<SessionData>,
+): Promise<void> {
+  if (!session.isLoggedIn || !session.userId) return
+
+  const now        = Date.now()
+  const lastActive = session.lastActiveAt ?? 0
+
+  // Only write if the timestamp is stale beyond the throttle threshold.
+  // This means at most one extra session.save() per ACTIVITY_UPDATE_THRESHOLD_MS
+  // across ALL API requests from this user, keeping MongoDB / cookie writes low.
+  if (now - lastActive >= ACTIVITY_UPDATE_THRESHOLD_MS) {
+    session.lastActiveAt = now
+    await session.save()
+  }
+}
+
+// ─── Main auth guard ──────────────────────────────────────────────────────────
 
 /**
  * Verify the session is authenticated and return the authenticated user's
@@ -96,29 +177,66 @@ export async function getSession(): Promise<IronSession<SessionData>> {
  * The lifeFlowId is read from the User document in MongoDB — it is NEVER
  * taken from the request body, query string, or any client-supplied value.
  *
- * Throws Error('Unauthorized') if the session cookie is missing or invalid.
- * Throws Error('UserNotFound') if the session is valid but the user no longer
- *   exists in the database.
- * Re-throws any other error (e.g. MongoDB connection failure) as-is so that
- *   callers can distinguish infrastructure failures from auth failures and
- *   surface the real error rather than silently destroying a valid session.
+ * Inactivity check:
+ *   If SESSION_IDLE_TIMEOUT_MINUTES > 0 and the session's lastActiveAt is
+ *   older than the configured timeout, the session is destroyed and
+ *   Error('SessionExpired') is thrown.  Callers should redirect to
+ *   /api/auth/clear-session (same as UserNotFound) so the stale cookie is
+ *   cleared before the /login redirect.
+ *
+ *   This function also refreshes lastActiveAt (throttled) so that genuine
+ *   user activity continuously resets the inactivity window.
+ *
+ * Throws Error('Unauthorized')      — session cookie missing or invalid.
+ * Throws Error('SessionExpired')    — session valid but idle > timeout.
+ * Throws Error('UserNotFound')      — session valid but user no longer exists.
+ * Throws Error('AccountDeleted')    — account is soft-deleted.
+ * Re-throws infrastructure errors   — MongoDB unreachable etc.
+ *
+ * @param options.skipActivityUpdate  Pass true for background/polling routes
+ *   that should NOT reset the inactivity timer (e.g. /api/notifications).
  */
-export async function requireAuth(): Promise<AuthUser> {
+export async function requireAuth(
+  options?: { skipActivityUpdate?: boolean }
+): Promise<AuthUser> {
   const session = await getSession()
 
   if (!session.isLoggedIn || !session.userId) {
     throw new Error('Unauthorized')
   }
 
-  // Lazy import to avoid circular dependency at module load time
-  const { default: User } = await import('@/models/User')
+  // ── Inactivity check ────────────────────────────────────────────────────────
+  const idleTimeoutMs = getIdleTimeoutMs()
 
-  // Lazy import mongoose for ObjectId validation
+  if (idleTimeoutMs > 0) {
+    const lastActive = session.lastActiveAt
+
+    if (!lastActive) {
+      // lastActiveAt absent means this is an old session issued before the
+      // inactivity feature was deployed.  Treat it as active now and stamp it
+      // so the next check has a baseline.  This avoids logging everyone out
+      // on first deploy.
+      session.lastActiveAt = Date.now()
+      await session.save()
+    } else if (Date.now() - lastActive > idleTimeoutMs) {
+      // Session has been idle longer than the allowed window.
+      // Destroy it so the next request from the same browser gets a clean state.
+      const idleMinutes = Math.round((Date.now() - lastActive) / 60_000)
+      logger.info('[AUTH] session expired due to inactivity', {
+        userId:       session.userId,
+        idleMinutes,
+        timeoutMinutes: idleTimeoutMs / 60_000,
+      })
+      await session.destroy()
+      throw new Error('SessionExpired')
+    }
+  }
+
+  // ── Lazy imports (avoid circular dependency at module load time) ────────────
+  const { default: User }     = await import('@/models/User')
   const { default: mongoose } = await import('mongoose')
 
   // Guard: session.userId must be a valid 24-char hex MongoDB ObjectId.
-  // If it is not (e.g. corrupted or wrong ID type), treat as stale — the
-  // caller (clear-session route or page) will handle cookie expiry.
   if (!mongoose.Types.ObjectId.isValid(session.userId)) {
     throw new Error('UserNotFound')
   }
@@ -126,8 +244,7 @@ export async function requireAuth(): Promise<AuthUser> {
   // NOTE: connectDB() and User.findById() are intentionally NOT wrapped in a
   // try/catch here. If MongoDB is unreachable the error propagates to the
   // caller so it can be distinguished from a genuine auth failure and logged
-  // with its real message. Swallowing DB errors here caused the symptom of
-  // "session missing or invalid" appearing for Atlas connection problems.
+  // with its real message.
   await connectDB()
   const user = await User.findById(session.userId)
     .select('publicId name email accountStatus')
@@ -144,9 +261,6 @@ export async function requireAuth(): Promise<AuthUser> {
     //
     // Instead, pages must redirect to /api/auth/clear-session, a Route Handler
     // that runs in a context where Set-Cookie headers ARE sent to the browser.
-    //
-    // Safe dev diagnostic: log DB name + user count to surface a wrong-database
-    // connection (count=0 means wrong DB, not a deleted user).
     if (process.env.NODE_ENV === 'development') {
       try {
         const totalUsers = await User.countDocuments()
@@ -166,15 +280,14 @@ export async function requireAuth(): Promise<AuthUser> {
   }
 
   // ── Soft-delete gate ──────────────────────────────────────────────────────
-  // If the account has been soft-deleted the session cookie is stale (we
-  // invalidate sessions in the delete-account route, but a cookie that was
-  // issued before deletion could still arrive here).  Treat it as if the
-  // account no longer exists so all protected routes return 401/redirect.
-  //
-  // accountStatus defaults to 'active' for legacy documents that pre-date
-  // the field, so the ?? 'active' fallback keeps existing accounts working.
   if ((user.accountStatus ?? 'active') !== 'active') {
     throw new Error('AccountDeleted')
+  }
+
+  // ── Refresh activity timestamp (throttled) ────────────────────────────────
+  // Skip for background polling routes that must not keep idle sessions alive.
+  if (!options?.skipActivityUpdate) {
+    await updateSessionActivity(session)
   }
 
   return {

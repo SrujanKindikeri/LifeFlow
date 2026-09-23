@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -17,8 +17,17 @@ import { useToast } from '@/components/ui/Toast'
 type Step = 'credentials' | 'email-not-verified' | '2fa' | '2fa-email' | 'account-deleted'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const { success, error, info } = useToast()
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+  const { success, error, info, warning } = useToast()
+
+  // Show a one-time banner when the user is redirected here after session expiry
+  useEffect(() => {
+    if (searchParams.get('reason') === 'session_expired') {
+      warning('Your session expired due to inactivity. Please log in again.')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [step, setStep]               = useState<Step>('credentials')
   const [showPassword, setShowPassword] = useState(false)

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import logger from '@/lib/logger'
 
@@ -16,13 +16,18 @@ import logger from '@/lib/logger'
  *
  * Flow:
  *   stale /app/* request
- *     → requireAuth() throws 'UserNotFound'
- *     → page redirects to /api/auth/clear-session
+ *     → requireAuth() throws 'UserNotFound' | 'SessionExpired'
+ *     → page redirects to /api/auth/clear-session[?reason=session_expired]
  *     → this handler destroys the session cookie (Set-Cookie: max-age=0)
- *     → 302 redirect to /login
+ *     → 302 redirect to /login[?reason=session_expired]
  *     → proxy sees no valid session → /login renders cleanly
+ *
+ * Query params:
+ *   reason  — optional string passed through to /login so the page can show
+ *             a contextual message (e.g. "session_expired").
+ *             Only safe values are forwarded; never reflected verbatim.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getSession()
     await session.destroy()
@@ -35,10 +40,18 @@ export async function GET() {
     })
   }
 
+  // Forward a safe reason param so the login page can show a contextual message.
+  // Whitelist the allowed values — never reflect arbitrary user input.
+  const rawReason = new URL(req.url).searchParams.get('reason')
+  const SAFE_REASONS = ['session_expired'] as const
+  const reason = SAFE_REASONS.includes(rawReason as (typeof SAFE_REASONS)[number])
+    ? rawReason
+    : null
+
+  const loginUrl = new URL('/login', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000')
+  if (reason) loginUrl.searchParams.set('reason', reason)
+
   // Use a 302 (temporary) so browsers do not cache the clear-session URL as
   // a permanent redirect to /login.
-  return NextResponse.redirect(
-    new URL('/login', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
-    { status: 302 },
-  )
+  return NextResponse.redirect(loginUrl, { status: 302 })
 }

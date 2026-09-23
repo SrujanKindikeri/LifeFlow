@@ -37,6 +37,7 @@ const REQUIRED_SERVER_VARS = [
 
 const OPTIONAL_SERVER_VARS = [
   'MONGODB_DB_NAME',
+  'SESSION_IDLE_TIMEOUT_MINUTES',
   'SCHEDULER_SECRET',
   'CRON_SECRET',
   'STORAGE_PROVIDER',
@@ -136,6 +137,13 @@ export function getServerEnv() {
     // Auth
     SESSION_SECRET: process.env.SESSION_SECRET!,
 
+    // Session inactivity timeout in minutes. Defaults to 60 (1 hour).
+    // Set SESSION_IDLE_TIMEOUT_MINUTES=0 to disable the inactivity timeout.
+    SESSION_IDLE_TIMEOUT_MINUTES: parseInt(
+      process.env.SESSION_IDLE_TIMEOUT_MINUTES ?? '60',
+      10
+    ),
+
     // Scheduler / Cron
     SCHEDULER_SECRET: process.env.SCHEDULER_SECRET ?? process.env.CRON_SECRET ?? '',
     CRON_SECRET:      process.env.CRON_SECRET ?? process.env.SCHEDULER_SECRET ?? '',
@@ -205,6 +213,10 @@ export const serverEnv = {
 
   // Auth
   get SESSION_SECRET()   { return process.env.SESSION_SECRET ?? '' },
+  // Session inactivity timeout in minutes. 0 = disabled. Default 60.
+  get SESSION_IDLE_TIMEOUT_MINUTES() {
+    return parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES ?? '60', 10)
+  },
 
   // Scheduler / Cron
   get SCHEDULER_SECRET() { return process.env.SCHEDULER_SECRET ?? process.env.CRON_SECRET ?? '' },

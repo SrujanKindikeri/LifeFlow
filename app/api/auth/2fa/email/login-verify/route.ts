@@ -232,6 +232,7 @@ export async function POST(req: NextRequest) {
     session.twoFactorPending   = false
     session.pendingUserId      = undefined
     session.twoFactorPendingAt = undefined
+    session.lastActiveAt       = Date.now() // inactivity timer starts at successful email OTP
     await session.save()
 
     logger.info('[2FA] Email OTP login verified', { userId: user._id.toString() })

@@ -19,13 +19,13 @@ export function GroupBillReminders({ reminders }: Props) {
   const [local, setLocal] = useState<GroupBillReminder[]>(reminders)
   const [settling, setSettling] = useState<string | null>(null) // `${billId}:${fromPerson}:${toPerson}`
 
+  // Track settled keys locally — must be declared BEFORE `visible` which reads from it
+  const [settled] = useState(() => new Set<string>())
+
   // Remove bills that have no remaining reminders
   const visible = local.filter(
     (b) => b.reminders.filter((r) => !settled.has(`${b._id}:${r.fromPerson}:${r.toPerson}`)).length > 0
   )
-
-  // Track settled keys locally
-  const [settled] = useState(() => new Set<string>())
 
   if (local.length === 0) return null
 

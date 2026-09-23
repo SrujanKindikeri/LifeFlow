@@ -6,7 +6,7 @@ import { FocusModeClient } from '@/components/focus/FocusModeClient'
 export default async function FocusPage({ params }: { params: Promise<{ id: string }> }) {
   try { await requireAuth() } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    redirect((msg === 'UserNotFound' || msg === 'AccountDeleted') ? '/api/auth/clear-session' : '/login')
+    redirect((msg === 'UserNotFound' || msg === 'AccountDeleted' || msg === 'SessionExpired') ? '/api/auth/clear-session?reason=session_expired' : '/login')
   }
   const { id } = await params
   return (

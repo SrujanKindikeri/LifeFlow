@@ -131,6 +131,10 @@ export function handleRouteError(
       return unauthorized()
     }
 
+    if (err.message === 'SessionExpired') {
+      return unauthorized('Your session expired due to inactivity. Please log in again.')
+    }
+
     // Log the real error server-side (never expose to client)
     logger.error(`${route} Unhandled error`, {
       route,
