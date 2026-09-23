@@ -16,12 +16,56 @@
  * All other server-side modules should call connectDB() before any DB query.
  */
 
+import dns from 'dns'
 import mongoose from 'mongoose'
 import logger from '@/lib/logger'
 
 // getServerEnv() validates MONGODB_URI at runtime (inside connectDB), not at module load.
 // This keeps `next build` working in Docker where secrets are absent during the build stage.
 import { getServerEnv } from '@/lib/env'
+
+// ─── Optional DNS server override ────────────────────────────────────────────
+//
+// Some environments (e.g. Windows with a home/mobile router as the DNS server)
+// run a DNS resolver that returns a malformed/unexpected response for DNS SRV
+// queries, which Node.js c-ares reports as EBADRESP.  The mongodb+srv://
+// connection string relies entirely on DNS SRV resolution, so a broken local
+// DNS server causes every connection attempt to fail before any TCP socket is
+// even opened.
+//
+// Set DNS_SERVERS in .env.local (or the platform's environment) to a comma-
+// separated list of reliable DNS server addresses (e.g. 8.8.8.8,8.8.4.4).
+// When the variable is present, this module overrides Node.js's default
+// resolver so that SRV lookups go to those servers instead of the system
+// resolver.
+//
+// This is intentionally a no-op when DNS_SERVERS is absent, so production
+// deployments on AWS EC2 / Azure VM (which use reliable VPC/platform DNS) are
+// completely unaffected.
+//
+// Safe to call at module load: dns.setServers() is synchronous and affects
+// only the c-ares resolver used by this Node.js process.
+if (typeof process !== 'undefined' && process.env.DNS_SERVERS) {
+  const servers = process.env.DNS_SERVERS
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  if (servers.length > 0) {
+    try {
+      dns.setServers(servers)
+      // Log only server count/addresses — no secrets here.
+      if (process.env.NODE_ENV === 'development') {
+        logger.info('[MongoDB] DNS resolver overridden via DNS_SERVERS', { servers })
+      }
+    } catch (err) {
+      // Non-fatal — log and continue with the system resolver.
+      logger.warn('[MongoDB] Failed to override DNS servers', {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+}
 
 // ─── Connection state cache ───────────────────────────────────────────────────
 
