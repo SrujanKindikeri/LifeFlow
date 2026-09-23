@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
@@ -16,7 +16,7 @@ import { useToast } from '@/components/ui/Toast'
 // ── Step types ─────────────────────────────────────────────────────────────────
 type Step = 'credentials' | 'email-not-verified' | '2fa' | '2fa-email' | 'account-deleted'
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const { success, error, info, warning } = useToast()
@@ -867,5 +867,19 @@ export default function LoginPage() {
         </AnimatePresence>
       </div>
     </motion.div>
+  )
+}
+
+// ── Suspense boundary — required because useSearchParams() suspends ───────────
+// The entire login card (credentials, 2FA-TOTP, 2FA-email, account-deleted,
+// email-not-verified steps) is rendered inside LoginPageContent.  Wrapping it
+// here keeps page.tsx as the sole default export while satisfying Next.js's
+// static-generation requirement that any component calling useSearchParams()
+// must be enclosed in a <Suspense> boundary.
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageContent />
+    </Suspense>
   )
 }
