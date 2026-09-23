@@ -213,21 +213,29 @@ export async function requireAuth(
 
     if (!lastActive) {
       // lastActiveAt absent means this is an old session issued before the
-      // inactivity feature was deployed.  Treat it as active now and stamp it
-      // so the next check has a baseline.  This avoids logging everyone out
-      // on first deploy.
-      session.lastActiveAt = Date.now()
-      await session.save()
+      // inactivity feature was deployed.  Treat it as active now.
+      //
+      // IMPORTANT: do NOT call session.save() here.  requireAuth() is called
+      // from Server Component render functions (page.tsx), and Next.js 16
+      // throws "Cookies can only be modified in a Server Action or Route Handler"
+      // if cookies are written during the RSC render phase.
+      //
+      // Old sessions without lastActiveAt are treated as active and given a
+      // grace period.  The timestamp will be stamped on the next Route Handler
+      // call (e.g. any /api/* request from the page) via updateSessionActivity().
     } else if (Date.now() - lastActive > idleTimeoutMs) {
       // Session has been idle longer than the allowed window.
-      // Destroy it so the next request from the same browser gets a clean state.
+      //
+      // IMPORTANT: do NOT call session.destroy() here — same reason as above.
+      // Callers (page.tsx) catch 'SessionExpired' and redirect to
+      // /api/auth/clear-session, a Route Handler that runs in a context where
+      // Set-Cookie headers ARE emitted, so the cookie is correctly cleared there.
       const idleMinutes = Math.round((Date.now() - lastActive) / 60_000)
       logger.info('[AUTH] session expired due to inactivity', {
         userId:       session.userId,
         idleMinutes,
         timeoutMinutes: idleTimeoutMs / 60_000,
       })
-      await session.destroy()
       throw new Error('SessionExpired')
     }
   }
@@ -285,7 +293,11 @@ export async function requireAuth(
   }
 
   // ── Refresh activity timestamp (throttled) ────────────────────────────────
-  // Skip for background polling routes that must not keep idle sessions alive.
+  // Skip for Server Component render callers — cookie writes are forbidden
+  // during the RSC render phase in Next.js 16 and throw a hard error.
+  // All page.tsx callers MUST pass { skipActivityUpdate: true }.
+  // Activity is refreshed instead by Route Handlers (API routes) which run
+  // in a context where Set-Cookie headers are permitted.
   if (!options?.skipActivityUpdate) {
     await updateSessionActivity(session)
   }

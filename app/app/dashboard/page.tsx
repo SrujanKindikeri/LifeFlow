@@ -7,7 +7,7 @@ import logger from '@/lib/logger'
 export default async function DashboardPage() {
   let session
   try {
-    session = await requireAuth()
+    session = await requireAuth({ skipActivityUpdate: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
 

@@ -6,7 +6,7 @@ export default async function ProfilePage() {
   let initialUser: { name: string; email: string; publicId: string }
 
   try {
-    const auth = await requireAuth()
+    const auth = await requireAuth({ skipActivityUpdate: true })
     initialUser = {
       name:     auth.name,
       email:    auth.email,

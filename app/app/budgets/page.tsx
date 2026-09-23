@@ -4,7 +4,7 @@ import { Suspense } from 'react'
 import { BudgetsClient } from '@/components/budgets/BudgetsClient'
 
 export default async function BudgetsPage() {
-  try { await requireAuth() } catch (err) {
+  try { await requireAuth({ skipActivityUpdate: true }) } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     redirect((msg === 'UserNotFound' || msg === 'AccountDeleted' || msg === 'SessionExpired') ? '/api/auth/clear-session?reason=session_expired' : '/login')
   }

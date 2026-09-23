@@ -4,7 +4,7 @@ import { Suspense } from 'react'
 import { FinancialReviewClient } from '@/components/financial-review/FinancialReviewClient'
 
 export default async function FinancialReviewPage() {
-  try { await requireAuth() } catch (err) {
+  try { await requireAuth({ skipActivityUpdate: true }) } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     redirect((msg === 'UserNotFound' || msg === 'AccountDeleted' || msg === 'SessionExpired') ? '/api/auth/clear-session?reason=session_expired' : '/login')
   }
