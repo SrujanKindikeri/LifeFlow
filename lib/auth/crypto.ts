@@ -209,3 +209,51 @@ export function safeCompare(a: string, b: string): boolean {
     return false
   }
 }
+
+
+// ─── Group Bill Reminder public-link tokens ───────────────────────────────────
+//
+// Public reminder tokens use the same cryptographic mechanism as email-
+// verification tokens (32 random bytes, base64url raw token, SHA-256 hash
+// stored in MongoDB).  The aliases below make call-sites self-documenting.
+
+/**
+ * Generate a cryptographically secure token for a public Group Bill reminder link.
+ *
+ * Returns:
+ *   rawToken  — URL-safe base64url string.  Embed in the email URL only.
+ *               Discard immediately after constructing the URL — never persist.
+ *   tokenHash — SHA-256 hex digest.  Store ONLY this in MongoDB.
+ *
+ * The URL:
+ *   /group-bill/view/<rawToken>
+ *
+ * The database stores:
+ *   { tokenHash: '<sha256-hex>' }
+ */
+export function generateReminderToken(): { rawToken: string; tokenHash: string } {
+  const { token, tokenHash } = generateVerificationToken()
+  return { rawToken: token, tokenHash }
+}
+
+/**
+ * Hash an incoming raw reminder token (from a URL path segment) for safe DB lookup.
+ *
+ * Returns null if the input is empty, not a string, or cannot be decoded.
+ * A null result must be treated as "token not found" — never expose error detail.
+ */
+export function hashReminderToken(rawToken: string | null | undefined): string | null {
+  return hashToken(rawToken)
+}
+
+/**
+ * Hash an email address for storage in GroupBillReminderToken.recipientEmailHash.
+ * Lower-cases and trims the address before hashing for consistent lookup.
+ * Returns null for empty/invalid input.
+ */
+export function hashEmailForStorage(email: string | null | undefined): string | null {
+  if (!email || typeof email !== 'string') return null
+  const normalised = email.toLowerCase().trim()
+  if (!normalised.includes('@')) return null
+  return crypto.createHash('sha256').update(normalised, 'utf8').digest('hex')
+}

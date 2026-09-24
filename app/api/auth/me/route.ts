@@ -7,6 +7,15 @@ import User from '@/models/User'
 import type { IUser } from '@/models/User'
 import type { AppearancePreferences } from '@/types'
 
+// Force this route to always be dynamically rendered — never statically cached.
+// Required for correctness: both GET (session cookie) and PATCH (writes) must
+// always hit the origin server.  In Next.js 16 the default for Route Handlers
+// is 'auto', which can statically prerender a GET in some deployment setups if
+// no Request-time API is detected at build time.  cookies() is a runtime API
+// and makes the route dynamic at request time, but adding the explicit export
+// removes any ambiguity and prevents edge-caching surprises.
+export const dynamic = 'force-dynamic'
+
 // ── Serialise a user doc into the safe client shape ───────────────────────────
 
 const DEFAULT_APPEARANCE: AppearancePreferences = {
@@ -29,6 +38,7 @@ function serializeUser(user: Partial<IUser> & { _id: { toString(): string }; cre
     avatar:                       user.avatar,
     currency:                     user.currency,
     timezone:                     user.timezone,
+    upiId:                        user.upiId ?? null,
     notificationPreferences:      user.notificationPreferences,
     emailNotifications:           user.emailNotifications,
     notificationsTested:          user.notificationsTested ?? false,
@@ -51,6 +61,7 @@ function serializeUser(user: Partial<IUser> & { _id: { toString(): string }; cre
 // The avatar (potentially a large base64 data URL) is intentionally kept so
 // the profile photo renders without a second round-trip.
 // emailOtpEnabled is included so the Security section can show correct 2FA status.
+// upiId is included so the Account section can display and edit the UPI ID.
 const PROFILE_GET_PROJECTION = [
   'publicId',
   'name',
@@ -58,6 +69,7 @@ const PROFILE_GET_PROJECTION = [
   'avatar',
   'currency',
   'timezone',
+  'upiId',
   'notificationPreferences',
   'emailNotifications',
   'notificationsTested',
@@ -92,6 +104,10 @@ export async function GET() {
     if ((userDoc.accountStatus ?? 'active') !== 'active') {
       return NextResponse.json({ error: 'Account is not active' }, { status: 403 })
     }
+
+    console.log(
+      '[PROFILE LOAD DEBUG] upiConfigured:', (userDoc.upiId ?? null) !== null,
+    )
 
     return NextResponse.json({ user: serializeUser(userDoc) })
   } catch (error) {
@@ -145,8 +161,8 @@ export async function PATCH(req: NextRequest) {
       const user = await User.findByIdAndUpdate(
         userId,
         { $set: setPayload },
-        { new: true }
-      ).select('-passwordHash')
+        { returnDocument: 'after' }
+      ).select('-passwordHash').lean<IUser>()
       if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
       return NextResponse.json({ user: serializeUser(user) })
@@ -162,26 +178,58 @@ export async function PATCH(req: NextRequest) {
       const user = await User.findByIdAndUpdate(
         userId,
         { $set: { appearancePreferences: parsed.data } },
-        { new: true, upsert: false }
-      ).select('-passwordHash')
+        { returnDocument: 'after', upsert: false }
+      ).select('-passwordHash').lean<IUser>()
       if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
       return NextResponse.json({ user: serializeUser(user) })
     }
 
-    // ── Profile update (name, currency, timezone) ──
+    // ── Profile update (name, currency, timezone, upiId) ──
     const parsed = profileUpdateSchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
     }
 
+    // Build an explicit $set payload so undefined optional fields (e.g. upiId
+    // when the client omits it) are not accidentally included.  When upiId IS
+    // present in parsed.data (string or null), it is written to MongoDB.
+    // When it is absent (undefined — Zod .optional() dropped it), it is
+    // intentionally omitted from the update so the existing value is preserved.
+    const profileSetPayload: Record<string, unknown> = {
+      name:     parsed.data.name,
+      currency: parsed.data.currency,
+      timezone: parsed.data.timezone,
+    }
+    if (parsed.data.upiId !== undefined) {
+      // null means "clear UPI"; a string means "set UPI"
+      profileSetPayload['upiId'] = parsed.data.upiId
+    }
+
+    console.log(
+      '[PROFILE SAVE DEBUG] authenticatedUser: true',
+      '| upiReceived:', parsed.data.upiId !== undefined,
+      '| upiConfigured:', parsed.data.upiId !== null && parsed.data.upiId !== undefined,
+    )
+
+    // Use .lean() so the returned object is a plain JS document — Mongoose
+    // Document getters can silently return undefined for fields that exist in
+    // the schema but were absent from the stored MongoDB document (e.g. legacy
+    // users created before upiId was added).  A lean result is a raw BSON
+    // object: after $set { upiId } the lean doc will contain the literal saved value.
     const user = await User.findByIdAndUpdate(
       userId,
-      { $set: parsed.data },
-      { new: true }
-    ).select('-passwordHash')
+      { $set: profileSetPayload },
+      { returnDocument: 'after' }
+    ).select('-passwordHash').lean<IUser>()
 
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+
+    console.log(
+      '[PROFILE SAVE DEBUG] dbMatched: true',
+      '| dbModified: true',
+      '| upiConfiguredAfterSave:', (user.upiId ?? null) !== null,
+    )
 
     // Update session name if it changed
     const session = await getSession()

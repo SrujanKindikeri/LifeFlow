@@ -96,6 +96,7 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
     name:     initialUser.name,
     currency: 'INR',
     timezone: 'Asia/Kolkata',
+    upiId:    '' as string,
   })
   const [savingProfile,setSavingProfile]=useState(false)
   const [pwForm,       setPwForm]      = useState({ currentPassword: '', newPassword: '', confirmNewPassword: '' })
@@ -108,6 +109,8 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
   const [deletePassword,    setDeletePassword]    = useState('')
   const [showDeletePw,      setShowDeletePw]      = useState(false)
   const [deleteError,       setDeleteError]       = useState<string | null>(null)
+  // ── UPI field validation error ────────────────────────────────────────────
+  const [upiError,          setUpiError]          = useState<string | null>(null)
 
   // ── Avatar / profile photo ────────────────────────────────────────────────
   const [avatarModalOpen, setAvatarModalOpen] = useState(false)
@@ -164,7 +167,12 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
       if (!res.ok) throw new Error()
       const data = await res.json()
       setUser(data.user)
-      setProfileForm({ name: data.user.name, currency: data.user.currency, timezone: data.user.timezone })
+      setProfileForm({
+        name:     data.user.name,
+        currency: data.user.currency,
+        timezone: data.user.timezone,
+        upiId:    data.user.upiId ?? '',
+      })
 
       // Sync server-stored appearance prefs into ThemeProvider (canonical source).
       // This ensures the theme persists correctly after logout/login even if
@@ -330,14 +338,61 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
 
   async function saveProfile() {
     if (!profileForm.name.trim()) { toastError('Name is required'); return }
+
+    // ── Client-side UPI validation (mirrors the server Zod rule) ─────────────
+    const rawUpi = profileForm.upiId.trim()
+    if (rawUpi !== '' && !/^[a-zA-Z0-9._\-+]+@[a-zA-Z0-9]+$/.test(rawUpi.toLowerCase())) {
+      setUpiError('Enter a valid UPI ID (e.g. srujan@upi, name@okaxis).')
+      return
+    }
+    setUpiError(null)
+
+    const prevUpi = (user?.upiId ?? null)
+
     setSavingProfile(true)
     try {
-      const res  = await fetch('/api/auth/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profileForm) })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? 'Failed') }
-      const data = await res.json()
-      setUser(data.user); success('Profile saved')
-    } catch (e) { toastError(e instanceof Error ? e.message : 'Failed to save profile') }
-    finally     { setSavingProfile(false) }
+      const res  = await fetch('/api/auth/me', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(profileForm),
+      })
+      if (!res.ok) {
+        const d = await res.json() as { error?: string }
+        throw new Error(d.error ?? 'Failed to save profile')
+      }
+      // The response is non-null here: we only reach this branch when res.ok is
+      // true, so the server always returns { user: UserType }.  Asserting
+      // non-null removes the `undefined` escape hatch introduced by `?.` which
+      // was silently collapsing upiId to '' via `undefined ?? ''`.
+      const data = await res.json() as { user: UserType }
+      const savedUser = data.user  // always a full UserType, never null
+
+      // Sync both user state AND form with server-returned (normalised) values.
+      // This ensures profileForm.upiId reflects the lowercase-trimmed value the
+      // server stored, so a subsequent save sends the correct canonical string.
+      // NOTE: upiId is `string | null` (never undefined) on UserType, so
+      // `savedUser.upiId ?? ''` only fires for the legitimate null case.
+      setUser(savedUser)
+      setProfileForm((f) => ({
+        ...f,
+        name:     savedUser.name,
+        currency: savedUser.currency,
+        timezone: savedUser.timezone,
+        upiId:    savedUser.upiId ?? '',
+      }))
+
+      // Tailor the success message so UPI changes are clearly acknowledged.
+      const newUpi = savedUser.upiId ?? null
+      if (newUpi !== prevUpi) {
+        success(newUpi ? 'UPI ID saved' : 'UPI ID removed')
+      } else {
+        success('Profile saved')
+      }
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : 'Failed to save profile')
+    } finally {
+      setSavingProfile(false)
+    }
   }
 
   async function changePassword() {
@@ -651,6 +706,27 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <GlassSelect label="Currency" value={profileForm.currency} onChange={(v) => setProfileForm((f) => ({ ...f, currency: v }))} options={CURRENCIES} />
               <GlassSelect label="Timezone" value={profileForm.timezone} onChange={(v) => setProfileForm((f) => ({ ...f, timezone: v }))} options={TIMEZONES} />
+            </div>
+            {/* ── UPI ID ── */}
+            <div className="flex flex-col gap-1">
+              <GlassInput
+                label="UPI ID"
+                value={profileForm.upiId}
+                onChange={(e) => {
+                  setProfileForm((f) => ({ ...f, upiId: e.target.value }))
+                  if (upiError) setUpiError(null)
+                }}
+                placeholder="e.g. yourname@upi"
+                error={upiError ?? undefined}
+                leftIcon={<span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: 'var(--text-faint)' }}>₹</span>}
+              />
+              {upiError ? null : (
+                <p className="text-[11px] px-1" style={{ color: 'var(--text-faint)' }}>
+                  {profileForm.upiId
+                    ? 'Used in Group Bill reminder emails so recipients know where to pay.'
+                    : 'Not configured — add your UPI ID so Group Bill recipients know where to pay.'}
+                </p>
+              )}
             </div>
             <div className="flex justify-end">
               <GlassButton variant="primary" onClick={saveProfile} loading={savingProfile}>

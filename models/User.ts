@@ -233,6 +233,14 @@ export interface IUser extends Document {
    */
   scheduledPermanentDeletionAt: Date | null
 
+  /**
+   * Optional UPI ID for payment identification.
+   * Used only as a payment destination displayed in Group Bill reminder emails.
+   * Never a secret, credential, or authentication factor.
+   * Example: "srujan@upi", "9876543210@okaxis"
+   */
+  upiId: string | null
+
   createdAt: Date
   updatedAt: Date
 }
@@ -470,6 +478,17 @@ const UserSchema = new Schema<IUser>(
       type:    Date,
       default: null,
       index:   true,   // used by cleanup job: range query on this field
+    },
+
+    // ── UPI ID (optional payment destination identifier) ──────────────────
+    // Displayed in Group Bill reminder emails so the recipient knows where to
+    // pay.  Not a credential, not a secret.  Only the account owner can edit it.
+    // Stored trimmed and lowercased.  Never exposed to other users.
+    upiId: {
+      type:      String,
+      default:   null,
+      maxlength: 100,
+      trim:      true,
     },
   },
   { timestamps: true }

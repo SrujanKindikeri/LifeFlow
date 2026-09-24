@@ -20,6 +20,10 @@
  *    double-sends even if the client fires the request twice.
  * 8. Rate-limited via checkBillReminderLimit (60-s cooldown, 3/day per
  *    recipient, 10/day total, 20/hr per IP).
+ * 9. A secure public-reminder token (GroupBillReminderToken) is generated and
+ *    stored at send time.  The raw token is embedded in the email URL only —
+ *    the database stores only its SHA-256 hash.  The token expires after
+ *    TOKEN_TTL_DAYS days so the public link does not persist indefinitely.
  *
  * ── REQUEST BODY ──────────────────────────────────────────────────────────────
  * {
@@ -59,12 +63,17 @@ import {
 import { getNotificationService }  from '@/lib/notifications'
 import { aggregateGroupBillPeople } from '@/lib/groupBillAggregator'
 import { getAppUrl }                from '@/lib/env'
+import {
+  generateReminderToken,
+  hashEmailForStorage,
+}                                   from '@/lib/auth/crypto'
 
 import GroupBill      from '@/models/GroupBill'
 import Person         from '@/models/Person'
 import User           from '@/models/User'
 import Notification   from '@/models/Notification'
 import NotificationLog from '@/models/NotificationLog'
+import GroupBillReminderToken, { TOKEN_TTL_DAYS } from '@/models/GroupBillReminderToken'
 
 import type { IGroupBill } from '@/models/GroupBill'
 import type { IPerson }    from '@/models/Person'
@@ -182,6 +191,16 @@ export async function POST(req: NextRequest) {
 
   const senderObjectId = new mongoose.Types.ObjectId(sender.userId)
 
+  // Fetch sender's upiId from the database — never trusted from the client.
+  // Only publicId and upiId are needed beyond what requireAuth() already gives us.
+  const senderDbRecord = await User.findById(senderObjectId)
+    .select('publicId upiId')
+    .lean<{ publicId: string; upiId: string | null }>()
+
+  // Fall back to session lifeFlowId if the DB record is unavailable (shouldn't happen).
+  const senderLifeFlowId = senderDbRecord?.publicId ?? sender.lifeFlowId ?? ''
+  const senderUpiId      = senderDbRecord?.upiId    ?? null
+
   // ── 4. Idempotency check ─────────────────────────────────────────────────
   const idempotencyKey = buildReminderKey(sender.userId, body.personKey, body.requestId)
 
@@ -298,8 +317,79 @@ export async function POST(req: NextRequest) {
 
   const inAppTitle   = 'Group Bill Reminder'
   const inAppMessage =
-    `You have ${_fmtAmount(totalOutstanding, currency)} outstanding across ` +
-    `${personSummary.billCount} Group Bill${personSummary.billCount !== 1 ? 's' : ''}.`
+    `${sender.name} sent you a reminder. You have ` +
+    `${_fmtAmount(totalOutstanding, currency)} outstanding across ` +
+    `${personSummary.billCount} Group Bill${personSummary.billCount !== 1 ? 's' : ''}` +
+    (senderUpiId ? `. Pay to: ${senderUpiId}` : '') +
+    '.'
+
+  // ── 11b. Generate public reminder token ──────────────────────────────────
+  // A cryptographically secure raw token is embedded in the email URL only.
+  // Only its SHA-256 hash is written to MongoDB.
+  // The token expires after TOKEN_TTL_DAYS days.
+  // On failure we degrade gracefully — the email still sends, but with the
+  // authenticated fallback URL instead of the public page.
+  let publicReminderUrl: string | undefined
+  const appBaseUrl = getAppUrl()
+
+  try {
+    const { rawToken, tokenHash } = generateReminderToken()
+
+    const expiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000)
+
+    // Collect bill ObjectIds for future revocation cross-checks.
+    const billObjectIds = personSummary.bills.map((b) => {
+      try {
+        return new mongoose.Types.ObjectId(b.billId)
+      } catch {
+        return null
+      }
+    }).filter(Boolean) as mongoose.Types.ObjectId[]
+
+    // Build per-bill snapshots (matches IBillSnapshot shape).
+    const billsSnapshot = billLines.map((b) => ({
+      billId:    personSummary.bills.find(
+        (pb) => pb.billName === b.billName && pb.billDate === b.billDate
+      )?.billId ?? '',
+      billName:  b.billName,
+      billDate:  b.billDate,
+      amountOwed: b.amountOwed,
+      currency,
+    }))
+
+    await GroupBillReminderToken.create({
+      tokenHash,
+      notificationLogId:  null,  // will be back-patched after logDoc is created
+      senderUserId:        senderObjectId,
+      recipientPersonId:   personRecord?._id ?? null,
+      recipientEmailHash:  personRecord?.email
+        ? hashEmailForStorage(personRecord.email)
+        : null,
+      billIds:             billObjectIds,
+      senderSnapshot: {
+        name:       sender.name,
+        lifeFlowId: senderLifeFlowId,
+        upiId:      senderUpiId ?? null,
+      },
+      billsSnapshot,
+      recipientName,
+      currency,
+      expiresAt,
+      revokedAt: null,
+    })
+
+    // Raw token goes into the URL — never into the DB.
+    publicReminderUrl = new URL(
+      `/group-bill/view/${rawToken}`,
+      appBaseUrl,
+    ).toString()
+  } catch (tokenErr: unknown) {
+    // Non-fatal — email still sends with the authenticated fallback URL.
+    // Log minimally; never log the raw token.
+    const msg = tokenErr instanceof Error ? tokenErr.message : String(tokenErr)
+    console.error('[send-reminder] Failed to create public reminder token:', msg)
+    publicReminderUrl = undefined
+  }
 
   // ── 12. Claim the idempotency slot BEFORE sending ────────────────────────
   const logDoc = await NotificationLog.create({
@@ -329,6 +419,17 @@ export async function POST(req: NextRequest) {
       duplicate: true,
       message:   'Reminder already sent for this request.',
     })
+  }
+
+  // Back-patch the notificationLogId on the reminder token now that logDoc exists.
+  // Fire-and-forget — never let this failure break the send flow.
+  if (publicReminderUrl) {
+    GroupBillReminderToken.findOneAndUpdate(
+      { senderUserId: senderObjectId, notificationLogId: null, revokedAt: null,
+        expiresAt: { $gt: new Date() } },
+      { $set: { notificationLogId: logDoc._id } },
+      { sort: { createdAt: -1 } },
+    ).catch(() => undefined)
   }
 
   // ── 13. Deliver — treat each channel independently ───────────────────────
@@ -363,10 +464,13 @@ export async function POST(req: NextRequest) {
       emailContent = buildGroupBillManualReminderEmail({
         recipientName,
         senderName:       sender.name,
+        senderLifeFlowId,
+        senderUpiId,
         totalOutstanding,
         currency,
         bills:            billLines,
-        appUrl:           getAppUrl(),
+        appUrl:           appBaseUrl,
+        publicReminderUrl,
       })
 
       const notifier = await getNotificationService()

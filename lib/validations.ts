@@ -129,6 +129,24 @@ export const profileUpdateSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(50, 'Name is too long'),
   currency: z.string().max(5).default('INR'),
   timezone: z.string().max(50).default('Asia/Kolkata'),
+  /**
+   * Optional UPI ID for payment identification.
+   * Accepts common UPI formats: name@bank, mobile@upi, username@okaxis, etc.
+   * Trimmed and lowercased before storage.
+   * Pass null or omit to clear.
+   */
+  upiId: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(100, 'UPI ID is too long')
+    .refine(
+      (v) => v === '' || /^[a-zA-Z0-9._\-+]+@[a-zA-Z0-9]+$/.test(v),
+      { message: 'Invalid UPI ID format. Expected format: name@bank (e.g. srujan@upi)' },
+    )
+    .transform((v) => v === '' ? null : v)
+    .optional()
+    .nullable(),
 })
 
 // ─── Appearance preferences ───────────────────────────────────────────────────

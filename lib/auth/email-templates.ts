@@ -3262,7 +3262,7 @@ export function buildGroupBillReminderEmail(
   <!-- CTA -->
   <tr>
     <td style="padding:24px 0 0 0;text-align:center;">
-      <a href="${appUrl}/app/expenses"
+      <a href="${appUrl}/app/expenses?tab=group"
          style="display:inline-block;background:#2563eb;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:10px;">
         Open Group Bills
       </a>
@@ -3319,7 +3319,7 @@ export function buildGroupBillReminderEmail(
     (youOwePeople.length > 0
       ? `YOU OWE\n───────\n${youOweText}\n\n`
       : '') +
-    `Open LifeFlow to settle: ${appUrl}/app/expenses\n\n` +
+    `Open LifeFlow to settle: ${appUrl}/app/expenses?tab=group\n\n` +
     `— The LifeFlow Team`
 
   return { subject, html, text }
@@ -3357,6 +3357,17 @@ export interface GroupBillManualReminderEmailOptions {
   /** Sender's display name, e.g. "Priya Sharma". */
   senderName: string
   /**
+   * Sender's LifeFlow ID (LF-XXXXXXXX) for identification in the email.
+   * Safe to display — it's the public identifier, not a secret.
+   */
+  senderLifeFlowId: string
+  /**
+   * Sender's UPI ID for payment (e.g. "srujan@upi").
+   * Null/undefined when the sender has not configured a UPI ID.
+   * Displayed as-is in the PAY TO section.
+   */
+  senderUpiId: string | null | undefined
+  /**
    * Total outstanding amount across ALL Group Bills for this person.
    * Always positive — represents what the recipient owes the sender.
    */
@@ -3367,6 +3378,17 @@ export interface GroupBillManualReminderEmailOptions {
   bills: GroupBillManualReminderBill[]
   /** App URL root, e.g. "https://lifeflow.app". */
   appUrl: string
+  /**
+   * Public reminder page URL containing the secure token, e.g.
+   * "https://lifeflow.app/group-bill/view/<rawToken>".
+   *
+   * When provided, the "View Group Bills" CTA links to this public page
+   * so the recipient can open the reminder without signing in to LifeFlow.
+   *
+   * When omitted (legacy/fallback), the CTA links to the authenticated
+   * /app/expenses?tab=group route instead.
+   */
+  publicReminderUrl?: string
 }
 
 /**
@@ -3380,7 +3402,7 @@ export interface GroupBillManualReminderEmailOptions {
 export function buildGroupBillManualReminderEmail(
   opts: GroupBillManualReminderEmailOptions,
 ): { subject: string; html: string; text: string } {
-  const { recipientName, senderName, totalOutstanding, currency, bills, appUrl } = opts
+  const { recipientName, senderName, senderLifeFlowId, senderUpiId, totalOutstanding, currency, bills, appUrl, publicReminderUrl } = opts
 
   const firstName = recipientName.split(' ')[0] ?? recipientName
 
@@ -3401,39 +3423,68 @@ export function buildGroupBillManualReminderEmail(
   const visibleBills = bills.slice(0, 10)
   const extraCount   = bills.length - visibleBills.length
 
-  // Build per-bill rows
-  const billRowsHtml = visibleBills
-    .map((b) => {
-      const dateLabel = (() => {
-        try {
-          const [y, m, d] = b.billDate.split('-').map(Number)
-          return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-IN', {
-            day: 'numeric', month: 'short', year: 'numeric',
-          })
-        } catch {
-          return b.billDate
-        }
-      })()
-      return `
-      <tr>
-        <td style="padding:8px 16px;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">
-          ${b.billName}
-          <span style="display:block;font-size:11px;color:#9ca3af;margin-top:2px;">${dateLabel}</span>
-        </td>
-        <td style="padding:8px 16px;font-size:13px;font-weight:600;color:#dc2626;text-align:right;border-bottom:1px solid #f3f4f6;">
-          ${fmt(b.amountOwed)}
-        </td>
-      </tr>`
-    })
-    .join('')
-
-  const extraRowHtml = extraCount > 0
+  // ── PAY TO section ────────────────────────────────────────────────────────
+  const upiRowHtml = senderUpiId
     ? `<tr>
-        <td colspan="2" style="padding:8px 16px;font-size:11px;color:#9ca3af;">
-          +${extraCount} more bill${extraCount !== 1 ? 's' : ''}
-        </td>
+         <td style="padding:4px 0;font-size:12px;color:#6b7280;">UPI ID</td>
+         <td style="padding:4px 0;font-size:13px;font-weight:600;color:#111827;text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+           ${senderUpiId}
+         </td>
        </tr>`
-    : ''
+    : `<tr>
+         <td colspan="2" style="padding:4px 0;font-size:11px;color:#9ca3af;font-style:italic;">
+           UPI not configured — contact ${senderName} for payment details.
+         </td>
+       </tr>`
+
+  const payToSectionHtml = `
+  <!-- PAY TO section -->
+  <tr>
+    <td style="padding:0 0 24px 0;">
+      <p style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;
+                 letter-spacing:0.05em;margin:0 0 10px 0;">Pay To</p>
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="border-radius:10px;overflow:hidden;background:#f0fdf4;border:1px solid #bbf7d0;">
+        <tr>
+          <td style="padding:16px 20px;">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:4px 0;font-size:12px;color:#6b7280;">Name</td>
+                <td style="padding:4px 0;font-size:13px;font-weight:600;color:#111827;text-align:right;">
+                  ${senderName}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:4px 0;font-size:12px;color:#6b7280;">LifeFlow ID</td>
+                <td style="padding:4px 0;font-size:12px;font-weight:500;color:#4b5563;text-align:right;
+                            font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+                  ${senderLifeFlowId}
+                </td>
+              </tr>
+              ${upiRowHtml}
+              <tr>
+                <td colspan="2" style="padding-top:10px;border-top:1px solid #d1fae5;">
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="font-size:12px;font-weight:600;color:#15803d;">Amount to Pay</td>
+                      <td style="font-size:16px;font-weight:700;color:#15803d;text-align:right;">
+                        ${fmt(totalOutstanding)}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>`
+
+  // The "View Group Bills" CTA uses the public reminder URL when available
+  // (recipient can open without signing in).  Falls back to the authenticated
+  // app route for legacy callers that do not supply publicReminderUrl.
+  const groupBillsUrl = publicReminderUrl ?? `${appUrl}/app/expenses?tab=group`
 
   const inner = `
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">
@@ -3473,36 +3524,12 @@ export function buildGroupBillManualReminderEmail(
     </td>
   </tr>
 
-  <!-- Per-bill breakdown -->
-  <tr>
-    <td style="padding:0 0 24px 0;">
-      <p style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;
-                 letter-spacing:0.05em;margin:0 0 10px 0;">Your Outstanding Bills</p>
-      <table width="100%" cellpadding="0" cellspacing="0"
-             style="border-radius:10px;overflow:hidden;background:#ffffff;border:1px solid #e5e7eb;">
-        <tr style="background:#f9fafb;">
-          <th style="padding:8px 16px;font-size:11px;font-weight:600;color:#9ca3af;
-                      text-align:left;border-bottom:1px solid #e5e7eb;">Bill</th>
-          <th style="padding:8px 16px;font-size:11px;font-weight:600;color:#9ca3af;
-                      text-align:right;border-bottom:1px solid #e5e7eb;">Amount</th>
-        </tr>
-        ${billRowsHtml}
-        ${extraRowHtml}
-        <!-- Total row -->
-        <tr style="background:#f9fafb;">
-          <td style="padding:10px 16px;font-size:13px;font-weight:700;color:#111827;
-                      border-top:2px solid #e5e7eb;">Total</td>
-          <td style="padding:10px 16px;font-size:14px;font-weight:700;color:#dc2626;
-                      text-align:right;border-top:2px solid #e5e7eb;">${fmt(totalOutstanding)}</td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+  ${payToSectionHtml}
 
   <!-- CTA -->
   <tr>
     <td style="padding:0 0 20px 0;text-align:center;">
-      <a href="${appUrl}/app/group-bills"
+      <a href="${groupBillsUrl}"
          style="display:inline-block;background:#2563eb;color:#ffffff;font-size:14px;
                 font-weight:600;text-decoration:none;padding:13px 36px;border-radius:10px;">
         View Group Bills
@@ -3515,7 +3542,7 @@ export function buildGroupBillManualReminderEmail(
     <td style="padding:0 0 0 0;">
       <p style="font-size:12px;color:#9ca3af;text-align:center;margin:0;">
         This reminder was sent by ${senderName} via LifeFlow.<br/>
-        Open LifeFlow to view full bill details and mark settlements as paid.
+        This is a read-only reminder — no LifeFlow account required to view.
       </p>
     </td>
   </tr>
@@ -3533,6 +3560,10 @@ export function buildGroupBillManualReminderEmail(
     ? `  +${extraCount} more bill${extraCount !== 1 ? 's' : ''}\n`
     : ''
 
+  const upiLine = senderUpiId
+    ? `UPI:         ${senderUpiId}\n`
+    : `UPI:         Not configured\n`
+
   const text =
     `LifeFlow Group Bill Reminder\n\n` +
     `Hi ${firstName},\n\n` +
@@ -3541,7 +3572,14 @@ export function buildGroupBillManualReminderEmail(
     `${billLines}\n` +
     `${extraLine}\n` +
     `Total outstanding: ${fmt(totalOutstanding)}\n\n` +
-    `Open LifeFlow to view and settle: ${appUrl}/app/group-bills\n\n` +
+    `────────────────────\n` +
+    `PAY TO\n` +
+    `────────────────────\n` +
+    `Name:        ${senderName}\n` +
+    `LifeFlow ID: ${senderLifeFlowId}\n` +
+    `${upiLine}` +
+    `Amount:      ${fmt(totalOutstanding)}\n\n` +
+    `Open LifeFlow to view and settle: ${groupBillsUrl}\n\n` +
     `— The LifeFlow Team`
 
   return { subject, html, text }

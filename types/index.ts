@@ -69,6 +69,13 @@ export interface User {
   emailOtpEnabled: boolean
   /** ISO string of when Email 2FA was enabled, or null. */
   twoFactorEnabledAt: string | null
+  /**
+   * UPI ID for payment identification.
+   * Displayed in Group Bill reminder emails as the payment destination.
+   * Not a secret — safe to display. Only the account owner can edit it.
+   * null means not configured; always present in the API response (never undefined).
+   */
+  upiId: string | null
   createdAt: string
   updatedAt: string
 }

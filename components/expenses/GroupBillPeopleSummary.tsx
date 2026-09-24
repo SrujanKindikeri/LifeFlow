@@ -132,6 +132,11 @@ export function GroupBillPeopleSummary({ onSelectBillById }: GroupBillPeopleSumm
   // ── Send Reminder modal state ──────────────────────────────────────────────
   const [reminderPerson, setReminderPerson] = useState<SendReminderPersonInfo | null>(null)
 
+  // ── Sender UPI — fetched once from /api/auth/me on mount ──────────────────
+  // Used only to display payment info in the Send Reminder modal UX.
+  // The backend independently re-reads it from the DB when sending.
+  const [senderUpiId, setSenderUpiId] = useState<string | null>(null)
+
   const { error: toastError } = useToast()
 
   const fetchSummary = useCallback(async () => {
@@ -148,6 +153,21 @@ export function GroupBillPeopleSummary({ onSelectBillById }: GroupBillPeopleSumm
       setLoading(false)
     }
   }, [toastError])
+
+  // Fetch sender UPI once — the /api/auth/me response already includes upiId
+  // because we added it to the PROFILE_GET_PROJECTION.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) return
+        const data = await res.json() as { user?: { upiId?: string | null } }
+        setSenderUpiId(data.user?.upiId ?? null)
+      } catch {
+        // Non-fatal: modal still works, just won't show UPI preview
+      }
+    })()
+  }, [])
 
   useEffect(() => { void fetchSummary() }, [fetchSummary])
 
@@ -294,6 +314,7 @@ export function GroupBillPeopleSummary({ onSelectBillById }: GroupBillPeopleSumm
           billCount: 0, currency: 'INR',
           hasLinkedAccount: false, hasEmail: false,
         }}
+        senderUpiId={senderUpiId}
       />
     </div>
   )

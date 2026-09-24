@@ -2215,7 +2215,7 @@ async function processGroupBillReminder(
   await sendPushToUser(user._id, {
     title: 'Group Bill Reminder',
     body:  `${totalPeople} outstanding balance${totalPeople !== 1 ? 's' : ''}`,
-    url:   `${appUrl}/app/expenses`,
+    url:   `${appUrl}/app/expenses?tab=group`,
     tag:   `group-bill-reminder-${today}`,
   }).catch((err: unknown) => {
     logger.warn('[notifScheduler] Group bill push failed', {
