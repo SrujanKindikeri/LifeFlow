@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
+import { getAppUrl } from '@/lib/env'
 import logger from '@/lib/logger'
 
 /**
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
     ? rawReason
     : null
 
-  const loginUrl = new URL('/login', process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000')
+  const loginUrl = new URL('/login', getAppUrl())
   if (reason) loginUrl.searchParams.set('reason', reason)
 
   // Use a 302 (temporary) so browsers do not cache the clear-session URL as

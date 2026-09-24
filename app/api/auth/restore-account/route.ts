@@ -57,6 +57,7 @@ import {
 } from '@/lib/auth/rate-limit'
 import { getNotificationService } from '@/lib/notifications'
 import { buildAccountRestoredEmail } from '@/lib/auth/email-templates'
+import { getAppUrl } from '@/lib/env'
 import logger from '@/lib/logger'
 
 /** Safe error for all invalid-token states — never reveal which condition failed. */
@@ -239,7 +240,7 @@ export async function POST(req: NextRequest) {
     // Sent regardless of notification preferences — transactional security email.
     // Notifications via the scheduler resume automatically because the scheduler
     // filters accountStatus: { $ne: 'deleted' } — no extra action needed here.
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+    const appUrl = getAppUrl()
     try {
       const notifier = await getNotificationService()
       const { subject, html, text } = buildAccountRestoredEmail({

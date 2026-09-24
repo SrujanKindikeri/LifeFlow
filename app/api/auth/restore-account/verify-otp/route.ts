@@ -54,6 +54,7 @@ import {
 } from '@/lib/auth/rate-limit'
 import { getNotificationService } from '@/lib/notifications'
 import { buildAccountRestoredEmail } from '@/lib/auth/email-templates'
+import { getAppUrl } from '@/lib/env'
 import logger from '@/lib/logger'
 
 /** Uniform response for every invalid-token state. */
@@ -347,7 +348,7 @@ export async function POST(req: NextRequest) {
     logger.info('[ACCOUNT RECOVERY] session issued', { userId: user._id.toString() })
 
     // ── Confirmation email (best-effort) ──────────────────────────────────────
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+    const appUrl = getAppUrl()
     try {
       const notifier = await getNotificationService()
       const { subject, html, text } = buildAccountRestoredEmail({

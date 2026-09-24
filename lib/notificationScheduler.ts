@@ -131,8 +131,15 @@ import {
   buildWeeklySummaryEmail,
   buildTaskReminderEmail,
   buildMorningBriefEmail,
+  buildGroupBillReminderEmail,
 } from '@/lib/auth/email-templates'
+import GroupBill from '@/models/GroupBill'
+import Person    from '@/models/Person'
+import { aggregateGroupBillPeople } from '@/lib/groupBillAggregator'
+import type { IGroupBill } from '@/models/GroupBill'
+import type { IPerson }   from '@/models/Person'
 import logger from '@/lib/logger'
+import { getAppUrl } from '@/lib/env'
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -2053,6 +2060,250 @@ async function processTaskDueSoon(
   return { sent: sentCount }
 }
 
+// ─── Group Bill Reminder (10:00 AM) ──────────────────────────────────────────
+//
+// Sent at 10:00 AM local time, at most once per calendar day per user.
+//
+// Summarises outstanding Group Bill balances across ALL of the user's bills so
+// they receive ONE email/notification instead of one per person.
+//
+// PREFERENCE MAPPING
+// ──────────────────
+// No dedicated preference field exists for group bills — we reuse the existing
+// spendingAlerts flags which are semantically closest (financial reminders).
+// • In-app gate: notificationPreferences.spendingAlerts
+// • Email gate:  emailNotifications.enabled && emailNotifications.spendingAlerts
+//
+// This avoids modifying the User schema (which would require a migration) while
+// still honouring the user's intent.  If they've turned off spending alerts,
+// they've expressed that they don't want financial reminders.
+//
+// DEDUPLICATION
+// ─────────────
+// Key: <userId>:GROUP_BILL_REMINDER:<YYYY-MM-DD>
+// One NotificationLog entry per user per day, guarded by the unique index.
+
+async function processGroupBillReminder(
+  user: UserRecord,
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600,
+): Promise<{ sent: boolean }> {
+  const tz    = user.timezone
+  const today = dateInTimezone(now, tz)
+
+  // Target: 10:00 AM local time
+  const targetUtc = localTimeToUtc(today, '10:00', tz)
+  if (!targetUtc) return { sent: false }
+
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  // Gate: in-app preference
+  if (!user.notificationPreferences.spendingAlerts) return { sent: false }
+
+  // Check deduplication (also claims the slot atomically)
+  const alreadySent = await checkAndRecord(
+    user._id,
+    'GROUP_BILL_REMINDER',
+    today,
+    '',
+    targetUtc,
+    `Group bill reminder for ${today}`,
+  )
+  if (alreadySent) return { sent: false }
+
+  // Fetch data — scoped to this user only
+  const [bills, people] = await Promise.all([
+    GroupBill.find({ userId: user._id })
+      .select('name date currency people settlements')
+      .lean(),
+    Person.find({ userId: user._id })
+      .select('name email linkedLifeFlowId linkedUserId source')
+      .lean(),
+  ])
+
+  const summaries = aggregateGroupBillPeople(
+    bills as unknown as (IGroupBill & { _id: import('mongoose').Types.ObjectId })[],
+    people as unknown as (IPerson   & { _id: import('mongoose').Types.ObjectId })[],
+  )
+
+  // Only notify when there is at least one person with an outstanding balance.
+  const outstanding = summaries.filter((s) => s.direction !== 'settled')
+  if (outstanding.length === 0) {
+    // Release the slot — no meaningful content to send.
+    await NotificationLog.deleteOne({
+      userId:  user._id,
+      type:    'GROUP_BILL_REMINDER',
+      forDate: today,
+    }).catch(() => undefined)
+    return { sent: false }
+  }
+
+  // Compute overview totals.
+  let totalOwedToYou = 0
+  let totalYouOwe    = 0
+  for (const s of outstanding) {
+    if (s.direction === 'owes_you') totalOwedToYou += s.netBalance
+    else                            totalYouOwe    += Math.abs(s.netBalance)
+  }
+  totalOwedToYou = Math.round(totalOwedToYou * 100) / 100
+  totalYouOwe    = Math.round(totalYouOwe    * 100) / 100
+
+  // Infer currency symbol from the first bill (all are owner's bills).
+  const firstBill = bills[0] as ({ currency?: string } | undefined)
+  const currencyCode = firstBill?.currency ?? 'INR'
+  const currencySymbols: Record<string, string> = {
+    INR: '₹', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
+  }
+  const currencySymbol = currencySymbols[currencyCode] ?? currencyCode
+
+  // Format today for display
+  const todayLabel = (() => {
+    try {
+      const [y, m, d] = today.split('-').map(Number)
+      const dt = new Date(Date.UTC(y, m - 1, d, 12))
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, weekday: 'long', day: 'numeric', month: 'short',
+      }).format(dt)
+    } catch {
+      return today
+    }
+  })()
+
+  // Build people payload for the notification.
+  const notifPeople = outstanding.map((s) => ({
+    displayName:  s.displayName,
+    billCount:    s.billCount,
+    netBalance:   s.netBalance,
+    direction:    s.direction as 'owes_you' | 'you_owe',
+    currency:     currencyCode,
+    bills: s.bills.map((b) => ({
+      billName:      b.billName,
+      billDate:      b.billDate,
+      owesYouAmount: b.owesYouAmount,
+      youOweAmount:  b.youOweAmount,
+    })),
+  }))
+
+  const totalPeople  = outstanding.length
+  const inAppMessage =
+    totalOwedToYou > 0 && totalYouOwe > 0
+      ? `${totalPeople} people with outstanding Group Bill balances. ` +
+        `${currencySymbol}${totalOwedToYou.toLocaleString('en-IN', { maximumFractionDigits: 2 })} owed to you, ` +
+        `${currencySymbol}${totalYouOwe.toLocaleString('en-IN', { maximumFractionDigits: 2 })} you owe.`
+      : totalOwedToYou > 0
+        ? `${totalPeople} people owe you a total of ` +
+          `${currencySymbol}${totalOwedToYou.toLocaleString('en-IN', { maximumFractionDigits: 2 })} across Group Bills.`
+        : `You owe ${totalPeople} people a total of ` +
+          `${currencySymbol}${totalYouOwe.toLocaleString('en-IN', { maximumFractionDigits: 2 })} in Group Bills.`
+
+  // ── In-app notification ───────────────────────────────────────────────────
+  await Notification.create({
+    userId:     user._id,
+    lifeFlowId: user.publicId,
+    title:      'Group Bill Reminder',
+    message:    inAppMessage,
+    type:       'reminder',
+  }).catch((err: unknown) => {
+    logger.warn('[notifScheduler] Group bill in-app creation failed', {
+      userId:       user._id.toString(),
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
+  })
+
+  // ── Push notification ─────────────────────────────────────────────────────
+  await sendPushToUser(user._id, {
+    title: 'Group Bill Reminder',
+    body:  `${totalPeople} outstanding balance${totalPeople !== 1 ? 's' : ''}`,
+    url:   `${appUrl}/app/expenses`,
+    tag:   `group-bill-reminder-${today}`,
+  }).catch((err: unknown) => {
+    logger.warn('[notifScheduler] Group bill push failed', {
+      userId:       user._id.toString(),
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
+  })
+
+  // ── Email ─────────────────────────────────────────────────────────────────
+  const wantEmail = shouldSendEmail(
+    user.emailNotifications,
+    'spendingAlerts',
+    user.email,
+  )
+
+  let emailOk = false
+  if (wantEmail) {
+    try {
+      const emailContent = buildGroupBillReminderEmail({
+        toName:         user.name,
+        todayLabel,
+        people:         notifPeople,
+        totalOwedToYou,
+        totalYouOwe,
+        appUrl,
+        currencySymbol,
+      })
+
+      const notifier = await getNotificationService()
+      const result = await notifier.send({
+        to:      user.email,
+        subject: emailContent.subject,
+        html:    emailContent.html,
+        text:    emailContent.text,
+      })
+
+      if (result.ok) {
+        emailOk = true
+        logger.info('[EMAIL] Group bill reminder sent', {
+          userId: user._id.toString(),
+        })
+        await markNotificationSent(
+          user._id,
+          'GROUP_BILL_REMINDER',
+          today,
+          '',
+          emailContent.subject,
+          emailContent.html,
+        )
+      } else {
+        logger.warn('[EMAIL] Group bill reminder failed', {
+          userId: user._id.toString(),
+          error:  result.error,
+        })
+        await markNotificationFailed(
+          user._id, 'GROUP_BILL_REMINDER', today, '',
+          result.error ?? 'provider returned non-ok',
+        )
+        // Don't return false — in-app was still created
+      }
+    } catch (err: unknown) {
+      const sanitisedError = err instanceof Error
+        ? err.message.replace(/pass(word)?[=:\s]+\S+/gi, '[REDACTED]')
+        : 'unexpected error'
+      logger.warn('[EMAIL] Group bill reminder failed (exception)', {
+        userId: user._id.toString(),
+        error:  sanitisedError,
+      })
+      await markNotificationFailed(
+        user._id, 'GROUP_BILL_REMINDER', today, '', sanitisedError,
+      )
+    }
+  }
+
+  if (!wantEmail || emailOk) {
+    await markNotificationSent(
+      user._id,
+      'GROUP_BILL_REMINDER',
+      today,
+      '',
+      undefined,
+      undefined,
+    )
+  }
+
+  return { sent: true }
+}
+
 // ─── Legacy no-ops ────────────────────────────────────────────────────────────
 
 async function processTomorrowTasks(
@@ -2123,6 +2374,7 @@ async function processUser(
   await run(processWeeklySummary)
   await run(processHabitReminder)
   await runSpending()
+  await run(processGroupBillReminder)
 
   // Legacy no-ops
   await run(processTomorrowTasks)
@@ -2167,7 +2419,7 @@ export async function runNotificationScheduler(
 
   await connectDB()
 
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+  const appUrl = getAppUrl()
   const now    = new Date()
 
   // Query filter (emailVerified: true, notificationsTested: true required)

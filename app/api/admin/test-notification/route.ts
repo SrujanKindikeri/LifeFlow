@@ -43,6 +43,7 @@ import { connectDB }   from '@/lib/db'
 import User            from '@/models/User'
 import NotificationLog from '@/models/NotificationLog'
 import logger          from '@/lib/logger'
+import { getAppUrl }  from '@/lib/env'
 
 export const dynamic = 'force-dynamic'
 
@@ -174,7 +175,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Optionally trigger the scheduler endpoint after the delay ──────────────
   // This fires a background task — we don't await it so the HTTP response
   // returns immediately.  The worker will also pick it up naturally.
-  const appUrl          = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+  const appUrl          = getAppUrl()
   const schedulerSecret = process.env.SCHEDULER_SECRET || process.env.CRON_SECRET || ''
 
   if (schedulerSecret) {

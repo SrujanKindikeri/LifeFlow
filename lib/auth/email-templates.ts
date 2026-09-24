@@ -3074,3 +3074,475 @@ export function buildTwoFaDisableOtpEmail(opts: TwoFaOtpEmailOptions): {
 
   return { subject, html, text }
 }
+
+// ─── Group Bill Reminder ──────────────────────────────────────────────────────
+
+export interface GroupBillReminderPerson {
+  displayName:  string
+  billCount:    number
+  /** Net amount (positive = they owe you, negative = you owe them). */
+  netBalance:   number
+  /** Direction: 'owes_you' | 'you_owe' */
+  direction:    'owes_you' | 'you_owe'
+  /** Currency code for the largest bill, used for symbol lookup. */
+  currency:     string
+  /** Per-bill lines for this person. */
+  bills: Array<{
+    billName:      string
+    billDate:      string
+    owesYouAmount: number
+    youOweAmount:  number
+  }>
+}
+
+export interface GroupBillReminderEmailOptions {
+  toName:           string
+  todayLabel:       string
+  people:           GroupBillReminderPerson[]
+  /** Sum of all owes-you net balances. */
+  totalOwedToYou:   number
+  /** Sum of all you-owe net balances. */
+  totalYouOwe:      number
+  appUrl:           string
+  currencySymbol:   string
+}
+
+/**
+ * Build the Group Bill Reminder email.
+ *
+ * Shows the bill owner a consolidated view of all outstanding balances:
+ *   - People who owe them
+ *   - People they owe
+ * With a per-person drill-down of contributing bills.
+ *
+ * SERVER-ONLY. Never import from client components.
+ */
+export function buildGroupBillReminderEmail(
+  opts: GroupBillReminderEmailOptions,
+): { subject: string; html: string; text: string } {
+  const {
+    toName,
+    todayLabel,
+    people,
+    totalOwedToYou,
+    totalYouOwe,
+    appUrl,
+    currencySymbol,
+  } = opts
+
+  const firstName = toName.split(' ')[0] ?? toName
+  const sym = currencySymbol
+
+  const subject = `LifeFlow Group Bill Reminder — ${todayLabel}`
+
+  // ── Helper: format amount ─────────────────────────────────────────────────
+  function fmt(amount: number): string {
+    return `${sym}${Math.abs(amount).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`
+  }
+
+  // ── Build person rows HTML ────────────────────────────────────────────────
+  function personRowHtml(p: GroupBillReminderPerson): string {
+    const isOwesYou   = p.direction === 'owes_you'
+    const amountColor = isOwesYou ? '#16a34a' : '#dc2626'
+    const dirLabel    = isOwesYou ? 'Owes You' : 'You Owe'
+    const netAmt      = fmt(Math.abs(p.netBalance))
+
+    const billLines = p.bills
+      .slice(0, 5)
+      .map((b) => {
+        const amt = isOwesYou ? b.owesYouAmount : b.youOweAmount
+        return `
+          <tr>
+            <td style="padding:4px 0 4px 16px;font-size:13px;color:#6b7280;">${b.billName}</td>
+            <td style="padding:4px 0 4px 8px;font-size:13px;color:#6b7280;text-align:right;">${fmt(amt)}</td>
+          </tr>`
+      })
+      .join('')
+
+    const moreLabel =
+      p.bills.length > 5
+        ? `<tr><td colspan="2" style="padding:2px 0 2px 16px;font-size:11px;color:#9ca3af;">+${p.bills.length - 5} more bill(s)</td></tr>`
+        : ''
+
+    return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border-radius:10px;overflow:hidden;background:#f9fafb;border:1px solid #e5e7eb;">
+      <tr>
+        <td colspan="2" style="padding:12px 16px 8px 16px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <span style="font-size:15px;font-weight:600;color:#111827;">${p.displayName}</span>
+                <span style="font-size:11px;color:#9ca3af;margin-left:8px;">${p.billCount} bill${p.billCount !== 1 ? 's' : ''}</span>
+              </td>
+              <td style="text-align:right;">
+                <span style="font-size:12px;font-weight:500;color:${amountColor};background:${isOwesYou ? '#dcfce7' : '#fee2e2'};padding:2px 8px;border-radius:9999px;">${dirLabel}</span>
+              </td>
+            </tr>
+            <tr>
+              <td colspan="2" style="padding-top:2px;">
+                <span style="font-size:18px;font-weight:700;color:${amountColor};">${netAmt}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      ${billLines}
+      ${moreLabel}
+      <tr><td colspan="2" style="height:4px;"></td></tr>
+    </table>`
+  }
+
+  const owesYouPeople = people.filter((p) => p.direction === 'owes_you')
+  const youOwePeople  = people.filter((p) => p.direction === 'you_owe')
+
+  const owesYouSection = owesYouPeople.length > 0
+    ? `<h3 style="font-size:14px;font-weight:600;color:#15803d;margin:0 0 10px 0;padding-bottom:6px;border-bottom:1px solid #dcfce7;">
+        ↙ Owed to You
+       </h3>
+       ${owesYouPeople.map(personRowHtml).join('')}`
+    : ''
+
+  const youOweSection = youOwePeople.length > 0
+    ? `<h3 style="font-size:14px;font-weight:600;color:#b91c1c;margin:${owesYouPeople.length > 0 ? '20px' : '0'} 0 10px 0;padding-bottom:6px;border-bottom:1px solid #fee2e2;">
+        ↗ You Owe
+       </h3>
+       ${youOwePeople.map(personRowHtml).join('')}`
+    : ''
+
+  const overviewRow = (label: string, amount: number, color: string) =>
+    amount > 0
+      ? `<tr>
+           <td style="padding:6px 0;font-size:13px;color:#6b7280;">${label}</td>
+           <td style="padding:6px 0;font-size:14px;font-weight:700;color:${color};text-align:right;">${fmt(amount)}</td>
+         </tr>`
+      : ''
+
+  const inner = `
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">
+
+  <!-- Greeting -->
+  <tr>
+    <td style="padding:0 0 20px 0;">
+      <p style="font-size:15px;color:#374151;margin:0;">Hi <strong>${firstName}</strong>,</p>
+      <p style="font-size:15px;color:#374151;margin:12px 0 0 0;">
+        Here's your Group Bill balance summary for <strong>${todayLabel}</strong>.
+        You have outstanding balances with <strong>${people.length} person${people.length !== 1 ? 's' : ''}</strong>.
+      </p>
+    </td>
+  </tr>
+
+  <!-- Overview card -->
+  <tr>
+    <td style="padding:0 0 24px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px;background:#f3f4f6;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr>
+          <td style="padding:16px 20px;">
+            <p style="font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 10px 0;">Overview</p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              ${overviewRow('Owed to You',   totalOwedToYou, '#15803d')}
+              ${overviewRow('You Owe Others', totalYouOwe,   '#b91c1c')}
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Per-person breakdown -->
+  <tr>
+    <td style="padding:0 0 4px 0;">
+      ${owesYouSection}
+      ${youOweSection}
+    </td>
+  </tr>
+
+  <!-- CTA -->
+  <tr>
+    <td style="padding:24px 0 0 0;text-align:center;">
+      <a href="${appUrl}/app/expenses"
+         style="display:inline-block;background:#2563eb;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:10px;">
+        Open Group Bills
+      </a>
+    </td>
+  </tr>
+
+  <!-- Footer note -->
+  <tr>
+    <td style="padding:20px 0 0 0;">
+      <p style="font-size:12px;color:#9ca3af;text-align:center;margin:0;">
+        Balances are recalculated live from your Group Bills.<br/>
+        Mark a settlement as settled in LifeFlow to remove it from this summary.
+      </p>
+    </td>
+  </tr>
+
+</table>`
+
+  const html = wrapHtml(inner)
+
+  // ── Plain text ─────────────────────────────────────────────────────────────
+  const owesYouText = owesYouPeople
+    .map(
+      (p) =>
+        `  ${p.displayName} — ${fmt(Math.abs(p.netBalance))} (owes you)\n` +
+        p.bills
+          .slice(0, 5)
+          .map((b) => `    • ${b.billName}: ${fmt(b.owesYouAmount)}`)
+          .join('\n'),
+    )
+    .join('\n\n')
+
+  const youOweText = youOwePeople
+    .map(
+      (p) =>
+        `  ${p.displayName} — ${fmt(Math.abs(p.netBalance))} (you owe)\n` +
+        p.bills
+          .slice(0, 5)
+          .map((b) => `    • ${b.billName}: ${fmt(b.youOweAmount)}`)
+          .join('\n'),
+    )
+    .join('\n\n')
+
+  const text =
+    `LifeFlow Group Bill Reminder — ${todayLabel}\n\n` +
+    `Hi ${firstName},\n\n` +
+    `You have outstanding Group Bill balances with ${people.length} person${people.length !== 1 ? 's' : ''}.\n\n` +
+    (totalOwedToYou > 0 ? `Total owed to you:   ${fmt(totalOwedToYou)}\n` : '') +
+    (totalYouOwe    > 0 ? `Total you owe others: ${fmt(totalYouOwe)}\n`    : '') +
+    '\n' +
+    (owesYouPeople.length > 0
+      ? `OWED TO YOU\n───────────\n${owesYouText}\n\n`
+      : '') +
+    (youOwePeople.length > 0
+      ? `YOU OWE\n───────\n${youOweText}\n\n`
+      : '') +
+    `Open LifeFlow to settle: ${appUrl}/app/expenses\n\n` +
+    `— The LifeFlow Team`
+
+  return { subject, html, text }
+}
+
+// ─── Group Bill Manual Reminder — sent to the RECIPIENT by a bill owner ───────
+//
+// This is distinct from buildGroupBillReminderEmail(), which is a scheduled
+// self-reminder sent to the bill OWNER.  This template is sent to another
+// person (e.g. "Rahul") to inform them that they have outstanding Group Bills.
+//
+// Design goals:
+//   • Shows ONLY the recipient's own outstanding balances (never other people's).
+//   • Subject line mentions the outstanding amount so the recipient immediately
+//     understands the purpose.
+//   • Per-bill breakdown lets the recipient see exactly which bills contribute.
+//   • CTA links to the LifeFlow Group Bills page (or a public landing page if
+//     the recipient is not a LifeFlow user).
+//   • No sensitive information about the sender's other contacts is exposed.
+//
+// SERVER-ONLY — never import from client components.
+
+export interface GroupBillManualReminderBill {
+  /** Human-readable bill name, e.g. "Dinner at Punjabi Dhaba". */
+  billName: string
+  /** Bill date in YYYY-MM-DD format. */
+  billDate: string
+  /** Amount this person owes on this specific bill (always positive). */
+  amountOwed: number
+}
+
+export interface GroupBillManualReminderEmailOptions {
+  /** Recipient's display name, e.g. "Rahul Kumar". */
+  recipientName: string
+  /** Sender's display name, e.g. "Priya Sharma". */
+  senderName: string
+  /**
+   * Total outstanding amount across ALL Group Bills for this person.
+   * Always positive — represents what the recipient owes the sender.
+   */
+  totalOutstanding: number
+  /** Currency code, e.g. "INR". */
+  currency: string
+  /** Per-bill breakdown (up to 10 shown; more shown as "+N more"). */
+  bills: GroupBillManualReminderBill[]
+  /** App URL root, e.g. "https://lifeflow.app". */
+  appUrl: string
+}
+
+/**
+ * Build the manual Group Bill reminder email sent to the RECIPIENT.
+ *
+ * The subject includes the outstanding amount for urgency/context.
+ * The body shows a per-bill breakdown and a CTA to open LifeFlow.
+ *
+ * SERVER-ONLY — never import from client components.
+ */
+export function buildGroupBillManualReminderEmail(
+  opts: GroupBillManualReminderEmailOptions,
+): { subject: string; html: string; text: string } {
+  const { recipientName, senderName, totalOutstanding, currency, bills, appUrl } = opts
+
+  const firstName = recipientName.split(' ')[0] ?? recipientName
+
+  const currencySymbols: Record<string, string> = {
+    INR: '₹', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
+  }
+  const sym = currencySymbols[currency] ?? currency
+
+  function fmt(amount: number): string {
+    return `${sym}${Math.abs(amount).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`
+  }
+
+  const subject = `LifeFlow Group Bill Reminder — ${fmt(totalOutstanding)} outstanding`
+
+  const visibleBills = bills.slice(0, 10)
+  const extraCount   = bills.length - visibleBills.length
+
+  // Build per-bill rows
+  const billRowsHtml = visibleBills
+    .map((b) => {
+      const dateLabel = (() => {
+        try {
+          const [y, m, d] = b.billDate.split('-').map(Number)
+          return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-IN', {
+            day: 'numeric', month: 'short', year: 'numeric',
+          })
+        } catch {
+          return b.billDate
+        }
+      })()
+      return `
+      <tr>
+        <td style="padding:8px 16px;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">
+          ${b.billName}
+          <span style="display:block;font-size:11px;color:#9ca3af;margin-top:2px;">${dateLabel}</span>
+        </td>
+        <td style="padding:8px 16px;font-size:13px;font-weight:600;color:#dc2626;text-align:right;border-bottom:1px solid #f3f4f6;">
+          ${fmt(b.amountOwed)}
+        </td>
+      </tr>`
+    })
+    .join('')
+
+  const extraRowHtml = extraCount > 0
+    ? `<tr>
+        <td colspan="2" style="padding:8px 16px;font-size:11px;color:#9ca3af;">
+          +${extraCount} more bill${extraCount !== 1 ? 's' : ''}
+        </td>
+       </tr>`
+    : ''
+
+  const inner = `
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">
+
+  <!-- Greeting -->
+  <tr>
+    <td style="padding:0 0 20px 0;">
+      <p style="font-size:15px;color:#374151;margin:0 0 10px 0;">
+        Hi <strong>${firstName}</strong>,
+      </p>
+      <p style="font-size:15px;color:#374151;margin:0;">
+        <strong>${senderName}</strong> has sent you a Group Bill reminder.
+        You have an outstanding balance on <strong>${bills.length} Group Bill${bills.length !== 1 ? 's' : ''}</strong>.
+      </p>
+    </td>
+  </tr>
+
+  <!-- Outstanding amount card -->
+  <tr>
+    <td style="padding:0 0 24px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="border-radius:12px;background:#fef2f2;overflow:hidden;border:1px solid #fecaca;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;
+                       letter-spacing:0.05em;margin:0 0 6px 0;">Total Outstanding</p>
+            <p style="font-size:30px;font-weight:700;color:#dc2626;margin:0;
+                       font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;">
+              ${fmt(totalOutstanding)}
+            </p>
+            <p style="font-size:12px;color:#9ca3af;margin:6px 0 0 0;">
+              across ${bills.length} bill${bills.length !== 1 ? 's' : ''}
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Per-bill breakdown -->
+  <tr>
+    <td style="padding:0 0 24px 0;">
+      <p style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;
+                 letter-spacing:0.05em;margin:0 0 10px 0;">Your Outstanding Bills</p>
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="border-radius:10px;overflow:hidden;background:#ffffff;border:1px solid #e5e7eb;">
+        <tr style="background:#f9fafb;">
+          <th style="padding:8px 16px;font-size:11px;font-weight:600;color:#9ca3af;
+                      text-align:left;border-bottom:1px solid #e5e7eb;">Bill</th>
+          <th style="padding:8px 16px;font-size:11px;font-weight:600;color:#9ca3af;
+                      text-align:right;border-bottom:1px solid #e5e7eb;">Amount</th>
+        </tr>
+        ${billRowsHtml}
+        ${extraRowHtml}
+        <!-- Total row -->
+        <tr style="background:#f9fafb;">
+          <td style="padding:10px 16px;font-size:13px;font-weight:700;color:#111827;
+                      border-top:2px solid #e5e7eb;">Total</td>
+          <td style="padding:10px 16px;font-size:14px;font-weight:700;color:#dc2626;
+                      text-align:right;border-top:2px solid #e5e7eb;">${fmt(totalOutstanding)}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- CTA -->
+  <tr>
+    <td style="padding:0 0 20px 0;text-align:center;">
+      <a href="${appUrl}/app/group-bills"
+         style="display:inline-block;background:#2563eb;color:#ffffff;font-size:14px;
+                font-weight:600;text-decoration:none;padding:13px 36px;border-radius:10px;">
+        View Group Bills
+      </a>
+    </td>
+  </tr>
+
+  <!-- Footer note -->
+  <tr>
+    <td style="padding:0 0 0 0;">
+      <p style="font-size:12px;color:#9ca3af;text-align:center;margin:0;">
+        This reminder was sent by ${senderName} via LifeFlow.<br/>
+        Open LifeFlow to view full bill details and mark settlements as paid.
+      </p>
+    </td>
+  </tr>
+
+</table>`
+
+  const html = wrapHtml(inner)
+
+  // ── Plain text ─────────────────────────────────────────────────────────────
+  const billLines = visibleBills
+    .map((b) => `  • ${b.billName}: ${fmt(b.amountOwed)}`)
+    .join('\n')
+
+  const extraLine = extraCount > 0
+    ? `  +${extraCount} more bill${extraCount !== 1 ? 's' : ''}\n`
+    : ''
+
+  const text =
+    `LifeFlow Group Bill Reminder\n\n` +
+    `Hi ${firstName},\n\n` +
+    `${senderName} has sent you a Group Bill reminder.\n\n` +
+    `You have ${fmt(totalOutstanding)} outstanding across ${bills.length} bill${bills.length !== 1 ? 's' : ''}:\n\n` +
+    `${billLines}\n` +
+    `${extraLine}\n` +
+    `Total outstanding: ${fmt(totalOutstanding)}\n\n` +
+    `Open LifeFlow to view and settle: ${appUrl}/app/group-bills\n\n` +
+    `— The LifeFlow Team`
+
+  return { subject, html, text }
+}

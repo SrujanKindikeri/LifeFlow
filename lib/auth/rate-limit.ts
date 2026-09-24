@@ -621,3 +621,59 @@ export function checkEmailOtpLoginSendLimit(ip: string, userId: string): RateLim
     windowMs: 60 * 60 * 1000,
   })
 }
+
+// ─── Group Bill manual reminder limiter ──────────────────────────────────────
+
+/**
+ * Rate limit for POST /api/group-bills/send-reminder.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-sender cooldown — 1 reminder per sender per 60-second window.
+ *      Prevents accidental rapid firing even when the frontend button is
+ *      momentarily re-enabled (e.g. navigation away and back).
+ *   2. Per-sender+recipient daily cap — max 3 reminders to the same person
+ *      per calendar day.  Prevents harassment via repeated manual reminders.
+ *   3. Per-sender daily cap — max 10 total reminders sent per day.
+ *      Broad abuse floor so a sender cannot spam all their contacts.
+ *   4. Per-IP hourly cap — max 20 calls per IP per hour.
+ *      Secondary defence against scripted bulk requests.
+ *
+ * The idempotency key on the API route provides an additional server-side
+ * guard against double-sends within a single user interaction.
+ */
+export function checkBillReminderLimit(
+  ip: string,
+  senderId: string,
+  recipientKey: string,
+): RateLimitResult {
+  // ── 1. Per-sender 60-second cooldown ─────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `bill-reminder:cooldown:${senderId}`,
+    limit:    1,
+    windowMs: 60 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-sender+recipient daily cap ─────────────────────────────────────
+  const perRecipientDaily = checkRateLimit({
+    key:      `bill-reminder:daily:${senderId}:${recipientKey}`,
+    limit:    3,
+    windowMs: 24 * 60 * 60 * 1000,
+  })
+  if (!perRecipientDaily.allowed) return perRecipientDaily
+
+  // ── 3. Per-sender total daily cap ────────────────────────────────────────
+  const senderDaily = checkRateLimit({
+    key:      `bill-reminder:sender-daily:${senderId}`,
+    limit:    10,
+    windowMs: 24 * 60 * 60 * 1000,
+  })
+  if (!senderDaily.allowed) return senderDaily
+
+  // ── 4. Per-IP hourly cap ─────────────────────────────────────────────────
+  return checkRateLimit({
+    key:      `bill-reminder:ip:${ip}`,
+    limit:    20,
+    windowMs: 60 * 60 * 1000,
+  })
+}

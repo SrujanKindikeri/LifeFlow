@@ -54,6 +54,7 @@ import { checkAccountDeletionLimit, getClientIp } from '@/lib/auth/rate-limit'
 import { generateVerificationToken } from '@/lib/auth/crypto'
 import { getNotificationService } from '@/lib/notifications'
 import { buildAccountDeletedEmail } from '@/lib/auth/email-templates'
+import { getAppUrl } from '@/lib/env'
 import logger from '@/lib/logger'
 
 /** The exact phrase the user must type to confirm deletion. */
@@ -180,7 +181,7 @@ export async function POST(req: NextRequest) {
     // transactional security email, not a marketing or scheduled notification.
     // The raw token lives only in restoreUrl; it is never assigned to a variable
     // that might reach a logger.
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+    const appUrl = getAppUrl()
     // Construct the URL here — rawRestoreToken leaves this scope only inside
     // this string and then in the email body.  After this line rawRestoreToken
     // goes out of scope with the function.

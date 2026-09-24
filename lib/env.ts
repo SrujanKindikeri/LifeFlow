@@ -274,6 +274,71 @@ export const publicEnv = {
   VAPID_PUBLIC_KEY:  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '',
 } as const
 
+// ─── App URL helper (server-side email / notification use) ───────────────────
+
+/**
+ * Return the canonical application URL for use in server-generated links
+ * (emails, push notifications, redirects).
+ *
+ * Rules:
+ *  - Reads NEXT_PUBLIC_APP_URL from the environment at call time.
+ *  - Always strips a trailing slash so callers can safely do `getAppUrl() + '/path'`.
+ *  - In production (NODE_ENV === 'production') a localhost URL is treated as a
+ *    misconfiguration: a console.error is emitted and the function throws so the
+ *    problem surfaces immediately rather than silently sending bad links.
+ *  - In development/test a localhost fallback is acceptable and no warning is
+ *    emitted unless the env var is missing entirely.
+ *
+ * SERVER-ONLY. Never import this from a client component.
+ */
+export function getAppUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_APP_URL
+
+  const isProduction = process.env.NODE_ENV === 'production'
+
+  if (!raw || raw.trim() === '') {
+    if (isProduction) {
+      // Log without exposing any secrets — the variable name is enough.
+      console.error(
+        '[LifeFlow] CRITICAL: NEXT_PUBLIC_APP_URL is not set. ' +
+        'Email links cannot be generated correctly. ' +
+        'Set NEXT_PUBLIC_APP_URL in your production .env file and recreate the container.',
+      )
+      throw new Error(
+        '[LifeFlow] NEXT_PUBLIC_APP_URL is required in production but is not set. ' +
+        'Configure it in .env and recreate the Docker container.',
+      )
+    }
+    // Development fallback — acceptable, just makes the link work locally.
+    return 'http://localhost:3000'
+  }
+
+  const url = raw.trim().replace(/\/$/, '')
+
+  // Validate that the URL is absolute (starts with http:// or https://).
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(
+      `[LifeFlow] NEXT_PUBLIC_APP_URL must be an absolute URL starting with http:// or https://. ` +
+      `Current value does not match (check your .env).`,
+    )
+  }
+
+  if (isProduction && /^https?:\/\/localhost/i.test(url)) {
+    console.error(
+      '[LifeFlow] CRITICAL: NEXT_PUBLIC_APP_URL is set to a localhost URL in production. ' +
+      'Email links will not work for recipients. ' +
+      'Set NEXT_PUBLIC_APP_URL to the public host (e.g. https://yourdomain.com or http://<EC2-IP>:3000) ' +
+      'in your production .env file and recreate the container.',
+    )
+    throw new Error(
+      '[LifeFlow] NEXT_PUBLIC_APP_URL points to localhost in a production environment. ' +
+      'Email links would be unreachable by recipients. Update .env and recreate the container.',
+    )
+  }
+
+  return url
+}
+
 // ─── Type exports ─────────────────────────────────────────────────────────────
 
 export type StorageProvider = 'mongodb' | 's3' | 'azure' | 'local'

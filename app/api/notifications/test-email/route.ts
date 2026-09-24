@@ -28,6 +28,7 @@ import { connectDB }                          from '@/lib/db'
 import User                                   from '@/models/User'
 import { getNotificationService }             from '@/lib/notifications'
 import { buildTestNotificationEmail }         from '@/lib/auth/email-templates'
+import { getAppUrl }                          from '@/lib/env'
 import {
   checkNotificationTestLimit,
   getClientIp,
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── 5. Build and send test email ───────────────────────────────────────────
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+  const appUrl = getAppUrl()
 
   const { subject, html, text } = buildTestNotificationEmail({
     toName: user.name,

@@ -63,6 +63,23 @@ export type ScheduledNotificationType =
   | 'DAILY_SUMMARY'
   | 'WEEKLY_SUMMARY'
   | 'MORNING_BRIEF'
+  /**
+   * Daily reminder to the bill OWNER about outstanding Group Bill balances.
+   * Sent at 10:00 AM local time when any person has an unsettled balance.
+   * Key format: "<userId>:GROUP_BILL_REMINDER:<YYYY-MM-DD>"
+   * Deduplication: one per owner per calendar day.
+   * Channel gating: uses spendingAlerts preference (in-app + email).
+   */
+  | 'GROUP_BILL_REMINDER'
+  /**
+   * Manual reminder sent by the bill OWNER to a specific person (the recipient).
+   * Triggered by the owner clicking "Send Reminder" in the Group Bill People Summary UI.
+   * Key format: "<senderUserId>:GROUP_BILL_MANUAL_REMINDER:<YYYY-MM-DD>:<personKey>:<requestId>"
+   * Deduplication: per request ID (prevents double-send on double-click).
+   * Channel gating: uses spendingAlerts preference on the RECIPIENT's account.
+   * The notification/email is delivered to the RECIPIENT, not the sender.
+   */
+  | 'GROUP_BILL_MANUAL_REMINDER'
 
 export type NotificationDeliveryStatus =
   | 'pending'
@@ -149,6 +166,8 @@ const NotificationLogSchema = new Schema<INotificationLog>(
         'DAILY_SUMMARY',
         'WEEKLY_SUMMARY',
         'MORNING_BRIEF',
+        'GROUP_BILL_REMINDER',
+        'GROUP_BILL_MANUAL_REMINDER',
       ],
       required: true,
     },

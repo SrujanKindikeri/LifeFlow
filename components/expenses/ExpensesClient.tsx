@@ -12,9 +12,11 @@ import { GroupBillList } from './GroupBillList'
 import { GroupBillSplitter } from './GroupBillSplitter'
 import { GroupBillDetail } from './GroupBillDetail'
 import { GroupBillCalendar } from './GroupBillCalendar'
+import { GroupBillPeopleSummary } from './GroupBillPeopleSummary'
 import { SplitBillChoiceModal } from './SplitBillChoiceModal'
 
 type View = 'list' | 'create' | 'edit' | 'detail'
+type ListTab = 'bills' | 'people'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,7 @@ export function ExpensesClient() {
   const [view,         setView]         = useState<View>('list')
   const [selectedBill, setSelectedBill] = useState<GroupBillData | null>(null)
   const [editingBill,  setEditingBill]  = useState<GroupBillData | null>(null)
+  const [listTab,      setListTab]      = useState<ListTab>('bills')
 
   // Calendar state
   const [calendarOpen,     setCalendarOpen]     = useState(false)
@@ -190,6 +193,15 @@ export function ExpensesClient() {
   function openEdit(bill: GroupBillData)     { setStartWithScan(false); setEditingBill(bill); setView('edit') }
   function openDetail(bill: GroupBillData)   { setSelectedBill(bill); setView('detail') }
   function goToList()                        { setView('list'); setSelectedBill(null); setEditingBill(null) }
+
+  /**
+   * Navigate to the detail view of the bill with the given _id.
+   * Called by GroupBillPeopleSummary when the user clicks "View Bill".
+   */
+  function handleSelectBillById(billId: string) {
+    const bill = bills.find((b) => b._id === billId)
+    if (bill) openDetail(bill)
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
@@ -351,13 +363,40 @@ export function ExpensesClient() {
       <AnimatePresence mode="wait">
         {view === 'list' && (
           <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <GroupBillList
-              bills={filteredBills}
-              loading={loading}
-              onSelect={openDetail}
-              onEdit={openEdit}
-              onDelete={handleDelete}
-            />
+            {/* Bills / People tab toggle */}
+            <div className="flex gap-1 glass-elevated rounded-xl p-1 mb-4" style={{ boxShadow: 'inset 0 1px 0 var(--glass-catchlight)' }}>
+              {([
+                { key: 'bills',  label: 'Bills',          icon: <Receipt size={14} /> },
+                { key: 'people', label: 'People Summary',  icon: <Users   size={14} /> },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setListTab(tab.key)}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all duration-150',
+                    listTab === tab.key ? 'glass-segment-active' : 'nav-hover',
+                  )}
+                  style={listTab === tab.key ? { color: 'var(--accent-text)' } : { color: 'var(--text-muted)' }}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {listTab === 'bills' && (
+              <GroupBillList
+                bills={filteredBills}
+                loading={loading}
+                onSelect={openDetail}
+                onEdit={openEdit}
+                onDelete={handleDelete}
+              />
+            )}
+
+            {listTab === 'people' && (
+              <GroupBillPeopleSummary onSelectBillById={handleSelectBillById} />
+            )}
           </motion.div>
         )}
 
