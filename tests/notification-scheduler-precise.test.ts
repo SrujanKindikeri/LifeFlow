@@ -931,8 +931,8 @@ describe('buildMorningBriefEmail()', () => {
       totalGoals:         0,
       appUrl:             'https://lifeflow.app',
     })
-    // Icon should contain arc paths (Wi-Fi style)
-    expect(result.html).toContain('Morning notification')
+    // The aria-label format is "{hhmm} {ampm} notification", e.g. "7:00 AM notification"
+    expect(result.html).toMatch(/\d+:\d+ [AP]M notification/)
     expect(result.html).toContain('Daily Brief')
     // Should have the circular arc element
     expect(result.html).toContain('<circle')

@@ -3584,3 +3584,238 @@ export function buildGroupBillManualReminderEmail(
 
   return { subject, html, text }
 }
+
+// ─── Note Reminder ────────────────────────────────────────────────────────────
+
+export interface NoteReminderEmailOptions {
+  /** Recipient's display name */
+  toName: string
+  /** Note title (already HTML-escaped by caller) */
+  noteTitle: string
+  /** Short content preview, max ~120 chars */
+  notePreview?: string
+  /** Formatted reminder time label e.g. "Tuesday, 15 Oct · 9:00 AM" */
+  reminderTimeLabel: string
+  /** Full app URL, no trailing slash */
+  appUrl: string
+}
+
+export function buildNoteReminderEmail(opts: NoteReminderEmailOptions): {
+  subject: string; html: string; text: string
+} {
+  const { toName, noteTitle, notePreview, reminderTimeLabel, appUrl } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const subject   = `Note reminder: ${noteTitle}`
+
+  const html = wrapHtml(`
+    ${buildNotificationIconHtml('🗒', 'AM' as 'AM', '20px', { size: 72 })}
+
+    <h2 style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+               font-size:20px;font-weight:700;color:#0f172a;">
+      Reminder for your note
+    </h2>
+    <p style="margin:0 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#64748b;">
+      ${escapeHtml(reminderTimeLabel)}
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;margin:0 0 24px;">
+      <tr>
+        <td style="padding:20px 24px;">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#94a3b8;
+                    text-transform:uppercase;letter-spacing:0.7px;">Note</p>
+          <p style="margin:0 0 ${notePreview ? '10px' : '0'};font-size:16px;font-weight:600;
+                    color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+            ${escapeHtml(noteTitle)}
+          </p>
+          ${notePreview ? `<p style="margin:0;font-size:13px;color:#475569;line-height:1.5;">${escapeHtml(notePreview)}</p>` : ''}
+        </td>
+      </tr>
+    </table>
+
+    ${buildNotifCta(`${appUrl}/app/notes`, 'Open Note')}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text =
+    `Hi ${firstName},\n\n` +
+    `Reminder: ${noteTitle}\n` +
+    `${reminderTimeLabel}\n` +
+    (notePreview ? `\n${notePreview}\n` : '') +
+    `\nOpen LifeFlow: ${appUrl}/app/notes\n\n— The LifeFlow Team`
+
+  return { subject, html, text }
+}
+
+// ─── Project Deadline Reminder ────────────────────────────────────────────────
+
+export interface ProjectDeadlineEmailOptions {
+  /** Recipient's display name */
+  toName: string
+  /** Project title */
+  projectTitle: string
+  /** Formatted due date label e.g. "Wednesday, 16 Oct 2026" */
+  dueDateLabel: string
+  /** Hours until deadline, e.g. 24 */
+  hoursUntilDeadline: number
+  /** Project status */
+  status: string
+  /** Full app URL, no trailing slash */
+  appUrl: string
+}
+
+export function buildProjectDeadlineEmail(opts: ProjectDeadlineEmailOptions): {
+  subject: string; html: string; text: string
+} {
+  const { toName, projectTitle, dueDateLabel, hoursUntilDeadline, status, appUrl } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const urgencyLabel = hoursUntilDeadline <= 24 ? 'due tomorrow' : `due in ${Math.round(hoursUntilDeadline / 24)} days`
+  const subject = `Project deadline: "${projectTitle}" is ${urgencyLabel}`
+
+  const statusColor = status === 'on_hold' ? '#d97706' : '#2563eb'
+  const statusLabel = status === 'on_hold' ? 'On Hold' : 'Active'
+
+  const html = wrapHtml(`
+    ${buildNotificationIconHtml('📋', 'AM' as 'AM', '20px', { size: 72 })}
+
+    <h2 style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+               font-size:20px;font-weight:700;color:#0f172a;">
+      Project deadline approaching
+    </h2>
+    <p style="margin:0 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#64748b;">
+      ${escapeHtml(dueDateLabel)}
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;margin:0 0 24px;">
+      <tr>
+        <td style="padding:20px 24px;">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#94a3b8;
+                    text-transform:uppercase;letter-spacing:0.7px;">Project</p>
+          <p style="margin:0 0 10px;font-size:16px;font-weight:600;color:#0f172a;
+                    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+            ${escapeHtml(projectTitle)}
+          </p>
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:4px 10px;border-radius:6px;background:${statusColor}20;">
+                <span style="font-size:12px;font-weight:600;color:${statusColor};">${escapeHtml(statusLabel)}</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#374151;">
+      Hi <strong>${escapeHtml(firstName)}</strong>, your project <strong>${escapeHtml(projectTitle)}</strong>
+      is <strong>${escapeHtml(urgencyLabel)}</strong>. Open LifeFlow to review progress and update tasks.
+    </p>
+
+    ${buildNotifCta(`${appUrl}/app/projects`, 'Open Projects')}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text =
+    `Hi ${firstName},\n\n` +
+    `Project deadline: "${projectTitle}" is ${urgencyLabel}\n` +
+    `Due: ${dueDateLabel}\n` +
+    `Status: ${statusLabel}\n\n` +
+    `Open LifeFlow: ${appUrl}/app/projects\n\n— The LifeFlow Team`
+
+  return { subject, html, text }
+}
+
+// ─── Subscription Renewal Reminder ───────────────────────────────────────────
+
+export interface SubscriptionRenewalEmailOptions {
+  /** Recipient's display name */
+  toName: string
+  /** Service name e.g. "Netflix" */
+  serviceName: string
+  /** Formatted amount e.g. "₹149" */
+  amountLabel: string
+  /** Formatted renewal date label e.g. "Friday, 18 Oct 2026" */
+  renewalDateLabel: string
+  /** Days until renewal e.g. 3 */
+  daysUntilRenewal: number
+  /** Billing cycle label e.g. "Monthly" */
+  billingCycleLabel: string
+  /** Full app URL, no trailing slash */
+  appUrl: string
+}
+
+export function buildSubscriptionRenewalEmail(opts: SubscriptionRenewalEmailOptions): {
+  subject: string; html: string; text: string
+} {
+  const {
+    toName, serviceName, amountLabel, renewalDateLabel,
+    daysUntilRenewal, billingCycleLabel, appUrl,
+  } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const dayWord = daysUntilRenewal === 1 ? 'tomorrow' : `in ${daysUntilRenewal} days`
+  const subject = `Subscription renews ${dayWord}: ${serviceName} — ${amountLabel}`
+
+  const html = wrapHtml(`
+    ${buildNotificationIconHtml('🔄', 'AM' as 'AM', '20px', { size: 72 })}
+
+    <h2 style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+               font-size:20px;font-weight:700;color:#0f172a;">
+      Upcoming subscription renewal
+    </h2>
+    <p style="margin:0 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#64748b;">
+      ${escapeHtml(renewalDateLabel)}
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;margin:0 0 24px;">
+      <tr>
+        <td style="padding:20px 24px;">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#94a3b8;
+                    text-transform:uppercase;letter-spacing:0.7px;">Subscription</p>
+          <p style="margin:0 0 8px;font-size:18px;font-weight:700;color:#0f172a;
+                    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+            ${escapeHtml(serviceName)}
+          </p>
+          <table cellpadding="0" cellspacing="4">
+            <tr>
+              <td style="font-size:13px;color:#64748b;padding-right:16px;">Amount</td>
+              <td style="font-size:13px;font-weight:600;color:#0f172a;">${escapeHtml(amountLabel)}</td>
+            </tr>
+            <tr>
+              <td style="font-size:13px;color:#64748b;padding-right:16px;">Cycle</td>
+              <td style="font-size:13px;font-weight:600;color:#0f172a;">${escapeHtml(billingCycleLabel)}</td>
+            </tr>
+            <tr>
+              <td style="font-size:13px;color:#64748b;padding-right:16px;">Renews</td>
+              <td style="font-size:13px;font-weight:600;color:#15803d;">${escapeHtml(dayWord)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#374151;">
+      Hi <strong>${escapeHtml(firstName)}</strong>, your <strong>${escapeHtml(serviceName)}</strong>
+      subscription renews <strong>${escapeHtml(dayWord)}</strong> for <strong>${escapeHtml(amountLabel)}</strong>.
+      Review or manage your subscriptions in LifeFlow.
+    </p>
+
+    ${buildNotifCta(`${appUrl}/app/subscriptions`, 'Manage Subscriptions')}
+    ${notifFooter(appUrl)}
+  `)
+
+  const text =
+    `Hi ${firstName},\n\n` +
+    `Your ${serviceName} subscription renews ${dayWord}.\n` +
+    `Amount: ${amountLabel} (${billingCycleLabel})\n` +
+    `Renewal date: ${renewalDateLabel}\n\n` +
+    `Manage subscriptions: ${appUrl}/app/subscriptions\n\n— The LifeFlow Team`
+
+  return { subject, html, text }
+}

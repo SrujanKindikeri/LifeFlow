@@ -80,12 +80,34 @@ export type ScheduledNotificationType =
    * The notification/email is delivered to the RECIPIENT, not the sender.
    */
   | 'GROUP_BILL_MANUAL_REMINDER'
+  /**
+   * Reminder for a note with an explicit reminderAt field.
+   * Key format: "<userId>:NOTE_REMINDER:<YYYY-MM-DD>:<noteObjectId>"
+   * Fires within the grace window of note.reminderAt UTC.
+   * Only sent once per note.reminderAt value (reminderSent flag on Note prevents re-send).
+   */
+  | 'NOTE_REMINDER'
+  /**
+   * Deadline reminder for an active project that has a dueDate set.
+   * Sent 24 hours before the project's dueDate at 09:00 AM local time.
+   * Key format: "<userId>:PROJECT_DEADLINE:<dueDate>:<projectObjectId>"
+   * Only sent for active/on_hold projects; not for completed or archived.
+   */
+  | 'PROJECT_DEADLINE'
+  /**
+   * Upcoming subscription renewal reminder.
+   * Sent 3 days before nextBillingDate at 10:00 AM local time.
+   * Key format: "<userId>:SUBSCRIPTION_RENEWAL:<nextBillingDate>:<subscriptionObjectId>"
+   * Only sent for active subscriptions; skipped for paused/cancelled.
+   */
+  | 'SUBSCRIPTION_RENEWAL'
 
 export type NotificationDeliveryStatus =
   | 'pending'
   | 'processing'
   | 'sent_to_smtp'
   | 'failed'
+  | 'skipped'
 
 export interface INotificationLog extends Document {
   _id: mongoose.Types.ObjectId
@@ -118,7 +140,8 @@ export interface INotificationLog extends Document {
    * pending      → claimed by scheduler, not yet sent
    * processing   → actively being sent
    * sent_to_smtp → successfully handed to SMTP/push transport
-   * failed       → transport returned an error
+   * failed       → transport returned an error (eligible for retry within grace window)
+   * skipped      → intentionally not sent (completed item, quiet hours, no content, etc.)
    */
   status: NotificationDeliveryStatus
 
@@ -143,9 +166,16 @@ export interface INotificationLog extends Document {
    */
   emailBodySnapshot: string | null
 
+  /**
+   * Human-readable reason why this notification was skipped.
+   * Only populated when status === 'skipped'.
+   * Examples: "task already completed", "project archived", "subscription cancelled"
+   * Never contains credentials or PII.
+   */
+  skipReason: string | null
+
   /** Error message if status === 'failed'. Sanitised — never contains secrets. */
   errorMessage: string | null
-
   createdAt: Date
   updatedAt: Date
 }
@@ -168,6 +198,9 @@ const NotificationLogSchema = new Schema<INotificationLog>(
         'MORNING_BRIEF',
         'GROUP_BILL_REMINDER',
         'GROUP_BILL_MANUAL_REMINDER',
+        'NOTE_REMINDER',
+        'PROJECT_DEADLINE',
+        'SUBSCRIPTION_RENEWAL',
       ],
       required: true,
     },
@@ -184,7 +217,7 @@ const NotificationLogSchema = new Schema<INotificationLog>(
     },
     status: {
       type:    String,
-      enum:    ['pending', 'processing', 'sent_to_smtp', 'failed'],
+      enum:    ['pending', 'processing', 'sent_to_smtp', 'failed', 'skipped'],
       default: 'pending',
       index:   true,    // filter by status in history queries
     },
@@ -204,6 +237,10 @@ const NotificationLogSchema = new Schema<INotificationLog>(
       maxlength: 2000,
     },
     errorMessage: {
+      type:    String,
+      default: null,
+    },
+    skipReason: {
       type:    String,
       default: null,
     },

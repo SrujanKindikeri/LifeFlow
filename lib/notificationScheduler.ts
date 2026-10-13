@@ -132,9 +132,15 @@ import {
   buildTaskReminderEmail,
   buildMorningBriefEmail,
   buildGroupBillReminderEmail,
+  buildNoteReminderEmail,
+  buildProjectDeadlineEmail,
+  buildSubscriptionRenewalEmail,
 } from '@/lib/auth/email-templates'
 import GroupBill from '@/models/GroupBill'
 import Person    from '@/models/Person'
+import Note       from '@/models/Note'
+import Project    from '@/models/Project'
+import Subscription from '@/models/Subscription'
 import { aggregateGroupBillPeople } from '@/lib/groupBillAggregator'
 import type { IGroupBill } from '@/models/GroupBill'
 import type { IPerson }   from '@/models/Person'
@@ -592,6 +598,31 @@ async function markNotificationFailed(
       $set: {
         status:       'failed' as NotificationDeliveryStatus,
         errorMessage: safe,
+      },
+    }
+  ).catch(() => undefined)
+}
+
+/**
+ * Mark a notification log entry as intentionally skipped.
+ * Used for items that were eligible by time window but suppressed for a
+ * valid business reason (e.g. project archived, subscription cancelled).
+ * Records a human-readable skipReason for the history view.
+ */
+async function markNotificationSkipped(
+  userId: mongoose.Types.ObjectId,
+  type: ScheduledNotificationType,
+  forDate: string,
+  extraDiscriminator = '',
+  skipReason: string
+): Promise<void> {
+  const key = buildKey(userId, type, forDate, extraDiscriminator)
+  await NotificationLog.updateOne(
+    { key },
+    {
+      $set: {
+        status:     'skipped' as NotificationDeliveryStatus,
+        skipReason: skipReason.slice(0, 200),
       },
     }
   ).catch(() => undefined)
@@ -2304,6 +2335,428 @@ async function processGroupBillReminder(
   return { sent: true }
 }
 
+// ─── 7. Note Reminders ────────────────────────────────────────────────────────
+//
+// Fires when note.reminderAt falls within the grace window of `now`.
+// Only for notes owned by this user that have not been archived and where
+// reminderSent=false.  After delivering, sets reminderSent=true on the note.
+//
+// No fixed time anchor — fires whenever `now` is within [reminderAt, reminderAt+grace].
+// Deduplication key: <userId>:NOTE_REMINDER:<YYYY-MM-DD>:<noteId>
+
+async function processNoteReminders(
+  user: UserRecord,
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600
+): Promise<{ sent: number }> {
+  const prefs = user.notificationPreferences
+  // Note reminders use the dailySummary preference as the general reminder gate.
+  // They are considered informational reminders, not spending alerts or task-specific.
+  if (!prefs.dailySummary) return { sent: 0 }
+
+  const tz  = user.timezone
+  const hr  = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: 0 }
+
+  // Find notes with pending reminders in a 2-hour look-ahead window
+  const windowStart = new Date(now.getTime() - graceSeconds * 1000)
+  const windowEnd   = new Date(now.getTime() + graceSeconds * 1000)
+
+  const notes = await Note.find({
+    userId:       user._id,
+    archived:     false,
+    reminderAt:   { $gte: windowStart, $lte: windowEnd },
+    reminderSent: false,
+  })
+    .select('_id title content reminderAt')
+    .limit(10)
+    .lean()
+
+  if (notes.length === 0) return { sent: 0 }
+
+  const today = dateInTimezone(now, tz)
+  let sentCount = 0
+
+  for (const note of notes) {
+    if (!note.reminderAt) continue
+
+    const reminderUtc = new Date(note.reminderAt)
+    if (!isWithinGraceWindow(now, reminderUtc, graceSeconds)) continue
+
+    const noteIdStr  = note._id.toString()
+    const forDate    = dateInTimezone(reminderUtc, tz)
+    const preview    = `"${note.title}" note reminder`
+
+    const alreadySent = await checkAndRecord(
+      user._id, 'NOTE_REMINDER', forDate, noteIdStr,
+      reminderUtc, preview
+    )
+    if (alreadySent) continue
+
+    // Verify note hasn't been archived or deleted since the query
+    const freshNote = await Note.findOne({ _id: note._id, userId: user._id, archived: false })
+      .select('title content reminderSent')
+      .lean()
+
+    if (!freshNote || freshNote.reminderSent) {
+      const reason = !freshNote ? 'note deleted or archived' : 'reminder already sent'
+      await markNotificationSkipped(user._id, 'NOTE_REMINDER', forDate, noteIdStr, reason)
+      continue
+    }
+
+    await NotificationLog.updateOne(
+      { key: buildKey(user._id, 'NOTE_REMINDER', forDate, noteIdStr) },
+      { $set: { status: 'processing' } }
+    ).catch(() => undefined)
+
+    // Format reminder time label
+    const reminderDateLabel = (() => {
+      try {
+        return new Intl.DateTimeFormat('en-GB', {
+          timeZone: tz,
+          weekday:  'long',
+          day:      'numeric',
+          month:    'short',
+          hour:     '2-digit',
+          minute:   '2-digit',
+          hour12:   true,
+        }).format(reminderUtc)
+      } catch {
+        return forDate
+      }
+    })()
+
+    const contentPreview = (note.content ?? '').replace(/<[^>]+>/g, '').slice(0, 120)
+
+    await deliver({
+      userId:             user._id,
+      lifeFlowId:         user.publicId,
+      prefs,
+      prefKey:            'dailySummary',
+      emailPrefs:         user.emailNotifications,
+      emailPrefKey:       'dailySummary',
+      userEmail:          user.email,
+      notifType:          'NOTE_REMINDER',
+      forDate,
+      extraDiscriminator: noteIdStr,
+      inApp: {
+        title:   `Reminder: ${freshNote.title}`,
+        message: contentPreview || 'Note reminder',
+        type:    'reminder',
+      },
+      push: {
+        title: `Note reminder`,
+        body:  freshNote.title,
+        url:   '/app/notes',
+        tag:   `NOTE_REMINDER_${noteIdStr}`,
+      },
+      email: buildNoteReminderEmail({
+        toName:            user.name,
+        noteTitle:         freshNote.title,
+        notePreview:       contentPreview || undefined,
+        reminderTimeLabel: reminderDateLabel,
+        appUrl,
+      }),
+    })
+
+    // Mark the note as having its reminder sent so it doesn't fire again.
+    await Note.updateOne(
+      { _id: note._id, userId: user._id },
+      { $set: { reminderSent: true } }
+    ).catch(() => undefined)
+
+    sentCount++
+    logger.info('[notifScheduler] NOTE_REMINDER sent', {
+      userId:    user._id.toString(),
+      noteId:    noteIdStr,
+      noteTitle: freshNote.title,
+    })
+  }
+
+  return { sent: sentCount }
+}
+
+// ─── 8. Project Deadline Reminders ───────────────────────────────────────────
+//
+// Sent at 09:00 AM local time, 1 day and 3 days before a project's dueDate.
+// Only for active or on_hold projects — not completed or archived.
+// Deduplication key: <userId>:PROJECT_DEADLINE:<dueDate>:<projectId>
+
+const PROJECT_REMINDER_DAYS_BEFORE = [1, 3] as const
+
+async function processProjectDeadlines(
+  user: UserRecord,
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600
+): Promise<{ sent: number }> {
+  const prefs = user.notificationPreferences
+  // Project deadlines use the taskReminders preference gate.
+  if (!prefs.taskReminders) return { sent: 0 }
+
+  const tz    = user.timezone
+  const today = dateInTimezone(now, tz)
+
+  // Only check at 09:00 AM local time
+  const targetUtc = localTimeToUtc(today, '09:00', tz)
+  if (!targetUtc) return { sent: 0 }
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: 0 }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: 0 }
+
+  let sentCount = 0
+
+  for (const daysBefore of PROJECT_REMINDER_DAYS_BEFORE) {
+    // What dueDate would trigger a reminder today?
+    const [ty, tm, td] = today.split('-').map(Number)
+    const targetDueDate = new Date(Date.UTC(ty, tm - 1, td + daysBefore))
+      .toISOString().split('T')[0]
+
+    const projects = await Project.find({
+      userId:  user._id,
+      dueDate: targetDueDate,
+      status:  { $in: ['active', 'on_hold'] },
+    })
+      .select('_id title dueDate status')
+      .lean()
+
+    for (const project of projects) {
+      const projectIdStr = project._id.toString()
+      const discriminator = `${targetDueDate}:${projectIdStr}`
+      const preview = `"${project.title}" due ${daysBefore === 1 ? 'tomorrow' : `in ${daysBefore} days`}`
+
+      const alreadySent = await checkAndRecord(
+        user._id, 'PROJECT_DEADLINE', targetDueDate, projectIdStr,
+        targetUtc, preview
+      )
+      if (alreadySent) continue
+
+      // Re-check current status
+      const freshProject = await Project.findOne({ _id: project._id, userId: user._id })
+        .select('title dueDate status')
+        .lean()
+
+      if (!freshProject) {
+        await markNotificationSkipped(
+          user._id, 'PROJECT_DEADLINE', targetDueDate, projectIdStr, 'project deleted'
+        )
+        continue
+      }
+      if (freshProject.status === 'completed' || freshProject.status === 'archived') {
+        await markNotificationSkipped(
+          user._id, 'PROJECT_DEADLINE', targetDueDate, projectIdStr,
+          `project ${freshProject.status}`
+        )
+        continue
+      }
+
+      await NotificationLog.updateOne(
+        { key: buildKey(user._id, 'PROJECT_DEADLINE', targetDueDate, projectIdStr) },
+        { $set: { status: 'processing' } }
+      ).catch(() => undefined)
+
+      const dueDateLabel = formatDateLabel(targetDueDate, tz)
+      const hoursUntil   = daysBefore * 24
+
+      void discriminator // used in key building above
+
+      await deliver({
+        userId:             user._id,
+        lifeFlowId:         user.publicId,
+        prefs,
+        prefKey:            'taskReminders',
+        emailPrefs:         user.emailNotifications,
+        emailPrefKey:       'taskReminders',
+        userEmail:          user.email,
+        notifType:          'PROJECT_DEADLINE',
+        forDate:            targetDueDate,
+        extraDiscriminator: projectIdStr,
+        inApp: {
+          title:   `Project due ${daysBefore === 1 ? 'tomorrow' : `in ${daysBefore} days`}`,
+          message: freshProject.title,
+          type:    'reminder',
+        },
+        push: {
+          title: `Project deadline approaching`,
+          body:  freshProject.title,
+          url:   '/app/projects',
+          tag:   `PROJECT_DEADLINE_${projectIdStr}`,
+        },
+        email: buildProjectDeadlineEmail({
+          toName:             user.name,
+          projectTitle:       freshProject.title,
+          dueDateLabel,
+          hoursUntilDeadline: hoursUntil,
+          status:             freshProject.status,
+          appUrl,
+        }),
+      })
+
+      sentCount++
+      logger.info('[notifScheduler] PROJECT_DEADLINE sent', {
+        userId:       user._id.toString(),
+        projectId:    projectIdStr,
+        projectTitle: freshProject.title,
+        daysBefore,
+      })
+    }
+  }
+
+  return { sent: sentCount }
+}
+
+// ─── 9. Subscription Renewal Reminders ───────────────────────────────────────
+//
+// Sent at 10:00 AM local time, 3 days before a subscription's nextBillingDate.
+// Only for active subscriptions — paused and cancelled are skipped.
+// Deduplication key: <userId>:SUBSCRIPTION_RENEWAL:<nextBillingDate>:<subscriptionId>
+//
+// IMPORTANT: This is a REMINDER only. Expense creation is handled separately
+// by the subscription scheduler (/api/jobs/process-subscriptions). These two
+// pipelines are fully independent — a failed email never prevents expense creation,
+// and expense creation never triggers duplicate emails.
+
+const SUBSCRIPTION_REMINDER_DAYS_BEFORE = 3
+
+async function processSubscriptionRenewals(
+  user: UserRecord,
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600
+): Promise<{ sent: number }> {
+  const prefs = user.notificationPreferences
+  // Subscription reminders use the spendingAlerts preference gate (financial reminders).
+  if (!prefs.spendingAlerts) return { sent: 0 }
+
+  const tz    = user.timezone
+  const today = dateInTimezone(now, tz)
+
+  // Fire at 10:00 AM local time
+  const targetUtc = localTimeToUtc(today, '10:00', tz)
+  if (!targetUtc) return { sent: 0 }
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: 0 }
+
+  const hr = localHour(now, tz)
+  if (isQuietHour(hr)) return { sent: 0 }
+
+  // What nextBillingDate would trigger a reminder today?
+  const [ty, tm, td] = today.split('-').map(Number)
+  const targetBillingDate = new Date(
+    Date.UTC(ty, tm - 1, td + SUBSCRIPTION_REMINDER_DAYS_BEFORE)
+  ).toISOString().split('T')[0]
+
+  const subscriptions = await Subscription.find({
+    userId:          user._id,
+    status:          'active',
+    nextBillingDate: targetBillingDate,
+  })
+    .select('_id serviceName amountMinor currency billingCycle customIntervalDays nextBillingDate status')
+    .lean()
+
+  if (subscriptions.length === 0) return { sent: 0 }
+
+  let sentCount = 0
+
+  for (const sub of subscriptions) {
+    const subIdStr = sub._id.toString()
+    const preview  = `${sub.serviceName} renews in ${SUBSCRIPTION_REMINDER_DAYS_BEFORE} days`
+
+    const alreadySent = await checkAndRecord(
+      user._id, 'SUBSCRIPTION_RENEWAL', targetBillingDate, subIdStr,
+      targetUtc, preview
+    )
+    if (alreadySent) continue
+
+    // Re-check status — subscription may have been cancelled since query
+    const freshSub = await Subscription.findOne({ _id: sub._id, userId: user._id })
+      .select('serviceName amountMinor currency billingCycle status nextBillingDate')
+      .lean()
+
+    if (!freshSub) {
+      await markNotificationSkipped(
+        user._id, 'SUBSCRIPTION_RENEWAL', targetBillingDate, subIdStr, 'subscription deleted'
+      )
+      continue
+    }
+    if (freshSub.status !== 'active') {
+      await markNotificationSkipped(
+        user._id, 'SUBSCRIPTION_RENEWAL', targetBillingDate, subIdStr,
+        `subscription ${freshSub.status}`
+      )
+      continue
+    }
+
+    await NotificationLog.updateOne(
+      { key: buildKey(user._id, 'SUBSCRIPTION_RENEWAL', targetBillingDate, subIdStr) },
+      { $set: { status: 'processing' } }
+    ).catch(() => undefined)
+
+    // Format amount: amountMinor is in paise (INR) or minor units
+    const currency   = freshSub.currency ?? 'INR'
+    const amountMajor = freshSub.amountMinor / 100
+    const currencySymbols: Record<string, string> = {
+      INR: '₹', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
+    }
+    const sym         = currencySymbols[currency] ?? currency
+    const amountLabel = `${sym}${amountMajor.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+
+    const billingCycleLabels: Record<string, string> = {
+      weekly:    'Weekly',
+      monthly:   'Monthly',
+      quarterly: 'Quarterly',
+      yearly:    'Yearly',
+      custom:    'Custom',
+    }
+    const billingCycleLabel = billingCycleLabels[freshSub.billingCycle] ?? freshSub.billingCycle
+    const renewalDateLabel  = formatDateLabel(targetBillingDate, tz)
+
+    await deliver({
+      userId:             user._id,
+      lifeFlowId:         user.publicId,
+      prefs,
+      prefKey:            'spendingAlerts',
+      emailPrefs:         user.emailNotifications,
+      emailPrefKey:       'spendingAlerts',
+      userEmail:          user.email,
+      notifType:          'SUBSCRIPTION_RENEWAL',
+      forDate:            targetBillingDate,
+      extraDiscriminator: subIdStr,
+      inApp: {
+        title:   `${freshSub.serviceName} renews in ${SUBSCRIPTION_REMINDER_DAYS_BEFORE} days`,
+        message: `${amountLabel} · ${billingCycleLabel}`,
+        type:    'expense',
+      },
+      push: {
+        title: `Subscription renewal upcoming`,
+        body:  `${freshSub.serviceName} — ${amountLabel}`,
+        url:   '/app/subscriptions',
+        tag:   `SUBSCRIPTION_RENEWAL_${subIdStr}`,
+      },
+      email: buildSubscriptionRenewalEmail({
+        toName:            user.name,
+        serviceName:       freshSub.serviceName,
+        amountLabel,
+        renewalDateLabel,
+        daysUntilRenewal:  SUBSCRIPTION_REMINDER_DAYS_BEFORE,
+        billingCycleLabel,
+        appUrl,
+      }),
+    })
+
+    sentCount++
+    logger.info('[notifScheduler] SUBSCRIPTION_RENEWAL sent', {
+      userId:      user._id.toString(),
+      subId:       subIdStr,
+      serviceName: freshSub.serviceName,
+      billingDate: targetBillingDate,
+    })
+  }
+
+  return { sent: sentCount }
+}
+
 // ─── Legacy no-ops ────────────────────────────────────────────────────────────
 
 async function processTomorrowTasks(
@@ -2375,6 +2828,22 @@ async function processUser(
   await run(processHabitReminder)
   await runSpending()
   await run(processGroupBillReminder)
+
+  // New module processors — Notes, Projects, Subscriptions
+  const runMulti = async (
+    fn: (u: UserRecord, n: Date, a: string, g: number) => Promise<{ sent: number }>
+  ) => {
+    try {
+      const r         = await fn(user, now, appUrl, graceSeconds)
+      result.sent    += r.sent
+      result.skipped += r.sent === 0 ? 1 : 0
+    } catch (err: unknown) {
+      result.errors.push(err instanceof Error ? err.message : String(err))
+    }
+  }
+  await runMulti(processNoteReminders)
+  await runMulti(processProjectDeadlines)
+  await runMulti(processSubscriptionRenewals)
 
   // Legacy no-ops
   await run(processTomorrowTasks)

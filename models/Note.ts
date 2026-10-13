@@ -12,6 +12,20 @@ export interface INote extends Document {
   archived: boolean
   /** Optional project association */
   projectId?: mongoose.Types.ObjectId
+  /**
+   * Optional reminder datetime (UTC). When set, the notification scheduler
+   * sends a reminder at this exact UTC instant (within the grace window).
+   * Set to null or omit to disable reminders for this note.
+   * Example: user sets a reminder for "2026-10-15 at 09:00 IST"
+   *   → stored as 2026-10-15T03:30:00.000Z
+   */
+  reminderAt?: Date | null
+  /**
+   * True once the reminder for this note has been delivered.
+   * Prevents re-delivery if the scheduler runs again after the reminder fires.
+   * Reset to false if the user updates reminderAt to a future time.
+   */
+  reminderSent: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -27,6 +41,8 @@ const NoteSchema = new Schema<INote>(
     pinned: { type: Boolean, default: false },
     archived: { type: Boolean, default: false },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
+    reminderAt:   { type: Date, default: null },
+    reminderSent: { type: Boolean, default: false },
   },
   { timestamps: true }
 )
@@ -34,6 +50,11 @@ const NoteSchema = new Schema<INote>(
 NoteSchema.index({ userId: 1, createdAt: -1 })
 NoteSchema.index({ userId: 1, pinned: -1 })
 NoteSchema.index({ userId: 1, projectId: 1 })
+// Sparse index to efficiently find notes with pending reminders
+NoteSchema.index(
+  { userId: 1, reminderAt: 1 },
+  { sparse: true, name: 'note_reminder_pending' }
+)
 
 const Note: Model<INote> =
   mongoose.models.Note || mongoose.model<INote>('Note', NoteSchema)

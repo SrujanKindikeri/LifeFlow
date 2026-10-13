@@ -55,6 +55,29 @@ const TYPE_LABELS: Record<string, string> = {
   SPENDING_ALERT:        'Spending Alert',
   DAILY_SUMMARY:         'Daily Summary',
   WEEKLY_SUMMARY:        'Weekly Summary',
+  GROUP_BILL_REMINDER:        'Group Bill Reminder',
+  GROUP_BILL_MANUAL_REMINDER: 'Group Bill Manual Reminder',
+  NOTE_REMINDER:         'Note Reminder',
+  PROJECT_DEADLINE:      'Project Deadline',
+  SUBSCRIPTION_RENEWAL:  'Subscription Renewal',
+}
+
+/** Module this notification type belongs to — shown in the history UI. */
+const TYPE_MODULE: Record<string, string> = {
+  MORNING_BRIEF:              'general',
+  TASK_DUE_SOON:              'tasks',
+  TASK_INCOMPLETE_TODAY:      'tasks',
+  TASK_TOMORROW:              'tasks',
+  HABIT_REMINDER:             'habits',
+  HABIT_TOMORROW:             'habits',
+  SPENDING_ALERT:             'expenses',
+  DAILY_SUMMARY:              'general',
+  WEEKLY_SUMMARY:             'general',
+  GROUP_BILL_REMINDER:        'expenses',
+  GROUP_BILL_MANUAL_REMINDER: 'expenses',
+  NOTE_REMINDER:              'notes',
+  PROJECT_DEADLINE:           'projects',
+  SUBSCRIPTION_RENEWAL:       'subscriptions',
 }
 
 function serializeLog(entry: {
@@ -68,11 +91,13 @@ function serializeLog(entry: {
   emailBodySnapshot?:string | null
   forDate:           string
   createdAt:         Date
+  skipReason?:       string | null
 }) {
   return {
     _id:               entry._id.toString(),
     type:              entry.type,
     typeLabel:         TYPE_LABELS[entry.type] ?? entry.type,
+    module:            TYPE_MODULE[entry.type] ?? 'general',
     scheduledAt:       entry.scheduledAt.toISOString(),
     sentAt:            entry.sentAt ? entry.sentAt.toISOString() : null,
     status:            entry.status,
@@ -81,6 +106,7 @@ function serializeLog(entry: {
     emailBodySnapshot: entry.emailBodySnapshot ?? null,
     forDate:           entry.forDate,
     createdAt:         entry.createdAt.toISOString(),
+    skipReason:        entry.skipReason ?? null,
   }
 }
 
@@ -103,6 +129,7 @@ export async function GET(req: NextRequest) {
     const status  = searchParams.get('status')
     const since   = searchParams.get('since')
     const channel = searchParams.get('channel')
+    const module  = searchParams.get('module')
 
     // Build query — always scoped to authenticated user
     const query: Record<string, unknown> = { userId }
@@ -118,12 +145,29 @@ export async function GET(req: NextRequest) {
     if (channel === 'email') {
       query.emailSubject = { $ne: null }
     }
+    // module=notes|tasks|habits|projects|expenses|subscriptions|general
+    // Translate module name to the set of type values it covers
+    if (module) {
+      const moduleTypeMap: Record<string, string[]> = {
+        tasks:         ['TASK_DUE_SOON', 'TASK_INCOMPLETE_TODAY', 'TASK_TOMORROW'],
+        habits:        ['HABIT_REMINDER', 'HABIT_TOMORROW'],
+        notes:         ['NOTE_REMINDER'],
+        projects:      ['PROJECT_DEADLINE'],
+        expenses:      ['SPENDING_ALERT', 'GROUP_BILL_REMINDER', 'GROUP_BILL_MANUAL_REMINDER'],
+        subscriptions: ['SUBSCRIPTION_RENEWAL'],
+        general:       ['MORNING_BRIEF', 'DAILY_SUMMARY', 'WEEKLY_SUMMARY'],
+      }
+      const types = moduleTypeMap[module.toLowerCase()]
+      if (types && types.length > 0) {
+        query.type = { $in: types }
+      }
+    }
 
     // ── Run count + page fetch in parallel ───────────────────────────────────
     const [total, entries] = await Promise.all([
       NotificationLog.countDocuments(query),
       NotificationLog.find(query)
-        .select('type scheduledAt sentAt status contentPreview emailSubject emailBodySnapshot forDate createdAt')
+        .select('type scheduledAt sentAt status contentPreview emailSubject emailBodySnapshot forDate createdAt skipReason')
         .sort({ scheduledAt: -1 })
         .skip(skip)
         .limit(limit)
