@@ -117,10 +117,12 @@ export function initSyncEngine(userId: string): void {
  */
 export function teardownSyncEngine(): void {
   unbindEvents()
-  _currentUserId = null
+  _currentUserId   = null
   _abortController?.abort()
   _abortController = null
   _syncInProgress  = false
+  _lastSyncStarted = 0   // reset debounce so next init can sync immediately
+  _eventsBound     = false
   emitState({ phase: 'idle', pendingCount: 0 })
 }
 
@@ -368,9 +370,29 @@ async function applyPulledRecords(
   if (records.length === 0) return
   const db = getOfflineDB()
 
+  // Build the set of entity IDs that still have pending outbox operations for
+  // this entity type. We must NOT overwrite those local records with the
+  // (possibly older) pulled snapshot — the local mutation is the authoritative
+  // version until the server confirms or rejects it.
+  //
+  // Note: pushOutbox runs before pullAllEntities in the same sync cycle, so
+  // successfully-accepted ops will already have been acknowledged (removed from
+  // the outbox) by the time we reach here. The remaining entries in pendingIds
+  // are operations that failed with 'retryable' or are from a previous partial
+  // sync cycle that was interrupted.
+  const allOutbox = await db.outbox
+    .where('clientUserId').equals(userId).toArray()
+  const pendingIds = new Set(
+    allOutbox
+      .filter((op) => op.entityType === entityType)
+      .map((op) => op.entityId),
+  )
+
   for (const rec of records) {
     const id    = rec._id as string
     const meta  = {
+      // clientUserId scopes IndexedDB queries to this account. The userId
+      // field from the server response is preserved in the spread below.
       clientUserId:       userId,
       syncStatus:         'synced' as const,
       serverRevision:     rec.serverRevision ?? 0,
@@ -380,10 +402,25 @@ async function applyPulledRecords(
     }
 
     if (rec.deleted) {
-      // Tombstone — remove from local store
-      await removeLocalRecord(entityType, id)
+      // Tombstone — only remove if no pending local operations reference this ID
+      // (e.g. an offline edit that was queued before the server-side delete).
+      if (!pendingIds.has(id)) {
+        await removeLocalRecord(entityType, id)
+      }
       continue
     }
+
+    // Guard: if there is a pending or in-flight local mutation for this entity,
+    // do NOT overwrite it with the server snapshot. The local version is newer
+    // than what the server just returned (the server hasn't seen our mutation
+    // yet). Overwriting would silently discard the user's unsynced work.
+    //
+    // The correct flow:
+    //   1. The outbox entry will be pushed on the next sync cycle.
+    //   2. The server returns 'accepted' (or 'conflict').
+    //   3. handleAccepted / handleConflictResult updates the local record with
+    //      the true server state.
+    if (pendingIds.has(id)) continue
 
     const localRecord = { ...rec, ...meta }
 
