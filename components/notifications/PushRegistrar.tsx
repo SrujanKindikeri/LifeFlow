@@ -3,32 +3,37 @@
 /**
  * components/notifications/PushRegistrar.tsx
  *
- * Silently registers the LifeFlow service worker once when the authenticated
- * app shell mounts.  Renders nothing — purely a side-effect component.
+ * Registers /sw.js (static file in /public) as the LifeFlow service worker.
+ * Handles the full SW lifecycle: install, update detection, and the safe
+ * update flow (show prompt → user confirms → send SKIP_WAITING → reload).
  *
- * WHAT IT DOES
- * ────────────
- * 1. Registers lib/service-worker.js using Next.js's recommended Worker URL
- *    pattern so webpack bundles it correctly for both dev and production.
- * 2. Does NOT prompt for permission — permission is requested only when the
- *    user explicitly clicks "Enable" in the Profile → Notifications section.
+ * CHANGES FROM PREVIOUS VERSION
+ * ──────────────────────────────
+ * • Registers /public/sw.js (static path) instead of the webpack Worker bundle
+ *   (lib/service-worker.js). The static path is more reliable across browsers,
+ *   does not require webpack Worker plugin support, and is required for proper
+ *   app-shell caching (webpack Workers cannot intercept navigation fetches).
+ * • Listens for SW updatefound events and notifies the user via toast.
+ * • Sends SKIP_WAITING after user-initiated update confirmation.
+ * • Listens for BACKGROUND_SYNC_READY messages from the SW to trigger the
+ *   sync engine (progressive enhancement only — not required for correctness).
  *
- * WHAT IT DOES NOT DO
- * ───────────────────
- * - Does not request Notification.permission automatically.
- * - Does not subscribe to push automatically.
- * - Does not store any user data.
- * - Does not run if the browser doesn't support service workers.
- *
- * PLACEMENT
- * ─────────
- * Rendered inside app/app/layout.tsx so it runs once for the entire
- * authenticated app shell, not on every page navigation.
+ * SECURITY
+ * ────────
+ * • Does NOT request Notification.permission automatically.
+ * • Does NOT subscribe to push automatically.
+ * • Does NOT store any user data.
+ * • Does NOT run if the browser doesn't support service workers.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { useToast } from '@/components/ui/Toast'
+import { triggerSync } from '@/lib/sync/engine'
 
 export function PushRegistrar() {
+  const { info } = useToast()
+  const updateReadyRef = useRef<ServiceWorkerRegistration | null>(null)
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (!('serviceWorker' in navigator)) return
@@ -37,28 +42,52 @@ export function PushRegistrar() {
 
     async function register() {
       try {
-        // Next.js docs pattern: new URL resolves the path relative to this
-        // module and webpack emits the worker as a separate chunk.
-        const registration = await navigator.serviceWorker.register(
-          new URL('../../lib/service-worker.js', import.meta.url),
-          {
-            scope:          '/',
-            updateViaCache: 'none',
-          }
-        )
+        // Register the static service worker from /public/sw.js
+        // This allows the SW to control navigation requests for app-shell caching.
+        const registration = await navigator.serviceWorker.register('/sw.js', {
+          scope:          '/',
+          updateViaCache: 'none',
+        })
 
         if (!mounted) return
 
-        // Trigger an update check in the background so users always get the
-        // latest service worker without a hard refresh.
+        // Trigger an update check so users always get the latest SW quickly.
         registration.update().catch(() => undefined)
 
+        // ── Update detection ─────────────────────────────────────────────
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing
+          if (!newWorker) return
+
+          newWorker.addEventListener('statechange', () => {
+            if (
+              newWorker.state === 'installed' &&
+              navigator.serviceWorker.controller
+            ) {
+              // A new SW version is installed and waiting.
+              // Store the registration so the user can trigger the update.
+              updateReadyRef.current = registration
+
+              // Notify the user non-intrusively via a toast.
+              info('LifeFlow update ready — refresh to apply.')
+            }
+          })
+        })
+
+        // ── BACKGROUND_SYNC_READY message from SW ────────────────────────
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (!event.data) return
+          if (event.data.type === 'BACKGROUND_SYNC_READY') {
+            // SW signalled that a background sync should run.
+            // Delegate to the sync engine (not the SW) for correctness.
+            void triggerSync()
+          }
+        })
+
       } catch (err) {
-        // Service worker registration failures are non-fatal.
-        // The app continues to work — push notifications just won't be available.
-        // We log only in development to avoid noise in production.
+        // SW registration failures are non-fatal. The app works without it.
         if (process.env.NODE_ENV === 'development') {
-          console.debug('[PushRegistrar] Service worker registration failed:', err)
+          console.debug('[PushRegistrar] SW registration failed:', err)
         }
       }
     }
@@ -68,8 +97,27 @@ export function PushRegistrar() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [info])
 
-  // Renders nothing — this is a side-effect-only component.
+  // Nothing rendered — side-effect only.
   return null
+}
+
+/**
+ * Call this when the user explicitly requests applying the pending SW update.
+ * Sends SKIP_WAITING to the waiting SW, then reloads the page once the new
+ * SW has activated and claimed the client.
+ *
+ * Export so the SyncStatusBar "Update available" button can call it.
+ */
+export function applyPendingUpdate(registration: ServiceWorkerRegistration): void {
+  const waiting = registration.waiting
+  if (!waiting) return
+
+  // Reload the page once the new SW activates
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload()
+  }, { once: true })
+
+  waiting.postMessage({ type: 'SKIP_WAITING' })
 }

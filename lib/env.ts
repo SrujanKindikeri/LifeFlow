@@ -38,6 +38,7 @@ const REQUIRED_SERVER_VARS = [
 const OPTIONAL_SERVER_VARS = [
   'MONGODB_DB_NAME',
   'SESSION_IDLE_TIMEOUT_MINUTES',
+  'SESSION_ABSOLUTE_TIMEOUT_HOURS',
   'SCHEDULER_SECRET',
   'CRON_SECRET',
   'STORAGE_PROVIDER',
@@ -144,6 +145,14 @@ export function getServerEnv() {
       10
     ),
 
+    // Absolute session lifetime in hours measured from login time.
+    // After this many hours the session is rejected regardless of activity.
+    // Defaults to 24 hours. Set to 0 to disable (not recommended).
+    SESSION_ABSOLUTE_TIMEOUT_HOURS: parseInt(
+      process.env.SESSION_ABSOLUTE_TIMEOUT_HOURS ?? '24',
+      10
+    ),
+
     // Scheduler / Cron
     SCHEDULER_SECRET: process.env.SCHEDULER_SECRET ?? process.env.CRON_SECRET ?? '',
     CRON_SECRET:      process.env.CRON_SECRET ?? process.env.SCHEDULER_SECRET ?? '',
@@ -216,6 +225,10 @@ export const serverEnv = {
   // Session inactivity timeout in minutes. 0 = disabled. Default 60.
   get SESSION_IDLE_TIMEOUT_MINUTES() {
     return parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES ?? '60', 10)
+  },
+  // Absolute session lifetime in hours from login. 0 = disabled. Default 24.
+  get SESSION_ABSOLUTE_TIMEOUT_HOURS() {
+    return parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_HOURS ?? '24', 10)
   },
 
   // Scheduler / Cron

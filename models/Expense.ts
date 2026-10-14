@@ -120,6 +120,11 @@ export interface IExpense extends Document {
   // Smart Transaction Capture — only present when captured from a screenshot
   transactionCapture?: ITransactionCapture
 
+  /** Monotonically-increasing revision counter — incremented on every sync write. */
+  serverRevision: number
+  /** MutationId of the last accepted sync mutation — used as an idempotency key. */
+  lastMutationId?: string
+
   createdAt: Date
   updatedAt: Date
 }
@@ -220,6 +225,8 @@ const ExpenseSchema = new Schema<IExpense>(
 
     // Smart Transaction Capture data — only present when added via screenshot
     transactionCapture: { type: TransactionCaptureSchema, default: null },
+    serverRevision: { type: Number, default: 0 },
+    lastMutationId: { type: String, index: true, sparse: true },
   },
   { timestamps: true }
 )

@@ -1304,6 +1304,7 @@ button, a, [role="button"] {
     var(--bottomnav-height, 56px)
     + env(safe-area-inset-bottom, 0px)
   );
+
 }
 
 .pb-mobile-nav {

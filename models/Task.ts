@@ -17,6 +17,10 @@ export interface ITask extends Document {
   recurring: TaskRecurring
   /** Optional project association */
   projectId?: mongoose.Types.ObjectId
+  /** Monotonically-increasing revision counter — incremented on every sync write. */
+  serverRevision: number
+  /** MutationId of the last accepted sync mutation — used as an idempotency key. */
+  lastMutationId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -42,6 +46,8 @@ const TaskSchema = new Schema<ITask>(
       default: 'none',
     },
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
+    serverRevision: { type: Number, default: 0 },
+    lastMutationId: { type: String, index: true, sparse: true },
   },
   { timestamps: true }
 )

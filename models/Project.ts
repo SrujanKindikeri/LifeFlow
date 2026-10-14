@@ -12,6 +12,10 @@ export interface IProject extends Document {
   status: ProjectStatus
   dueDate?: string   // YYYY-MM-DD
   color?: string     // hex colour for visual differentiation
+  /** Monotonically-increasing revision counter — incremented on every sync write. */
+  serverRevision: number
+  /** MutationId of the last accepted sync mutation — used as an idempotency key. */
+  lastMutationId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -30,6 +34,8 @@ const ProjectSchema = new Schema<IProject>(
     },
     dueDate: { type: String },
     color:   { type: String, maxlength: 7, default: '#3b82f6' },
+    serverRevision: { type: Number, default: 0 },
+    lastMutationId: { type: String, index: true, sparse: true },
   },
   { timestamps: true }
 )

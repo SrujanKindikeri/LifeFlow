@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2, History, Camera } from 'lucide-react'
+import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2, History, Camera, Wifi, WifiOff, RefreshCw, AlertTriangle, Clock, CloudOff, Database } from 'lucide-react'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
@@ -17,7 +17,9 @@ import { ProfilePhotoUploadModal } from '@/components/profile/ProfilePhotoUpload
 import { AppearanceSection } from '@/components/profile/AppearanceSection'
 import { TwoFactorSection } from '@/components/profile/TwoFactorSection'
 import { useAppearance } from '@/hooks/useAppearance'
+import { useSync } from '@/hooks/useSync'
 import { prewarmAudio } from '@/lib/tonePlayer'
+import type { SyncPhase } from '@/types/sync'
 
 const CURRENCIES = [
   { value: 'INR', label: '₹ INR — Indian Rupee'        },
@@ -149,6 +151,25 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
     setHistoryOpen((prev) => {
       const next = !prev
       try { window.localStorage.setItem('lf_notif_history_open', String(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
+
+  // ── Data Sync section open/closed state (persisted) ───────────────────────
+  const [dataSyncOpen, setDataSyncOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      const stored = window.localStorage.getItem('lf_datasync_section_open')
+      return stored === null ? true : stored !== 'false'
+    } catch {
+      return true
+    }
+  })
+
+  function toggleDataSyncSection() {
+    setDataSyncOpen((prev) => {
+      const next = !prev
+      try { window.localStorage.setItem('lf_datasync_section_open', String(next)) } catch { /* ignore */ }
       return next
     })
   }
@@ -766,6 +787,14 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
           </div>
         )}
       </ProfileSection>
+
+      {/* ── Data Sync ── */}
+      <DataSyncSection
+        isOpen={dataSyncOpen}
+        onToggle={toggleDataSyncSection}
+        timezone={profileForm.timezone}
+        variants={fadeUp}
+      />
 
       {/* ── Notifications (collapsible) ── */}
       <CollapsibleNotifications
@@ -1432,5 +1461,314 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
         transition={{ type: 'spring', stiffness: 520, damping: 32 }}
       />
     </button>
+  )
+}
+
+// ─── Sync helpers (local to this file) ───────────────────────────────────────
+
+function syncStatusLabel(phase: SyncPhase, online: boolean, pendingCount: number): string {
+  if (!online)                                    return 'Offline'
+  if (phase === 'pushing' || phase === 'pulling') return 'Syncing\u2026'
+  if (phase === 'error')                          return 'Sync failed'
+  if (pendingCount > 0)                           return 'Pending sync'
+  return 'Synced'
+}
+
+function syncStatusColor(
+  phase: SyncPhase,
+  online: boolean,
+  pendingCount: number,
+  conflictCount: number,
+): string {
+  if (!online)           return 'var(--text-tertiary)'
+  if (phase === 'error') return 'var(--danger)'
+  if (conflictCount > 0) return 'var(--warning)'
+  if (pendingCount > 0)  return 'var(--accent)'
+  return 'var(--success)'
+}
+
+/**
+ * Format an ISO timestamp using the user's configured timezone.
+ * Falls back to the browser's local timezone if the IANA key is invalid.
+ */
+function formatSyncTimestamp(iso: string | null, timezone: string): string {
+  if (!iso) return 'Never'
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone:    timezone,
+      month:       'short',
+      day:         'numeric',
+      hour:        '2-digit',
+      minute:      '2-digit',
+      hour12:      true,
+    }).format(new Date(iso))
+  } catch {
+    // Unknown IANA zone — fall back to locale default
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+    })
+  }
+}
+
+/* ── DataSyncSection ─────────────────────────────────────────────────────────── */
+/**
+ * Collapsible "Data Sync" section for the Profile page.
+ *
+ * Reads live state directly from useSync() — the same engine that previously
+ * powered the floating SyncStatusBar pill. No second engine, no extra network
+ * listeners.
+ *
+ * Accuracy guarantee: online/offline connectivity alone never implies synced.
+ * The green "Synced" indicator only appears when phase === 'idle', online,
+ * pendingCount === 0, conflictCount === 0, and lastError === null — matching
+ * the exact predicate used by the old pill.
+ */
+function DataSyncSection({
+  isOpen,
+  onToggle,
+  timezone,
+  variants,
+}: {
+  isOpen:   boolean
+  onToggle: () => void
+  timezone: string
+  variants?: import('framer-motion').Variants
+}) {
+  const { state, triggerSync } = useSync()
+  const { online, phase, pendingCount, lastSyncedAt, lastError, conflictCount } = state
+
+  const [retrying, setRetrying] = useState(false)
+  const panelId  = useId()
+  const headerId = useId()
+
+  const label  = syncStatusLabel(phase, online, pendingCount)
+  const color  = syncStatusColor(phase, online, pendingCount, conflictCount)
+  const isBusy = phase === 'pushing' || phase === 'pulling'
+
+  const showRetry = !isBusy && (phase === 'error' || (online && pendingCount > 0))
+
+  async function handleRetry() {
+    if (retrying || isBusy) return
+    setRetrying(true)
+    try { await triggerSync() } finally { setRetrying(false) }
+  }
+
+  return (
+    <motion.div variants={variants} className="glass-elevated rounded-2xl overflow-hidden">
+      {/* ── Header ── */}
+      <button
+        type="button"
+        id={headerId}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        onClick={onToggle}
+        className={cn(
+          'w-full flex items-center gap-2 px-5 py-[18px] text-left',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 focus-visible:ring-inset',
+          'transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.03] active:bg-black/[0.04]',
+          isOpen && 'border-b',
+        )}
+        style={isOpen ? { borderColor: 'var(--border)' } : {}}
+      >
+        <span style={{ color: 'var(--text-muted)' }}>
+          <Database size={14} />
+        </span>
+        <h3 className="text-[13px] font-semibold flex-1" style={{ color: 'var(--text-secondary)' }}>
+          Data Sync
+        </h3>
+
+        {/* Inline status dot + label — visible even when collapsed */}
+        <span
+          className="flex items-center gap-1.5 text-[11px] font-medium mr-2"
+          style={{ color }}
+          aria-hidden="true"
+        >
+          <span
+            className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', isBusy && 'animate-pulse')}
+            style={{ background: color }}
+          />
+          {label}
+        </span>
+
+        <motion.span
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+          style={{ color: 'var(--text-faint)', display: 'flex', alignItems: 'center' }}
+          aria-hidden="true"
+        >
+          <ChevronDown size={14} />
+        </motion.span>
+      </button>
+
+      {/* ── Collapsible panel ── */}
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            key="datasync-panel"
+            id={panelId}
+            role="region"
+            aria-label="Data sync details"
+            aria-labelledby={headerId}
+            aria-live="polite"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="px-5 pt-4 pb-5 flex flex-col gap-3">
+
+              {/* ── Status row ── */}
+              <div className="flex items-center justify-between gap-3 py-1">
+                <div className="flex items-center gap-2.5">
+                  {/* Animated status icon */}
+                  {isBusy ? (
+                    <RefreshCw size={15} className="animate-spin flex-shrink-0" style={{ color }} aria-hidden />
+                  ) : !online ? (
+                    <WifiOff size={15} className="flex-shrink-0" style={{ color }} aria-hidden />
+                  ) : phase === 'error' ? (
+                    <AlertTriangle size={15} className="flex-shrink-0" style={{ color }} aria-hidden />
+                  ) : pendingCount > 0 ? (
+                    <Clock size={15} className="flex-shrink-0" style={{ color }} aria-hidden />
+                  ) : (
+                    <CheckCircle2 size={15} className="flex-shrink-0" style={{ color }} aria-hidden />
+                  )}
+                  <div>
+                    <p className="text-[13px] font-semibold" style={{ color }}>
+                      {label}
+                    </p>
+                    {!online && (
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        Changes are saved locally and will sync when connectivity returns.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Network indicator */}
+                <span
+                  className="flex items-center gap-1 text-[11px] flex-shrink-0"
+                  style={{ color: online ? 'var(--success)' : 'var(--text-tertiary)' }}
+                  aria-label={online ? 'Online' : 'Offline'}
+                >
+                  {online
+                    ? <Wifi size={12} aria-hidden />
+                    : <WifiOff size={12} aria-hidden />
+                  }
+                  {online ? 'Online' : 'Offline'}
+                </span>
+              </div>
+
+              {/* ── Divider ── */}
+              <div className="h-px" style={{ background: 'var(--border-subtle)' }} />
+
+              {/* ── Last synced timestamp ── */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={13} style={{ color: 'var(--text-faint)' }} aria-hidden />
+                  <span className="text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
+                    Last synced
+                  </span>
+                </div>
+                <span className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {lastSyncedAt ? formatSyncTimestamp(lastSyncedAt, timezone) : 'Never'}
+                </span>
+              </div>
+
+              {/* ── Pending operations count ── */}
+              {pendingCount > 0 && (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Clock size={13} style={{ color: 'var(--accent)' }} aria-hidden />
+                    <span className="text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
+                      Pending changes
+                    </span>
+                  </div>
+                  <span
+                    className="text-[12.5px] font-semibold"
+                    style={{ color: 'var(--accent)' }}
+                    aria-label={`${pendingCount} pending operation${pendingCount > 1 ? 's' : ''}`}
+                  >
+                    {pendingCount} {pendingCount === 1 ? 'operation' : 'operations'}
+                  </span>
+                </div>
+              )}
+
+              {/* ── Conflict count ── */}
+              {conflictCount > 0 && (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={13} style={{ color: 'var(--warning)' }} aria-hidden />
+                    <span className="text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
+                      Conflicts
+                    </span>
+                  </div>
+                  <span
+                    className="text-[12.5px] font-semibold"
+                    style={{ color: 'var(--warning)' }}
+                    aria-label={`${conflictCount} conflict${conflictCount > 1 ? 's' : ''} need review`}
+                  >
+                    {conflictCount} {conflictCount === 1 ? 'conflict' : 'conflicts'}
+                  </span>
+                </div>
+              )}
+
+              {/* ── Error detail ── */}
+              {lastError && (
+                <div
+                  className="rounded-xl px-3 py-2.5 text-[11px] leading-snug"
+                  style={{
+                    color:      'var(--danger)',
+                    background: 'rgba(220,38,38,0.07)',
+                    border:     '1px solid rgba(220,38,38,0.15)',
+                  }}
+                  role="alert"
+                >
+                  <span className="font-semibold">Sync error: </span>{lastError}
+                </div>
+              )}
+
+              {/* ── Offline notice ── */}
+              {!online && (
+                <div
+                  className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-[11px]"
+                  style={{
+                    color:      'var(--text-secondary)',
+                    background: 'var(--glass-subtle-bg, rgba(0,0,0,0.04))',
+                    border:     '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <CloudOff size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} aria-hidden />
+                  All changes are safely stored on this device. Sync will resume automatically.
+                </div>
+              )}
+
+              {/* ── Retry / Sync now button ── */}
+              {showRetry && (
+                <button
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  className={cn(
+                    'flex items-center justify-center gap-1.5',
+                    'w-full py-2 rounded-xl text-[12.5px] font-medium',
+                    'transition-opacity disabled:opacity-40 hover:opacity-80',
+                  )}
+                  style={{ background: 'var(--accent)', color: '#fff' }}
+                  aria-label="Retry sync"
+                >
+                  <RefreshCw
+                    size={12}
+                    className={cn(retrying && 'animate-spin')}
+                    aria-hidden
+                  />
+                  {retrying ? 'Syncing\u2026' : 'Sync now'}
+                </button>
+              )}
+
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   )
 }

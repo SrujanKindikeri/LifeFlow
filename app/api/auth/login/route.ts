@@ -212,6 +212,7 @@ export async function POST(req: NextRequest) {
     session.pendingUserId      = undefined
     session.twoFactorPendingAt = undefined
     session.lastActiveAt       = Date.now() // inactivity timer starts at login
+    session.loginAt            = Date.now() // absolute 24-hour deadline starts at login
     await session.save()
 
     logger.info('[login] Successful login', { userId: user._id.toString() })

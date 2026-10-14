@@ -38,6 +38,10 @@ export interface ISubscription extends Document {
    */
   autoCreateExpense: boolean
   notes?: string
+  /** Monotonically-increasing revision counter — incremented on every sync write. */
+  serverRevision: number
+  /** MutationId of the last accepted sync mutation — used as an idempotency key. */
+  lastMutationId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -76,6 +80,8 @@ const SubscriptionSchema = new Schema<ISubscription>(
     },
     autoCreateExpense:   { type: Boolean, default: true },
     notes:               { type: String, trim: true, maxlength: 500 },
+    serverRevision:      { type: Number, default: 0 },
+    lastMutationId:      { type: String, index: true, sparse: true },
   },
   { timestamps: true }
 )

@@ -10,6 +10,10 @@ export interface IHabit extends Document {
   description?: string
   frequency: 'daily' | 'weekly'
   target: number
+  /** Monotonically-increasing revision counter — incremented on every sync write. */
+  serverRevision: number
+  /** MutationId of the last accepted sync mutation — used as an idempotency key. */
+  lastMutationId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -24,6 +28,8 @@ const HabitSchema = new Schema<IHabit>(
     description: { type: String, trim: true, maxlength: 500 },
     frequency: { type: String, enum: ['daily', 'weekly'], default: 'daily' },
     target: { type: Number, default: 1, min: 1, max: 100 },
+    serverRevision: { type: Number, default: 0 },
+    lastMutationId: { type: String, index: true, sparse: true },
   },
   { timestamps: true }
 )

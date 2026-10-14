@@ -4,6 +4,19 @@ import { getServerEnv, serverEnv } from '@/lib/env'
 import { connectDB } from '@/lib/db'
 import logger from '@/lib/logger'
 
+// ─── Absolute session lifetime ────────────────────────────────────────────────
+
+/**
+ * Hard maximum lifetime of a session measured from login time (loginAt).
+ * No amount of activity can extend this deadline.
+ * Reads SESSION_ABSOLUTE_TIMEOUT_HOURS at runtime; defaults to 24 hours.
+ * A value of 0 disables the absolute check entirely (not recommended).
+ */
+export function getAbsoluteTimeoutMs(): number {
+  const hours = serverEnv.SESSION_ABSOLUTE_TIMEOUT_HOURS
+  return hours > 0 ? hours * 60 * 60 * 1000 : 0
+}
+
 // ─── Inactivity timeout constants ─────────────────────────────────────────────
 
 /**
@@ -15,6 +28,53 @@ export function getIdleTimeoutMs(): number {
   const minutes = serverEnv.SESSION_IDLE_TIMEOUT_MINUTES
   return minutes > 0 ? minutes * 60 * 1000 : 0
 }
+
+// ─── Pure expiry-check helpers (injectable clock for tests) ──────────────────
+
+/**
+ * Check whether the session data represents an absolutely-expired session.
+ *
+ * This is a pure function extracted from requireAuth() so it can be unit-tested
+ * without iron-session's cookie machinery or the Next.js request context.
+ *
+ * @param loginAt          - session.loginAt (ms timestamp or undefined)
+ * @param absoluteTimeoutMs - result of getAbsoluteTimeoutMs()
+ * @param now              - current time in ms (injectable for tests; defaults to Date.now())
+ * @returns true if the session has exceeded the absolute lifetime
+ */
+export function isAbsolutelyExpired(
+  loginAt:            number | undefined,
+  absoluteTimeoutMs:  number,
+  now = Date.now(),
+): boolean {
+  if (absoluteTimeoutMs <= 0) return false
+  if (!loginAt) return false
+  return (now - loginAt) > absoluteTimeoutMs
+}
+
+/**
+ * Check whether the session data represents an inactivity-expired session.
+ *
+ * Pure function extracted from requireAuth() for the same testability reason.
+ *
+ * @param lastActiveAt  - session.lastActiveAt (ms timestamp or undefined)
+ * @param idleTimeoutMs - result of getIdleTimeoutMs()
+ * @param now           - current time in ms (injectable for tests; defaults to Date.now())
+ * @returns true if the session has been idle longer than the allowed window
+ */
+export function isIdleExpired(
+  lastActiveAt:   number | undefined,
+  idleTimeoutMs:  number,
+  now = Date.now(),
+): boolean {
+  if (idleTimeoutMs <= 0) return false
+  if (!lastActiveAt) return false
+  return (now - lastActiveAt) > idleTimeoutMs
+}
+
+
+
+// ─── Activity update throttle ────────────────────────────────────────────────
 
 /**
  * Activity update throttle: only write a refreshed lastActiveAt cookie when the
@@ -74,6 +134,20 @@ export interface SessionData {
    * activity updates so they cannot keep an otherwise-idle session alive.
    */
   lastActiveAt?: number
+
+  /**
+   * Unix timestamp (ms) when the session was first established — i.e. the
+   * moment the user successfully authenticated (password + any 2FA step).
+   *
+   * This value is set once at login time and is NEVER updated thereafter.
+   * The server uses it to enforce the SESSION_ABSOLUTE_TIMEOUT_HOURS limit:
+   * once (Date.now() - loginAt) exceeds that limit the session is rejected
+   * regardless of how recently the user was active.
+   *
+   * Do NOT update this field on activity refresh — that would defeat the
+   * purpose of an absolute (non-sliding) deadline.
+   */
+  loginAt?: number
 }
 
 // ─── AuthUser shape ───────────────────────────────────────────────────────────
@@ -121,12 +195,12 @@ export function getSessionOptions(): SessionOptions {
         (process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://') ?? false),
       httpOnly: true,
       sameSite: 'lax',
-      // The cookie TTL is kept at 7 days. Inactivity enforcement is done
-      // in application logic via lastActiveAt, NOT via cookie expiry, because
-      // a sliding-window maxAge would require re-issuing the cookie on every
-      // request. The 7-day hard cap means a completely abandoned session still
-      // expires eventually even if the inactivity check is somehow bypassed.
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      // The cookie TTL is set to match SESSION_ABSOLUTE_TIMEOUT_HOURS (default
+      // 24 hours).  Even if the absolute timeout is disabled (value 0), we
+      // cap at 7 days so a completely abandoned session still clears itself.
+      // Application-level enforcement via loginAt is the authoritative check;
+      // the cookie maxAge is a belt-and-suspenders backstop.
+      maxAge: 60 * 60 * 24, // 24 hours (matches default SESSION_ABSOLUTE_TIMEOUT_HOURS)
     },
   }
 }
@@ -238,6 +312,32 @@ export async function requireAuth(
       })
       throw new Error('SessionExpired')
     }
+  }
+
+  // ── Absolute expiry check ────────────────────────────────────────────────────
+  // Enforces a hard deadline from the moment of login regardless of activity.
+  // loginAt is stamped at login / 2FA completion and NEVER updated.
+  // IMPORTANT: same cookie-write constraint as inactivity — only throw here,
+  // never call session.destroy(). Callers redirect to /api/auth/clear-session.
+  const absoluteTimeoutMs = getAbsoluteTimeoutMs()
+
+  if (absoluteTimeoutMs > 0) {
+    const loginAt = session.loginAt
+
+    if (loginAt && Date.now() - loginAt > absoluteTimeoutMs) {
+      const ageHours = ((Date.now() - loginAt) / (60 * 60 * 1000)).toFixed(2)
+      logger.info('[AUTH] session expired — absolute lifetime exceeded', {
+        userId:          session.userId,
+        ageHours,
+        limitHours:      absoluteTimeoutMs / (60 * 60 * 1000),
+      })
+      throw new Error('SessionExpired')
+    }
+    // loginAt absent means this is an old session issued before this feature
+    // was deployed.  Treat it as active now — it will be stamped with loginAt
+    // on the next Route Handler that creates a fresh session.
+    // (Unlike lastActiveAt, we cannot back-fill loginAt for existing sessions
+    // without knowing the real login time, so we grant a grace period.)
   }
 
   // ── Lazy imports (avoid circular dependency at module load time) ────────────

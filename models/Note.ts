@@ -26,6 +26,10 @@ export interface INote extends Document {
    * Reset to false if the user updates reminderAt to a future time.
    */
   reminderSent: boolean
+  /** Monotonically-increasing revision counter — incremented on every sync write. */
+  serverRevision: number
+  /** MutationId of the last accepted sync mutation — used as an idempotency key. */
+  lastMutationId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -43,6 +47,8 @@ const NoteSchema = new Schema<INote>(
     projectId: { type: Schema.Types.ObjectId, ref: 'Project', default: null },
     reminderAt:   { type: Date, default: null },
     reminderSent: { type: Boolean, default: false },
+    serverRevision: { type: Number, default: 0, index: false },
+    lastMutationId: { type: String, index: true, sparse: true },
   },
   { timestamps: true }
 )

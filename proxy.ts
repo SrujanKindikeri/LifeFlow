@@ -20,7 +20,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getIronSession } from 'iron-session'
-import { SessionData, getSessionOptions, getIdleTimeoutMs } from '@/lib/session'
+import { SessionData, getSessionOptions, getIdleTimeoutMs, getAbsoluteTimeoutMs } from '@/lib/session'
 
 /**
  * Routes where logged-in users should NOT be sent.
@@ -43,7 +43,7 @@ export async function proxy(req: NextRequest) {
   // is treated as unverified so the user is sent through the verification flow.
   const isVerified = isLoggedIn && session.emailVerified === true
 
-  // ── Inactivity expiry check (page requests only) ───────────────────────────
+  // ── Inactivity + absolute expiry check (page requests only) ──────────────
   // Only enforce on /app/* routes for a logged-in, verified session.
   // The proxy cannot call session.destroy() — it has no Set-Cookie context that
   // the browser will honour for the final response. Instead we redirect to
@@ -54,24 +54,35 @@ export async function proxy(req: NextRequest) {
   // requireAuth() in lib/session.ts. This proxy check is an early short-circuit
   // for /app/* page navigations so the user never sees a protected page flash.
   if (isVerified && pathname.startsWith('/app')) {
+    const now = Date.now()
+
+    // ── Inactivity check ──────────────────────────────────────────────────
     const idleTimeoutMs = getIdleTimeoutMs()
-
     if (idleTimeoutMs > 0 && session.lastActiveAt) {
-      const idleMs = Date.now() - session.lastActiveAt
-
+      const idleMs = now - session.lastActiveAt
       if (idleMs > idleTimeoutMs) {
-        // Session is expired. Redirect to the clear-session handler which
-        // destroys the cookie and forwards to /login with a reason param so
-        // the login page can show the "session expired" message.
         const clearUrl = new URL('/api/auth/clear-session', req.url)
         clearUrl.searchParams.set('reason', 'session_expired')
         return NextResponse.redirect(clearUrl)
       }
     }
-    // Note: if lastActiveAt is absent (old session before this feature), we
-    // let the request through. requireAuth() in lib/session.ts will stamp it
-    // on the first authenticated request, giving those users a grace period
-    // rather than immediately logging everyone out on first deploy.
+
+    // ── Absolute expiry check ─────────────────────────────────────────────
+    // Hard 24-hour deadline from the moment of login — activity cannot extend it.
+    const absoluteTimeoutMs = getAbsoluteTimeoutMs()
+    if (absoluteTimeoutMs > 0 && session.loginAt) {
+      const ageMs = now - session.loginAt
+      if (ageMs > absoluteTimeoutMs) {
+        const clearUrl = new URL('/api/auth/clear-session', req.url)
+        clearUrl.searchParams.set('reason', 'session_expired')
+        return NextResponse.redirect(clearUrl)
+      }
+    }
+    // Note: if lastActiveAt or loginAt is absent (old session before this
+    // feature), we let the request through. requireAuth() in lib/session.ts
+    // will enforce both checks on the first authenticated API request and
+    // stamp the timestamps, giving those users a grace period rather than
+    // immediately logging everyone out on first deploy.
   }
 
   // ── Redirect verified+authenticated users away from pure-auth pages ────────
