@@ -79,6 +79,13 @@ export default function UpiPaymentModal({
     setIsMobile(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
   }, [])
 
+  const handleClose = useCallback(() => {
+    setOpen(false)
+    setCopied(false)
+    // Return focus to the trigger button
+    setTimeout(() => openBtnRef.current?.focus(), 50)
+  }, [])
+
   // Trap focus inside modal and close on Escape
   useEffect(() => {
     if (!open) return
@@ -121,13 +128,6 @@ export default function UpiPaymentModal({
       document.body.style.overflow = ''
     }
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleClose = useCallback(() => {
-    setOpen(false)
-    setCopied(false)
-    // Return focus to the trigger button
-    setTimeout(() => openBtnRef.current?.focus(), 50)
-  }, [])
 
   async function handleCopyUpi() {
     if (!upiId) return

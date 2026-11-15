@@ -8,7 +8,7 @@ import {
   Flame, Wallet, BarChart3, Bell, User, LogOut,
   FolderOpen, CreditCard,
   PiggyBank, Users, Calendar, TrendingUp, Activity,
-  BarChart2, BookOpen,
+  BarChart2, BookOpen, Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/Toast'
@@ -67,6 +67,7 @@ const navGroups = [
       { href: '/app/tasks',           icon: CheckSquare,  label: 'Tasks'           },
       { href: '/app/habits',          icon: Flame,         label: 'Habits'          },
       { href: '/app/projects',        icon: FolderOpen,    label: 'Projects'        },
+      { href: '/app/invitations',     icon: Mail,          label: 'Invitations'     },
       { href: '/app/drafts',          icon: BookOpen,      label: 'Drafts'          },
       { href: '/app/calendar',        icon: Calendar,      label: 'Calendar'        },
       { href: '/app/activity',        icon: Activity,      label: 'Activity'        },

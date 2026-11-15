@@ -39,7 +39,7 @@ export async function PATCH(
     const goal = await SavingsGoal.findOneAndUpdate(
       { _id: id, userId },
       { $set: update },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!goal) {

@@ -3,6 +3,15 @@
  * POST /api/money-records  — create a new money record
  *
  * Security: userId is ALWAYS read from the session. Never trusted from body.
+ *
+ * personId handling (POST):
+ *   If the client supplies a personId the server:
+ *     1. Verifies the Person document exists AND belongs to the same userId.
+ *     2. Copies the current name/email/phone from that Person into the
+ *        embedded person sub-document so the record is self-contained.
+ *     3. Stores the personId reference for live-lookup and future sync.
+ *   If personId is absent the submitted person fields are used as-is
+ *   (backward-compatible path for legacy / manual entry).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -11,11 +20,13 @@ import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import MoneyRecord from '@/models/MoneyRecord'
 import MoneyPayment from '@/models/MoneyPayment'
+import Person from '@/models/Person'
 import { moneyRecordSchema } from '@/lib/validations'
 import { calcBalance, rupeesToPaise } from '@/lib/moneyCalculator'
 import type { IMoneyRecord } from '@/models/MoneyRecord'
 import type { IMoneyAdditionalAmount } from '@/models/MoneyRecord'
 import type { IMoneyPayment } from '@/models/MoneyPayment'
+import type { IPerson } from '@/models/Person'
 
 // ── Serialiser ────────────────────────────────────────────────────────────────
 
@@ -31,6 +42,7 @@ function serializeRecord(
   return {
     _id:                 record._id.toString(),
     userId:              record.userId.toString(),
+    personId:            record.personId ? record.personId.toString() : undefined,
     person:              record.person,
     direction:           record.direction,
     originalAmountMinor: record.originalAmountMinor,
@@ -65,6 +77,45 @@ function serializeRecord(
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
+}
+
+// ── Shared helper: resolve + verify a personId ─────────────────────────────
+/**
+ * If personId is supplied, look it up and confirm it belongs to userId.
+ * Returns the Person document (lean) on success.
+ * Returns null if personId is absent (caller uses submitted person fields).
+ * Throws a Response-shaped error object on ownership/not-found failures so
+ * callers can return it directly.
+ */
+async function resolvePersonId(
+  personId: string | undefined,
+  userId: string
+): Promise<{ person: IPerson | null; errorResponse: NextResponse | null }> {
+  if (!personId) return { person: null, errorResponse: null }
+
+  if (!mongoose.Types.ObjectId.isValid(personId)) {
+    return {
+      person: null,
+      errorResponse: NextResponse.json({ error: 'Invalid personId' }, { status: 400 }),
+    }
+  }
+
+  // Find the Person — the userId filter guarantees cross-user access is impossible.
+  const found = await Person.findOne({ _id: personId, userId })
+    .select('_id name phone email linkedLifeFlowId')
+    .lean<IPerson>()
+
+  if (!found) {
+    return {
+      person: null,
+      errorResponse: NextResponse.json(
+        { error: 'Person not found or does not belong to you.' },
+        { status: 404 }
+      ),
+    }
+  }
+
+  return { person: found, errorResponse: null }
 }
 
 // ── GET ───────────────────────────────────────────────────────────────────────
@@ -153,12 +204,31 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { amount, currency, ...rest } = parsed.data
+    const { amount, currency, personId, person: submittedPerson, ...rest } = parsed.data
+
+    // ── personId ownership check ───────────────────────────────────────────
+    const { person: linkedPerson, errorResponse } = await resolvePersonId(personId, userId)
+    if (errorResponse) return errorResponse
+
+    // If a valid linked person was found, use their current details for the
+    // embedded sub-document so names/emails stay in sync with the People directory.
+    // Fall back to whatever the client submitted if no link is provided.
+    const personData = linkedPerson
+      ? {
+          name:             linkedPerson.name,
+          phone:            linkedPerson.phone,
+          email:            linkedPerson.email,
+          linkedLifeFlowId: linkedPerson.linkedLifeFlowId,
+        }
+      : submittedPerson
+
     const originalAmountMinor = rupeesToPaise(amount)
 
     const record = await MoneyRecord.create({
       userId,
       lifeFlowId,
+      ...(personId ? { personId: new mongoose.Types.ObjectId(personId) } : {}),
+      person: personData,
       ...rest,
       originalAmountMinor,
       currency: currency ?? 'INR',

@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
         $set: { completed: true },
         $setOnInsert: { lifeFlowId },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     )
 
     return NextResponse.json({

@@ -102,7 +102,7 @@ export async function PATCH(req: NextRequest) {
       const notification = await Notification.findOneAndUpdate(
         { _id: body.id, userId },
         { $set: { read: body.read ?? true } },
-        { new: true }
+        { returnDocument: 'after' }
       )
       if (!notification) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 })

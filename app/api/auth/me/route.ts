@@ -6,6 +6,7 @@ import { profileUpdateSchema, changePasswordSchema, appearancePreferencesSchema 
 import User from '@/models/User'
 import type { IUser } from '@/models/User'
 import type { AppearancePreferences } from '@/types'
+import logger from '@/lib/logger'
 
 // Force this route to always be dynamically rendered — never statically cached.
 // Required for correctness: both GET (session cookie) and PATCH (writes) must
@@ -49,6 +50,14 @@ function serializeUser(user: Partial<IUser> & { _id: { toString(): string }; cre
     scheduledPermanentDeletionAt: user.scheduledPermanentDeletionAt?.toISOString() ?? null,
     emailOtpEnabled:              user.emailOtpEnabled ?? false,
     twoFactorEnabledAt:           user.twoFactorEnabledAt?.toISOString() ?? null,
+    dailyIntelligence:            user.dailyIntelligence ?? {
+      enabled: false,
+      morningTime: '07:00',
+      eveningTime: '19:00',
+      emailMorning: false,
+      emailEvening: false,
+      includeFinancial: true,
+    },
     createdAt:                    user.createdAt.toISOString(),
     updatedAt:                    user.updatedAt.toISOString(),
   }
@@ -80,6 +89,7 @@ const PROFILE_GET_PROJECTION = [
   'scheduledPermanentDeletionAt',
   'emailOtpEnabled',
   'twoFactorEnabledAt',
+  'dailyIntelligence',
   'createdAt',
   'updatedAt',
 ].join(' ')
@@ -105,13 +115,9 @@ export async function GET() {
       return NextResponse.json({ error: 'Account is not active' }, { status: 403 })
     }
 
-    console.log(
-      '[PROFILE LOAD DEBUG] upiConfigured:', (userDoc.upiId ?? null) !== null,
-    )
-
     return NextResponse.json({ user: serializeUser(userDoc) })
   } catch (error) {
-    console.error('[me GET]', error)
+    logger.error('[me GET]', { errorMessage: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: 'Failed to get user' }, { status: 500 })
   }
 }
@@ -185,6 +191,46 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ user: serializeUser(user) })
     }
 
+    // ── Update Daily Intelligence preferences ──
+    if (body.action === 'updateDailyIntelligence') {
+      const di = body.dailyIntelligence as Partial<{
+        enabled: boolean
+        morningTime: string
+        eveningTime: string
+        emailMorning: boolean
+        emailEvening: boolean
+        includeFinancial: boolean
+      }> | undefined
+
+      if (!di) {
+        return NextResponse.json({ error: 'Missing dailyIntelligence payload' }, { status: 400 })
+      }
+
+      // Validate times
+      const timeRe = /^([01]\d|2[0-3]):([0-5]\d)$/
+      if (di.morningTime !== undefined && !timeRe.test(di.morningTime)) {
+        return NextResponse.json({ error: 'Invalid morningTime (expected HH:MM)' }, { status: 400 })
+      }
+      if (di.eveningTime !== undefined && !timeRe.test(di.eveningTime)) {
+        return NextResponse.json({ error: 'Invalid eveningTime (expected HH:MM)' }, { status: 400 })
+      }
+
+      const setPayload: Record<string, unknown> = {}
+      const allowed = ['enabled', 'morningTime', 'eveningTime', 'emailMorning', 'emailEvening', 'includeFinancial'] as const
+      for (const k of allowed) {
+        if (di[k] !== undefined) setPayload[`dailyIntelligence.${k}`] = di[k]
+      }
+
+      const updated = await User.findByIdAndUpdate(
+        userId,
+        { $set: setPayload },
+        { returnDocument: 'after', runValidators: false }
+      ).select('dailyIntelligence').lean<IUser>()
+
+      if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      return NextResponse.json({ dailyIntelligence: updated.dailyIntelligence })
+    }
+
     // ── Profile update (name, currency, timezone, upiId) ──
     const parsed = profileUpdateSchema.safeParse(body)
     if (!parsed.success) {
@@ -206,12 +252,6 @@ export async function PATCH(req: NextRequest) {
       profileSetPayload['upiId'] = parsed.data.upiId
     }
 
-    console.log(
-      '[PROFILE SAVE DEBUG] authenticatedUser: true',
-      '| upiReceived:', parsed.data.upiId !== undefined,
-      '| upiConfigured:', parsed.data.upiId !== null && parsed.data.upiId !== undefined,
-    )
-
     // Use .lean() so the returned object is a plain JS document — Mongoose
     // Document getters can silently return undefined for fields that exist in
     // the schema but were absent from the stored MongoDB document (e.g. legacy
@@ -225,12 +265,6 @@ export async function PATCH(req: NextRequest) {
 
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-    console.log(
-      '[PROFILE SAVE DEBUG] dbMatched: true',
-      '| dbModified: true',
-      '| upiConfiguredAfterSave:', (user.upiId ?? null) !== null,
-    )
-
     // Update session name if it changed
     const session = await getSession()
     if (parsed.data.name && session.name !== parsed.data.name) {
@@ -243,7 +277,7 @@ export async function PATCH(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[me PATCH]', error)
+    logger.error('[me PATCH]', { errorMessage: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 })
   }
 }

@@ -83,7 +83,7 @@ export async function PATCH(
     const updated = await Draft.findByIdAndUpdate(
       id,
       { $set: updateFields },
-      { new: true }
+      { returnDocument: 'after' }
     ).lean()
 
     return NextResponse.json({ draft: serializeDraft(updated!) })

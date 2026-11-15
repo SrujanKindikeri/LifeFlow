@@ -200,7 +200,7 @@ export function getSessionOptions(): SessionOptions {
       // cap at 7 days so a completely abandoned session still clears itself.
       // Application-level enforcement via loginAt is the authoritative check;
       // the cookie maxAge is a belt-and-suspenders backstop.
-      maxAge: 60 * 60 * 24, // 24 hours (matches default SESSION_ABSOLUTE_TIMEOUT_HOURS)
+      maxAge: (parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_HOURS ?? '24', 10) || 24) * 60 * 60,
     },
   }
 }

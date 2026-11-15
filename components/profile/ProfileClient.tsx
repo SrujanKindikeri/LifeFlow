@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { User, Mail, Lock, LogOut, Trash2, Save, Eye, EyeOff, Shield, Bell, Copy, Check, Fingerprint, ChevronDown, CheckCircle2, Loader2, History, Camera, Wifi, WifiOff, RefreshCw, AlertTriangle, Clock, CloudOff, Database } from 'lucide-react'
+import { SupportCenterSection } from '@/components/support/SupportCenterSection'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { GlassInput, GlassSelect } from '@/components/ui/GlassInput'
 import { Modal } from '@/components/ui/Modal'
@@ -1062,6 +1063,9 @@ export function ProfileClient({ initialUser }: { initialUser: InitialUser }) {
           </div>
         </div>
       </ProfileSection>
+
+      {/* ── Support Center ── */}
+      <SupportCenterSection variants={fadeUp} />
 
       {/* Change password modal */}
       <Modal isOpen={pwModalOpen} onClose={() => setPwModalOpen(false)} title="Change Password" size="sm">

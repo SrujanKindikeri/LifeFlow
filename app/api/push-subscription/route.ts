@@ -75,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           userAgent,
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     )
 
     logger.info('[push-subscription] Subscription registered', { userId })

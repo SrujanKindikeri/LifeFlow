@@ -12,6 +12,12 @@ export interface IProject extends Document {
   status: ProjectStatus
   dueDate?: string   // YYYY-MM-DD
   color?: string     // hex colour for visual differentiation
+  /**
+   * Whether project collaboration is enabled by the owner.
+   * Defaults to false — projects are private by default.
+   * Disabling does NOT remove members, messages, tasks, or history.
+   */
+  collaborationEnabled: boolean
   /** Monotonically-increasing revision counter — incremented on every sync write. */
   serverRevision: number
   /** MutationId of the last accepted sync mutation — used as an idempotency key. */
@@ -34,6 +40,11 @@ const ProjectSchema = new Schema<IProject>(
     },
     dueDate: { type: String },
     color:   { type: String, maxlength: 7, default: '#3b82f6' },
+    /**
+     * Collaboration toggle — false by default so all existing and new projects
+     * remain private until the owner explicitly enables it.
+     */
+    collaborationEnabled: { type: Boolean, default: false, index: true },
     serverRevision: { type: Number, default: 0 },
     lastMutationId: { type: String, index: true, sparse: true },
   },

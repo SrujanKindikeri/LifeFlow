@@ -10,19 +10,45 @@
  *
  * The session is destroyed regardless of pending mutations — the server cannot
  * hold the session hostage. The client is responsible for warning the user.
+ *
+ * SECURITY EVENT
+ * ──────────────
+ * Records a `logout` SecurityEvent (non-fatal, fire-and-forget) so the
+ * admin dashboard can show logout history.
  */
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
 import logger from '@/lib/logger'
+import { resolveClientIp, isValidIp } from '@/lib/ip'
+import { parseUserAgent } from '@/lib/useragent'
+import { recordSecurityEvent } from '@/models/SecurityEvent'
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
     const session = await getSession()
 
-    // Capture userId before destroying — returned to client for pending-count UX
+    // Capture userId and publicId before destroying
     const userId = session.userId ?? null
+    const isLoggedIn = session.isLoggedIn === true
 
     await session.destroy()
+
+    // Record logout security event (non-fatal)
+    if (userId && isLoggedIn) {
+      const ipResult = resolveClientIp(req)
+      const securityIp = isValidIp(ipResult.ip) ? ipResult.ip : null
+      const parsedUa = parseUserAgent(req.headers.get('user-agent'))
+
+      void recordSecurityEvent({
+        userId,
+        eventType:  'logout',
+        outcome:    'success',
+        ip:         securityIp,
+        ipSource:   ipResult.source,
+        deviceCategory: parsedUa.deviceCategory,
+        browser:    parsedUa.browser,
+      })
+    }
 
     return NextResponse.json({
       message:  'Logged out successfully',

@@ -184,7 +184,7 @@ async function applyNote(mutationId: string, entityId: string, op: string, paylo
     const updated = await Note.findOneAndUpdate(
       { _id: entityId, userId },
       { $set: { ...parsed.data, serverRevision: newRev, lastMutationId: mutationId } },
-      { new: true }
+      { returnDocument: 'after' }
     )
     if (!updated) return { mutationId, entityId, status: 'rejected', reason: 'Note not found' }
     return { mutationId, entityId, status: 'accepted', newRevision: newRev, serverUpdatedAt: updated.updatedAt.toISOString() }
@@ -225,7 +225,7 @@ async function applyTask(mutationId: string, entityId: string, op: string, paylo
     }
 
     const newRev = currentRev + 1
-    const updated = await Task.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...update, serverRevision: newRev, lastMutationId: mutationId } }, { new: true })
+    const updated = await Task.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...update, serverRevision: newRev, lastMutationId: mutationId } }, { returnDocument: 'after' })
     if (!updated) return { mutationId, entityId, status: 'rejected', reason: 'Task not found' }
     return { mutationId, entityId, status: 'accepted', newRevision: newRev, serverUpdatedAt: updated.updatedAt.toISOString() }
   }
@@ -259,7 +259,7 @@ async function applyHabit(mutationId: string, entityId: string, op: string, payl
       return { mutationId, entityId, status: 'conflict', reason: 'Concurrent modification', serverRecord: serializeHabit(current), newRevision: currentRev }
     }
     const newRev = currentRev + 1
-    const updated = await Habit.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...parsed.data, serverRevision: newRev, lastMutationId: mutationId } }, { new: true })
+    const updated = await Habit.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...parsed.data, serverRevision: newRev, lastMutationId: mutationId } }, { returnDocument: 'after' })
     if (!updated) return { mutationId, entityId, status: 'rejected', reason: 'Habit not found' }
     return { mutationId, entityId, status: 'accepted', newRevision: newRev, serverUpdatedAt: updated.updatedAt.toISOString() }
   }
@@ -291,7 +291,7 @@ async function applyHabitLog(mutationId: string, entityId: string, op: string, p
     const log = await HabitLog.findOneAndUpdate(
       { userId, habitId, date },
       { $set: { completed: true }, $setOnInsert: { lifeFlowId, lastMutationId: mutationId } },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     )
     return { mutationId, entityId, serverId: log._id.toString(), status: 'accepted', newRevision: 1, serverUpdatedAt: log.updatedAt.toISOString() }
   }
@@ -328,7 +328,7 @@ async function applyExpense(mutationId: string, entityId: string, op: string, pa
       return { mutationId, entityId, status: 'conflict', reason: 'Concurrent modification', serverRecord: serializeExpense(current), newRevision: currentRev }
     }
     const newRev = currentRev + 1
-    const updated = await Expense.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...parsed.data, serverRevision: newRev, lastMutationId: mutationId } }, { new: true })
+    const updated = await Expense.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...parsed.data, serverRevision: newRev, lastMutationId: mutationId } }, { returnDocument: 'after' })
     if (!updated) return { mutationId, entityId, status: 'rejected', reason: 'Expense not found' }
     return { mutationId, entityId, status: 'accepted', newRevision: newRev, serverUpdatedAt: updated.updatedAt.toISOString() }
   }
@@ -364,7 +364,7 @@ async function applySubscription(mutationId: string, entityId: string, op: strin
     // Only allow non-billing fields to be updated offline (billing is server-controlled)
     const safe = { serviceName: payload.serviceName, notes: payload.notes, paymentMethod: payload.paymentMethod, status: payload.status, category: payload.category }
     const newRev = currentRev + 1
-    const updated = await Subscription.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...safe, serverRevision: newRev, lastMutationId: mutationId } }, { new: true })
+    const updated = await Subscription.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...safe, serverRevision: newRev, lastMutationId: mutationId } }, { returnDocument: 'after' })
     if (!updated) return { mutationId, entityId, status: 'rejected', reason: 'Subscription not found' }
     return { mutationId, entityId, status: 'accepted', newRevision: newRev }
   }
@@ -397,7 +397,7 @@ async function applyProject(mutationId: string, entityId: string, op: string, pa
     const update: Record<string, unknown> = {}
     for (const k of allowed) { if (k in payload) update[k] = payload[k] }
     const newRev = currentRev + 1
-    const updated = await Project.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...update, serverRevision: newRev, lastMutationId: mutationId } }, { new: true })
+    const updated = await Project.findOneAndUpdate({ _id: entityId, userId }, { $set: { ...update, serverRevision: newRev, lastMutationId: mutationId } }, { returnDocument: 'after' })
     if (!updated) return { mutationId, entityId, status: 'rejected', reason: 'Project not found' }
     return { mutationId, entityId, status: 'accepted', newRevision: newRev }
   }

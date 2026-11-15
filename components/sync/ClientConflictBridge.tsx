@@ -14,7 +14,7 @@ import { useState, useEffect } from 'react'
 import { getActiveUser } from '@/lib/sync/account-guard'
 import { ConflictResolutionModal } from '@/components/sync/ConflictResolutionModal'
 
-export function _ClientConflictBridge() {
+export function ClientConflictBridge() {
   const [clientUserId, setClientUserId] = useState<string | null>(null)
 
   useEffect(() => {

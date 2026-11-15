@@ -24,17 +24,24 @@ interface WindowEntry {
   windowStartMs: number
 }
 
-// Module-level store: key → {count, windowStartMs}
-const store = new Map<string, WindowEntry>()
+interface StoreEntry extends WindowEntry {
+  /** The windowMs used when this entry was created — needed for correct sweep. */
+  windowMs: number
+}
+
+// Module-level store: key → {count, windowStartMs, windowMs}
+const store = new Map<string, StoreEntry>()
 
 // Periodically sweep expired entries to prevent memory growth.
 // Run every 10 minutes.
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000
 
-function sweep(windowMs: number): void {
+function sweep(): void {
   const now = Date.now()
   for (const [key, entry] of store.entries()) {
-    if (now - entry.windowStartMs > windowMs) {
+    // Use each entry's own windowMs so long-lived windows (e.g. 24-hour daily
+    // caps) are not evicted prematurely by a shorter sweep interval.
+    if (now - entry.windowStartMs > entry.windowMs) {
       store.delete(key)
     }
   }
@@ -42,7 +49,7 @@ function sweep(windowMs: number): void {
 
 // Start the background sweep (only in server context)
 if (typeof setInterval !== 'undefined') {
-  setInterval(() => sweep(60 * 60 * 1000), SWEEP_INTERVAL_MS).unref?.()
+  setInterval(sweep, SWEEP_INTERVAL_MS).unref?.()
 }
 
 // ─── Core check function ──────────────────────────────────────────────────────
@@ -79,8 +86,9 @@ export function checkRateLimit(opts: RateLimitOptions): RateLimitResult {
   const entry   = store.get(key)
 
   if (!entry || now - entry.windowStartMs > windowMs) {
-    // Start a new window
-    store.set(key, { count: 1, windowStartMs: now })
+    // Start a new window — store windowMs so sweep() can evict with the
+    // correct window duration instead of a hardcoded global constant.
+    store.set(key, { count: 1, windowStartMs: now, windowMs })
     return {
       allowed:   true,
       remaining: limit - 1,
@@ -102,7 +110,25 @@ export function checkRateLimit(opts: RateLimitOptions): RateLimitResult {
   }
 }
 
-// ─── Pre-configured limiters ──────────────────────────────────────────────────
+// ─── Internal helper ──────────────────────────────────────────────────────────
+
+/**
+ * Apply a per-IP rate-limit bucket.
+ * When ip is null (no proxy header present) the guard is skipped and the
+ * previous allowed result is returned unchanged — callers must never fall back
+ * to a shared key like '0.0.0.0', which would make this a global cap.
+ */
+function checkIpLimit(
+  ip: string | null,
+  prefix: string,
+  limit: number,
+  windowMs: number,
+  fallback: RateLimitResult,
+): RateLimitResult {
+  if (ip === null) return fallback
+  return checkRateLimit({ key: `${prefix}:${ip}`, limit, windowMs })
+}
+
 
 /**
  * Rate limit for the resend-verification-email endpoint.
@@ -121,7 +147,7 @@ export function checkRateLimit(opts: RateLimitOptions): RateLimitResult {
  * All keys are normalised to lowercase so changing email casing cannot bypass
  * the limit.
  */
-export function checkResendVerificationLimit(ip: string, email: string): RateLimitResult {
+export function checkResendVerificationLimit(ip: string | null, email: string): RateLimitResult {
   const normalised = email.toLowerCase()
 
   // Read timing constants from env at call time so hot-reloads pick them up
@@ -145,11 +171,7 @@ export function checkResendVerificationLimit(ip: string, email: string): RateLim
   if (!hourlyResult.allowed) return hourlyResult
 
   // ── 3. Hourly cap per IP ─────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `resend-verify:ip:${ip}`,
-    limit:    10,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'resend-verify:ip', 10, 60 * 60 * 1000, hourlyResult)
 }
 
 /**
@@ -169,19 +191,15 @@ export function checkTotpAttemptLimit(userId: string): RateLimitResult {
  *   • Per IP:    10 attempts per 5 minutes
  *   • Per email: 5 attempts per 5 minutes
  */
-export function checkLoginLimit(ip: string, email: string): RateLimitResult {
-  const ipResult = checkRateLimit({
-    key:      `login:ip:${ip}`,
-    limit:    10,
-    windowMs: 5 * 60 * 1000,
-  })
-  if (!ipResult.allowed) return ipResult
-
-  return checkRateLimit({
+export function checkLoginLimit(ip: string | null, email: string): RateLimitResult {
+  const emailResult = checkRateLimit({
     key:      `login:email:${email.toLowerCase()}`,
     limit:    5,
     windowMs: 5 * 60 * 1000,
   })
+  if (!emailResult.allowed) return emailResult
+
+  return checkIpLimit(ip, 'login:ip', 10, 5 * 60 * 1000, emailResult)
 }
 
 /**
@@ -201,15 +219,22 @@ export function checkRecoveryCodeLimit(userId: string): RateLimitResult {
 /**
  * Extract the real client IP from a Next.js request.
  * Respects X-Forwarded-For (set by load balancers / reverse proxies).
- * Falls back to '0.0.0.0' if no IP can be determined.
+ *
+ * Returns null if no IP can be determined (e.g. direct connection without
+ * proxy headers, unit tests, or local dev).  Callers MUST handle null and
+ * skip IP-based rate-limit buckets rather than falling back to a shared key
+ * like '0.0.0.0', which would make the per-IP cap a global cap across all users.
  */
-export function getClientIp(req: { headers: { get(name: string): string | null } }): string {
+export function getClientIp(req: { headers: { get(name: string): string | null } }): string | null {
   const forwarded = req.headers.get('x-forwarded-for')
   if (forwarded) {
     // x-forwarded-for can be a comma-separated list; the leftmost is the client
-    return forwarded.split(',')[0].trim()
+    const ip = forwarded.split(',')[0].trim()
+    if (ip) return ip
   }
-  return req.headers.get('x-real-ip') ?? '0.0.0.0'
+  const realIp = req.headers.get('x-real-ip')
+  if (realIp && realIp.trim()) return realIp.trim()
+  return null
 }
 
 // ─── Password reset limiters ──────────────────────────────────────────────────
@@ -231,7 +256,7 @@ export function getClientIp(req: { headers: { get(name: string): string | null }
  * The generic response pattern ensures rate-limited responses never reveal
  * whether the email exists in the database.
  */
-export function checkPasswordResetRequestLimit(ip: string, email: string): RateLimitResult {
+export function checkPasswordResetRequestLimit(ip: string | null, email: string): RateLimitResult {
   const normalised = email.toLowerCase()
 
   const cooldownSeconds = parseInt(process.env.PASSWORD_RESET_RESEND_COOLDOWN_SECONDS ?? '60', 10) || 60
@@ -254,11 +279,7 @@ export function checkPasswordResetRequestLimit(ip: string, email: string): RateL
   if (!hourly.allowed) return hourly
 
   // ── 3. Hourly cap per IP ─────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `pw-reset:ip:${ip}`,
-    limit:    10,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'pw-reset:ip', 10, 60 * 60 * 1000, hourly)
 }
 
 /**
@@ -286,7 +307,7 @@ export function checkPasswordResetAttemptLimit(tokenHash: string): RateLimitResu
  * Even after the button disappears from the UI (notificationsTested=true),
  * the endpoint enforces these limits so direct API calls cannot spam SMTP.
  */
-export function checkNotificationTestLimit(ip: string, userId: string): RateLimitResult {
+export function checkNotificationTestLimit(ip: string | null, userId: string): RateLimitResult {
   // ── 1. Per-user 60-second cooldown ────────────────────────────────────────
   const cooldown = checkRateLimit({
     key:      `notif-test:cooldown:${userId}`,
@@ -304,11 +325,7 @@ export function checkNotificationTestLimit(ip: string, userId: string): RateLimi
   if (!daily.allowed) return daily
 
   // ── 3. Per-IP hourly cap ──────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `notif-test:ip:${ip}`,
-    limit:    5,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'notif-test:ip', 5, 60 * 60 * 1000, daily)
 }
 
 // ─── Account deletion limiter ────────────────────────────────────────────────
@@ -326,7 +343,7 @@ export function checkNotificationTestLimit(ip: string, userId: string): RateLimi
  * accidentally submits the form twice is never locked out, while still
  * blocking bulk automation.
  */
-export function checkAccountDeletionLimit(ip: string, userId: string): RateLimitResult {
+export function checkAccountDeletionLimit(ip: string | null, userId: string): RateLimitResult {
   // Per-user hourly cap
   const userResult = checkRateLimit({
     key:      `account-delete:user:${userId}`,
@@ -336,11 +353,7 @@ export function checkAccountDeletionLimit(ip: string, userId: string): RateLimit
   if (!userResult.allowed) return userResult
 
   // Per-IP hourly cap
-  return checkRateLimit({
-    key:      `account-delete:ip:${ip}`,
-    limit:    10,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'account-delete:ip', 10, 60 * 60 * 1000, userResult)
 }
 
 // ─── Account restore limiter ─────────────────────────────────────────────────
@@ -356,7 +369,7 @@ export function checkAccountDeletionLimit(ip: string, userId: string): RateLimit
  *   3. Per-IP: max 10 attempts per hour across all accounts.
  *      Secondary defence against distributed brute-force.
  */
-export function checkAccountRestoreLimit(ip: string, userId: string): RateLimitResult {
+export function checkAccountRestoreLimit(ip: string | null, userId: string): RateLimitResult {
   // Cooldown: 1 attempt per 30 s per user
   const cooldown = checkRateLimit({
     key:      `account-restore:cooldown:${userId}`,
@@ -374,11 +387,7 @@ export function checkAccountRestoreLimit(ip: string, userId: string): RateLimitR
   if (!userHourly.allowed) return userHourly
 
   // Hourly cap per IP
-  return checkRateLimit({
-    key:      `account-restore:ip:${ip}`,
-    limit:    10,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'account-restore:ip', 10, 60 * 60 * 1000, userHourly)
 }
 
 // ─── Restore-token attempt limiter ───────────────────────────────────────────
@@ -423,7 +432,7 @@ export function checkRestoreTokenAttemptLimit(tokenHash: string): RateLimitResul
  * password submissions or token preflight checks.
  */
 export function checkRecoveryOtpRequestLimit(
-  ip: string,
+  ip: string | null,
   tokenHash: string,
 ): RateLimitResult {
   // ── 1. Per-token 60-second cooldown ───────────────────────────────────────
@@ -443,11 +452,7 @@ export function checkRecoveryOtpRequestLimit(
   if (!daily.allowed) return daily
 
   // ── 3. Per-IP hourly cap ──────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `recovery-otp:ip:${ip}`,
-    limit:    10,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'recovery-otp:ip', 10, 60 * 60 * 1000, daily)
 }
 
 /**
@@ -485,7 +490,7 @@ export function checkRecoveryPasswordAttemptLimit(tokenHash: string): RateLimitR
  * request-otp) cannot drain this budget.
  */
 export function checkRecoveryOtpVerifyAttemptLimit(
-  ip: string,
+  ip: string | null,
   tokenHash: string,
 ): RateLimitResult {
   // ── 1. Per-token OTP-verify flood guard ───────────────────────────────────
@@ -497,11 +502,7 @@ export function checkRecoveryOtpVerifyAttemptLimit(
   if (!attempts.allowed) return attempts
 
   // ── 2. Per-IP hourly cap ──────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `recovery-otp-verify:ip:${ip}`,
-    limit:    20,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'recovery-otp-verify:ip', 20, 60 * 60 * 1000, attempts)
 }
 
 /**
@@ -510,7 +511,7 @@ export function checkRecoveryOtpVerifyAttemptLimit(
  * future cleanup.
  */
 export function checkRecoveryOtpVerifyLimit(
-  ip: string,
+  ip: string | null,
   tokenHash: string,
 ): RateLimitResult {
   return checkRecoveryOtpVerifyAttemptLimit(ip, tokenHash)
@@ -531,7 +532,7 @@ export function checkRecoveryOtpVerifyLimit(
  * @param ip     — client IP from getClientIp()
  * @param userId — authenticated user's MongoDB _id string
  */
-export function checkEmailOtpRequestLimit(ip: string, userId: string): RateLimitResult {
+export function checkEmailOtpRequestLimit(ip: string | null, userId: string): RateLimitResult {
   // ── 1. Per-user 60-second cooldown ────────────────────────────────────────
   const cooldown = checkRateLimit({
     key:      `email-otp:cooldown:${userId}`,
@@ -549,11 +550,7 @@ export function checkEmailOtpRequestLimit(ip: string, userId: string): RateLimit
   if (!hourly.allowed) return hourly
 
   // ── 3. Per-IP hourly cap ───────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `email-otp:ip:${ip}`,
-    limit:    20,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'email-otp:ip', 20, 60 * 60 * 1000, hourly)
 }
 
 /**
@@ -569,7 +566,7 @@ export function checkEmailOtpRequestLimit(ip: string, userId: string): RateLimit
  * @param ip     — client IP from getClientIp()
  * @param userId — pending/authenticated user's MongoDB _id string
  */
-export function checkEmailOtpVerifyLimit(ip: string, userId: string): RateLimitResult {
+export function checkEmailOtpVerifyLimit(ip: string | null, userId: string): RateLimitResult {
   // ── 1. Per-user attempt flood guard ───────────────────────────────────────
   const attempts = checkRateLimit({
     key:      `email-otp-verify:attempt:${userId}`,
@@ -579,11 +576,7 @@ export function checkEmailOtpVerifyLimit(ip: string, userId: string): RateLimitR
   if (!attempts.allowed) return attempts
 
   // ── 2. Per-IP hourly cap ───────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `email-otp-verify:ip:${ip}`,
-    limit:    30,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'email-otp-verify:ip', 30, 60 * 60 * 1000, attempts)
 }
 
 /**
@@ -597,7 +590,7 @@ export function checkEmailOtpVerifyLimit(ip: string, userId: string): RateLimitR
  *   2. Per-userId hourly cap (10/hr)
  *   3. Per-IP hourly cap (20/hr)
  */
-export function checkEmailOtpLoginSendLimit(ip: string, userId: string): RateLimitResult {
+export function checkEmailOtpLoginSendLimit(ip: string | null, userId: string): RateLimitResult {
   // ── 1. Per-user 60-second cooldown ────────────────────────────────────────
   const cooldown = checkRateLimit({
     key:      `email-otp-login:cooldown:${userId}`,
@@ -615,11 +608,7 @@ export function checkEmailOtpLoginSendLimit(ip: string, userId: string): RateLim
   if (!hourly.allowed) return hourly
 
   // ── 3. Per-IP hourly cap ───────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `email-otp-login:ip:${ip}`,
-    limit:    20,
-    windowMs: 60 * 60 * 1000,
-  })
+  return checkIpLimit(ip, 'email-otp-login:ip', 20, 60 * 60 * 1000, hourly)
 }
 
 // ─── Group Bill manual reminder limiter ──────────────────────────────────────
@@ -642,7 +631,7 @@ export function checkEmailOtpLoginSendLimit(ip: string, userId: string): RateLim
  * guard against double-sends within a single user interaction.
  */
 export function checkBillReminderLimit(
-  ip: string,
+  ip: string | null,
   senderId: string,
   recipientKey: string,
 ): RateLimitResult {
@@ -671,9 +660,168 @@ export function checkBillReminderLimit(
   if (!senderDaily.allowed) return senderDaily
 
   // ── 4. Per-IP hourly cap ─────────────────────────────────────────────────
-  return checkRateLimit({
-    key:      `bill-reminder:ip:${ip}`,
+  return checkIpLimit(ip, 'bill-reminder:ip', 20, 60 * 60 * 1000, senderDaily)
+}
+
+// ─── Support ticket limiters ──────────────────────────────────────────────────
+
+/**
+ * Rate limit for POST /api/support/tickets — ticket creation.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-user cooldown — 1 ticket per SUPPORT_TICKET_COOLDOWN_SECONDS (default 30 s).
+ *      Prevents double-click or rapid-retry on form submission.
+ *   2. Per-user daily cap — max SUPPORT_TICKET_DAILY_LIMIT (default 5) tickets per 24 hours.
+ *      Prevents spam while allowing legitimate multi-issue users.
+ *   3. Per-IP hourly cap — max SUPPORT_TICKET_IP_HOURLY_LIMIT (default 20) ticket-creates
+ *      per IP per hour.  SKIPPED when ip is null (no proxy headers available) to prevent
+ *      all users resolving to a shared '0.0.0.0' key and consuming a single shared quota.
+ *
+ * @param ip     — from getClientIp(); null means no IP header is present
+ * @param userId — verified server-side session user ID (primary rate-limit key)
+ */
+export function checkTicketCreateLimit(ip: string | null, userId: string): RateLimitResult {
+  const cooldownSeconds = parseInt(process.env.SUPPORT_TICKET_COOLDOWN_SECONDS ?? '30', 10) || 30
+  const dailyLimit      = parseInt(process.env.SUPPORT_TICKET_DAILY_LIMIT      ?? '5',  10) || 5
+  const ipHourlyLimit   = parseInt(process.env.SUPPORT_TICKET_IP_HOURLY_LIMIT  ?? '20', 10) || 20
+
+  // ── 1. Per-user cooldown ──────────────────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `support-ticket:cooldown:${userId}`,
+    limit:    1,
+    windowMs: cooldownSeconds * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-user daily cap ─────────────────────────────────────────────────
+  const daily = checkRateLimit({
+    key:      `support-ticket:daily:${userId}`,
+    limit:    dailyLimit,
+    windowMs: 24 * 60 * 60 * 1000,
+  })
+  if (!daily.allowed) return daily
+
+  // ── 3. Per-IP hourly cap (secondary abuse guard only) ─────────────────────
+  // Only applied when a real IP is available.  When ip is null (no proxy
+  // headers) we skip this guard entirely rather than sharing '0.0.0.0' across
+  // all users, which would turn the cap into a global limit.
+  if (ip !== null) {
+    return checkRateLimit({
+      key:      `support-ticket:ip:${ip}`,
+      limit:    ipHourlyLimit,
+      windowMs: 60 * 60 * 1000,
+    })
+  }
+
+  // No IP available — user-scoped guards above are sufficient
+  return { allowed: true, remaining: ipHourlyLimit, resetAt: Date.now() + 60 * 60 * 1000 }
+}
+
+/**
+ * Rate limit for POST /api/support/tickets/[id]/messages — message submission.
+ *
+ * Guards applied in order — all must pass:
+ *   1. Per-user cooldown — 1 message per 2 seconds (prevents double-send).
+ *   2. Per-user per-ticket: max 30 messages per 5-minute window.
+ *   3. Per-IP hourly cap — max 200 messages per IP per hour.
+ */
+export function checkMessageSendLimit(ip: string | null, userId: string, ticketId: string): RateLimitResult {
+  // ── 1. Per-user 2-second cooldown ─────────────────────────────────────────
+  const cooldown = checkRateLimit({
+    key:      `support-msg:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 2 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  // ── 2. Per-user per-ticket burst limit ────────────────────────────────────
+  const burst = checkRateLimit({
+    key:      `support-msg:burst:${userId}:${ticketId}`,
+    limit:    30,
+    windowMs: 5 * 60 * 1000,
+  })
+  if (!burst.allowed) return burst
+
+  // ── 3. Per-IP hourly cap ──────────────────────────────────────────────────
+  return checkIpLimit(ip, 'support-msg:ip', 200, 60 * 60 * 1000, burst)
+}
+
+// ─── Project collaboration limiters ──────────────────────────────────────────
+
+/**
+ * Rate limit for POST /api/projects/[id]/invitations (and resend).
+ *
+ * Guards:
+ *   1. Per-user 5-second cooldown — prevents double-click sends.
+ *   2. Per-user hourly cap — max 20 invitations per hour.
+ *   3. Per-IP hourly cap — max 50 invitation calls per IP per hour.
+ */
+export function checkInvitationSendLimit(ip: string | null, userId: string): RateLimitResult {
+  const cooldown = checkRateLimit({
+    key:      `invitation:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 5 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  const hourly = checkRateLimit({
+    key:      `invitation:hourly:${userId}`,
     limit:    20,
     windowMs: 60 * 60 * 1000,
   })
+  if (!hourly.allowed) return hourly
+
+  return checkIpLimit(ip, 'invitation:ip', 50, 60 * 60 * 1000, hourly)
+}
+
+/**
+ * Rate limit for GET /api/projects/[id]/members/search.
+ *
+ * Guards:
+ *   1. Per-user 1-second cooldown — prevents rapid typing bursts.
+ *   2. Per-user per-minute cap — max 60 searches per minute.
+ *   3. Per-IP hourly cap — max 300 searches per IP per hour.
+ */
+export function checkUserSearchLimit(ip: string | null, userId: string): RateLimitResult {
+  const cooldown = checkRateLimit({
+    key:      `user-search:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 1 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  const perMinute = checkRateLimit({
+    key:      `user-search:minute:${userId}`,
+    limit:    60,
+    windowMs: 60 * 1000,
+  })
+  if (!perMinute.allowed) return perMinute
+
+  return checkIpLimit(ip, 'user-search:ip', 300, 60 * 60 * 1000, perMinute)
+}
+
+/**
+ * Rate limit for POST /api/projects/[id]/messages — project chat message.
+ *
+ * Guards:
+ *   1. Per-user 2-second cooldown — prevents double-click sends.
+ *   2. Per-user per-project: max 60 messages per 5-minute window.
+ *   3. Per-IP hourly cap — max 300 messages per IP per hour.
+ */
+export function checkChatMessageLimit(ip: string | null, userId: string, projectId: string): RateLimitResult {
+  const cooldown = checkRateLimit({
+    key:      `chat-msg:cooldown:${userId}`,
+    limit:    1,
+    windowMs: 2 * 1000,
+  })
+  if (!cooldown.allowed) return cooldown
+
+  const burst = checkRateLimit({
+    key:      `chat-msg:burst:${userId}:${projectId}`,
+    limit:    60,
+    windowMs: 5 * 60 * 1000,
+  })
+  if (!burst.allowed) return burst
+
+  return checkIpLimit(ip, 'chat-msg:ip', 300, 60 * 60 * 1000, burst)
 }

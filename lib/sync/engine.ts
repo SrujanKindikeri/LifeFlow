@@ -75,7 +75,7 @@ let _state: SyncState = {
   conflictCount: 0,
 }
 
-let _listeners: Set<(s: SyncState) => void> = new Set()
+const _listeners: Set<(s: SyncState) => void> = new Set()
 let _syncInProgress = false
 let _lastSyncStarted = 0
 let _currentUserId: string | null = null

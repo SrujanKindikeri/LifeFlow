@@ -1,97 +1,270 @@
 'use client'
 
+/**
+ * app/error.tsx — Route-segment error boundary for the LifeFlow App Router.
+ *
+ * CRITICAL CONSTRAINTS
+ * ────────────────────
+ * 1. NO Tailwind class names.  This component renders before ThemeProvider
+ *    and before globals.css custom properties are resolved on the client.
+ *    Any class like `auth-bg` or `glass-floating` that depends on CSS custom
+ *    properties (--bg-base, --text-primary, etc.) will produce invisible or
+ *    broken UI.  All styling must be inline.
+ *
+ * 2. NO external component imports (lucide-react, framer-motion, etc.).
+ *    In React 19 App Router, if an error fires during the RSC phase before
+ *    ESM modules are fully resolved, the import resolves to a Promise<undefined>
+ *    rather than a component function.  React throws:
+ *      "Element type is invalid. Received a promise that resolves to: undefined."
+ *    which then triggers `enqueueModel` Fiber crashes in a recursive loop.
+ *    Inline SVGs are safe and have zero dependencies.
+ *
+ * 3. Keep it a Client Component ('use client') — Next.js requires this.
+ *
+ * 4. The fallback must NEVER throw.  If it does, React escalates to
+ *    global-error.tsx, which also renders before any provider, and a crash
+ *    there produces an infinite error loop with no user-visible recovery path.
+ */
+
 import { useEffect } from 'react'
-import { RefreshCw, Home } from 'lucide-react'
 
 interface ErrorPageProps {
   error: Error & { digest?: string }
   reset: () => void
 }
 
+// ── Inline SVG icons — no external import required ────────────────────────────
+
+function IconRefresh() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true">
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+    </svg>
+  )
+}
+
+function IconHome() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  )
+}
+
+// ── DB / network hint (dev only) ─────────────────────────────────────────────
+
+function getDevHint(msg: string): string | null {
+  if (!msg) return null
+  if (msg.includes('IP') || msg.includes('whitelist') || msg.includes('Atlas'))
+    return 'MongoDB Atlas is rejecting the connection. Add your current IP to the Atlas cluster IP Allowlist.'
+  if (msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND'))
+    return 'Cannot reach the database server. Check that MONGODB_URI in .env.local is correct.'
+  if (msg.includes('Authentication failed') || msg.includes('bad auth'))
+    return 'MongoDB authentication failed. Verify the username and password in MONGODB_URI.'
+  if (msg.includes('Unauthorized') || msg.includes('session'))
+    return 'Session is missing or invalid. Try logging in again.'
+  return null
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function ErrorPage({ error, reset }: ErrorPageProps) {
   useEffect(() => {
-    console.error('[app error]', error)
+    // Log without re-throwing — a throw inside useEffect would recurse
+    try { console.error('[app error]', error) } catch { /* ignore */ }
   }, [error])
 
   const isDev = process.env.NODE_ENV === 'development'
-
-  function getHint(msg: string): string | null {
-    if (msg.includes('IP') || msg.includes('whitelist') || msg.includes('Atlas'))
-      return 'MongoDB Atlas is rejecting the connection. Add your current IP to the Atlas cluster IP Allowlist.'
-    if (msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND'))
-      return 'Cannot reach the database server. Check that MONGODB_URI in .env.local is correct.'
-    if (msg.includes('Authentication failed') || msg.includes('bad auth'))
-      return 'MongoDB authentication failed. Verify the username and password in MONGODB_URI.'
-    if (msg.includes('Unauthorized') || msg.includes('session'))
-      return 'Session is missing or invalid. Try logging in again.'
-    return null
-  }
-
-  const hint = isDev ? getHint(error?.message ?? '') : null
+  const hint  = isDev ? getDevHint(error?.message ?? '') : null
 
   return (
-    <div className="auth-bg">
-      <div className="glass-floating rounded-[28px] p-10 max-w-lg w-full text-center shadow-[0_32px_80px_rgba(0,0,0,0.55)] relative overflow-hidden">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/18 to-transparent pointer-events-none" />
-        <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-44 h-44 bg-red-500/08 rounded-full blur-3xl pointer-events-none" />
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '1rem',
+      background: '#f5f5f7',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    }}>
+      <div style={{
+        background: '#ffffff',
+        borderRadius: '1.5rem',
+        padding: '2.5rem',
+        maxWidth: '480px',
+        width: '100%',
+        textAlign: 'center',
+        boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)',
+        border: '1px solid rgba(0,0,0,0.07)',
+      }}>
+        {/* Icon */}
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '4rem',
+          height: '4rem',
+          borderRadius: '1rem',
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.18)',
+          fontSize: '1.75rem',
+          marginBottom: '1.5rem',
+        }}>
+          ⚡
+        </div>
 
-        <div className="relative">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 text-3xl mb-6">
-            ⚡
-          </div>
+        <p style={{
+          fontSize: '0.6875rem',
+          fontWeight: 700,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+          color: 'rgba(239,68,68,0.65)',
+          marginBottom: '0.75rem',
+          margin: '0 0 0.75rem',
+        }}>
+          Something went wrong
+        </p>
 
-          <p className="text-[11px] font-bold tracking-[0.14em] text-red-400/65 uppercase mb-3">
-            Something went wrong
-          </p>
+        <h1 style={{
+          fontSize: '1.375rem',
+          fontWeight: 700,
+          color: '#111827',
+          margin: '0 0 0.75rem',
+          letterSpacing: '-0.02em',
+        }}>
+          Unexpected error
+        </h1>
 
-          <h1 className="text-[24px] font-bold text-white mb-3 tracking-tight">
-            Unexpected error
-          </h1>
-          <p className="text-[13px] text-white/42 mb-6 leading-relaxed max-w-sm mx-auto">
-            An unexpected error occurred. Please try again, or contact support if the problem persists.
-          </p>
+        <p style={{
+          fontSize: '0.8125rem',
+          color: '#6b7280',
+          margin: '0 0 1.75rem',
+          lineHeight: 1.6,
+        }}>
+          An unexpected error occurred. Please try again, or contact support if the problem persists.
+        </p>
 
-          {/* Dev-only error details */}
-          {isDev && (
-            <div className="text-left mb-6 space-y-3">
-              <div className="rounded-xl bg-red-500/[0.07] border border-red-500/18 px-4 py-3">
-                <p className="text-[10px] font-bold text-red-400/65 uppercase tracking-wider mb-1.5">
-                  Error (dev only)
+        {/* Dev-only error details */}
+        {isDev && (
+          <div style={{ textAlign: 'left', marginBottom: '1.5rem' }}>
+            <div style={{
+              borderRadius: '0.75rem',
+              background: 'rgba(239,68,68,0.05)',
+              border: '1px solid rgba(239,68,68,0.15)',
+              padding: '0.75rem 1rem',
+              marginBottom: hint ? '0.75rem' : '0',
+            }}>
+              <p style={{
+                fontSize: '0.625rem',
+                fontWeight: 700,
+                color: 'rgba(239,68,68,0.6)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                margin: '0 0 0.5rem',
+              }}>
+                Error (dev only)
+              </p>
+              <p style={{
+                fontSize: '0.75rem',
+                color: '#dc2626',
+                fontFamily: '"SF Mono", "Fira Code", Consolas, monospace',
+                wordBreak: 'break-all',
+                lineHeight: 1.5,
+                margin: 0,
+              }}>
+                {error?.message || 'Unknown error'}
+              </p>
+              {error?.digest && (
+                <p style={{
+                  fontSize: '0.6875rem',
+                  color: '#9ca3af',
+                  margin: '0.5rem 0 0',
+                }}>
+                  digest: {error.digest}
                 </p>
-                <p className="text-[12px] text-red-300/75 font-mono break-all leading-relaxed">
-                  {error?.message || 'Unknown error'}
-                </p>
-                {error?.digest && (
-                  <p className="text-[10px] text-white/28 mt-1.5">digest: {error.digest}</p>
-                )}
-              </div>
-              {hint && (
-                <div className="rounded-xl bg-amber-500/[0.07] border border-amber-500/18 px-4 py-3">
-                  <p className="text-[10px] font-bold text-amber-400/65 uppercase tracking-wider mb-1.5">
-                    How to fix
-                  </p>
-                  <p className="text-[12px] text-amber-200/65 leading-relaxed">{hint}</p>
-                </div>
               )}
             </div>
-          )}
 
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <button
-              onClick={reset}
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-500/88 hover:bg-indigo-500 text-white font-semibold transition-colors text-sm shadow-[0_4px_14px_rgba(99,102,241,0.3)]"
-            >
-              <RefreshCw size={14} />
-              Try again
-            </button>
-            <a
-              href="/app/dashboard"
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl glass hover:bg-white/[0.08] text-white/65 hover:text-white font-semibold transition-colors text-sm"
-            >
-              <Home size={14} />
-              Go to Dashboard
-            </a>
+            {hint && (
+              <div style={{
+                borderRadius: '0.75rem',
+                background: 'rgba(245,158,11,0.06)',
+                border: '1px solid rgba(245,158,11,0.18)',
+                padding: '0.75rem 1rem',
+              }}>
+                <p style={{
+                  fontSize: '0.625rem',
+                  fontWeight: 700,
+                  color: 'rgba(245,158,11,0.7)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  margin: '0 0 0.5rem',
+                }}>
+                  How to fix
+                </p>
+                <p style={{
+                  fontSize: '0.75rem',
+                  color: '#92400e',
+                  lineHeight: 1.5,
+                  margin: 0,
+                }}>
+                  {hint}
+                </p>
+              </div>
+            )}
           </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={reset}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.375rem',
+              borderRadius: '0.75rem',
+              background: 'rgba(99,102,241,0.90)',
+              color: '#ffffff',
+              border: 'none',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(99,102,241,0.28)',
+            }}
+          >
+            <IconRefresh />
+            Try again
+          </button>
+
+          <a
+            href="/app/dashboard"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.375rem',
+              borderRadius: '0.75rem',
+              background: 'rgba(0,0,0,0.04)',
+              color: '#374151',
+              border: '1px solid rgba(0,0,0,0.08)',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              textDecoration: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <IconHome />
+            Go to Dashboard
+          </a>
         </div>
       </div>
     </div>

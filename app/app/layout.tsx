@@ -5,7 +5,7 @@ import { CommandPalette }            from '@/components/ui/CommandPalette'
 import { PushRegistrar }             from '@/components/notifications/PushRegistrar'
 import { InactivityMonitor }         from '@/components/providers/InactivityMonitor'
 import { SyncProvider }              from '@/components/sync/SyncProvider'
-import { ConflictResolutionModal }   from '@/components/sync/ConflictResolutionModal'
+import { ClientConflictBridge }      from '@/components/sync/ClientConflictBridge'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -62,27 +62,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/*
         Conflict resolution modal — shown when a record has been modified
-        both locally and on the server. Only mounts with a resolved userId.
-        Uses a placeholder that the SyncProvider/useCurrentUser would normally
-        supply; here we render it at the shell level so it appears above all pages.
-        The ConflictResolutionModal reads the clientUserId from the engine state.
+        both locally and on the server. ClientConflictBridge is a 'use client'
+        component that reads the userId from sessionStorage and conditionally
+        renders ConflictResolutionModal.
       */}
-      <_ConflictModalBridge />
+      <ClientConflictBridge />
     </SyncProvider>
   )
 }
-
-/**
- * A thin client-side bridge that reads the active userId and passes it
- * to ConflictResolutionModal without blocking the RSC layout render.
- */
-function _ConflictModalBridge() {
-  // This is a server component — the ConflictResolutionModal itself is 'use client'
-  // so it cannot be rendered directly from a Server Component with a userId prop
-  // that requires client state. We use a small wrapper that is always rendered
-  // but reads the clientUserId from sessionStorage client-side.
-  return <_ClientConflictBridge />
-}
-
-// Internal client bridge — avoids making AppLayout itself a client component
-import { _ClientConflictBridge } from '@/components/sync/ClientConflictBridge'

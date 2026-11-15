@@ -24,6 +24,9 @@ export function formatDate(dateStr: string): string {
 
 export function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
+  // Guard: new Date('') or new Date(undefined-coerced string) returns Invalid Date.
+  // Return a safe fallback rather than crashing with NaN arithmetic downstream.
+  if (isNaN(date.getTime())) return '—'
   const now = new Date()
   const diff = now.getTime() - date.getTime()
 

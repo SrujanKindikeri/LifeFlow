@@ -161,7 +161,7 @@ export async function POST(
     const updated = await MoneyRecord.findOneAndUpdate(
       { _id: recordId, userId },
       { $push: { additionalAmounts: newEntry } },
-      { new: true }  // return the document AFTER the update
+      { returnDocument: 'after' }  // return the document AFTER the update
     )
 
     if (!updated) {

@@ -37,6 +37,14 @@ export interface IMoneyRecord extends Document {
   /** Owner's LifeFlow ID (LF-XXXXXXXX). Sourced from User.publicId at creation. */
   lifeFlowId: string
 
+  /**
+   * Stable reference to the People directory entry for the other party.
+   * Optional — absent on records created before this feature was added.
+   * When set, the server resolves the current name/email from this record
+   * rather than relying solely on the embedded person sub-document.
+   */
+  personId?: mongoose.Types.ObjectId
+
   person: IMoneyPerson
   direction: MoneyDirection
 
@@ -99,6 +107,13 @@ const MoneyRecordSchema = new Schema<IMoneyRecord>(
     userId:              { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     /** Owner's LifeFlow ID (LF-XXXXXXXX). Server-derived from authenticated session. */
     lifeFlowId:          { type: String, required: true, index: true },
+    /**
+     * Optional reference to the People directory entry for the other party.
+     * When set, name/email are resolved from the linked Person document.
+     * The embedded person sub-document is always populated for backward
+     * compatibility and offline access.
+     */
+    personId:            { type: Schema.Types.ObjectId, ref: 'Person', index: true, sparse: true },
     person:              { type: MoneyPersonSchema, required: true },
     direction:           { type: String, enum: ['given', 'borrowed'], required: true },
     originalAmountMinor: { type: Number, required: true, min: 1, validate: { validator: Number.isInteger, message: 'Must be integer paise' } },
@@ -118,6 +133,8 @@ const MoneyRecordSchema = new Schema<IMoneyRecord>(
 MoneyRecordSchema.index({ userId: 1, givenDate: -1 })
 MoneyRecordSchema.index({ userId: 1, direction: 1, status: 1 })
 MoneyRecordSchema.index({ userId: 1, 'person.name': 1 })
+// Enables efficient lookup of all money records linked to a specific People entry.
+MoneyRecordSchema.index({ userId: 1, personId: 1 }, { sparse: true })
 
 const MoneyRecord: Model<IMoneyRecord> =
   mongoose.models.MoneyRecord || mongoose.model<IMoneyRecord>('MoneyRecord', MoneyRecordSchema)

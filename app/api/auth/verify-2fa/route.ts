@@ -21,6 +21,9 @@ import User from '@/models/User'
 import { decryptTotpSecret, hashRecoveryCode } from '@/lib/auth/crypto'
 import { checkTotpAttemptLimit, checkRecoveryCodeLimit, getClientIp } from '@/lib/auth/rate-limit'
 import logger from '@/lib/logger'
+import { resolveClientIp, isValidIp } from '@/lib/ip'
+import { parseUserAgent } from '@/lib/useragent'
+import { recordSecurityEvent } from '@/models/SecurityEvent'
 
 // The pending session must be completed within this window (matches login route)
 const TWO_FA_PENDING_TTL_MS = 5 * 60 * 1000
@@ -153,6 +156,18 @@ export async function POST(req: NextRequest) {
       }
 
       if (!verified) {
+        // Record 2FA challenge failure (non-fatal)
+        void recordSecurityEvent({
+          userId:    user._id.toString(),
+          publicId:  user.publicId,
+          eventType:  'two_factor_challenge_failed',
+          outcome:    'failure',
+          ip:         isValidIp(resolveClientIp(req).ip) ? resolveClientIp(req).ip : null,
+          ipSource:   resolveClientIp(req).source,
+          deviceCategory: parseUserAgent(req.headers.get('user-agent')).deviceCategory,
+          browser:    parseUserAgent(req.headers.get('user-agent')).browser,
+          metadata:   { method: 'totp' },
+        })
         return NextResponse.json(
           { error: 'Invalid authenticator code. Please try again.' },
           { status: 401 }
@@ -177,6 +192,24 @@ export async function POST(req: NextRequest) {
       userId: user._id.toString(),
       method: isRecovery ? 'recovery' : 'totp',
     })
+
+    // Record login_success security event after full session promotion (non-fatal)
+    {
+      const ipResult = resolveClientIp(req)
+      const secIp    = isValidIp(ipResult.ip) ? ipResult.ip : null
+      const parsedUa = parseUserAgent(req.headers.get('user-agent'))
+      void recordSecurityEvent({
+        userId:        user._id.toString(),
+        publicId:      user.publicId,
+        eventType:     'login_success',
+        outcome:       'success',
+        ip:            secIp,
+        ipSource:      ipResult.source,
+        deviceCategory: parsedUa.deviceCategory,
+        browser:       parsedUa.browser,
+        metadata:      { method: isRecovery ? 'totp_recovery' : 'totp' },
+      })
+    }
 
     return NextResponse.json({
       message: 'Logged in successfully',

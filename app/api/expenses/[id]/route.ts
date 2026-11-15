@@ -88,7 +88,7 @@ export async function PATCH(
     const expense = await Expense.findOneAndUpdate(
       { _id: id, userId },
       { $set: parsed.data },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!expense) {

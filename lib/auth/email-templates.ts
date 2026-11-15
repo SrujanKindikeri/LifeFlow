@@ -3819,3 +3819,95 @@ export function buildSubscriptionRenewalEmail(opts: SubscriptionRenewalEmailOpti
 
   return { subject, html, text }
 }
+
+// ─── Project invitation ────────────────────────────────────────────────────────
+
+export interface ProjectInvitationEmailOptions {
+  /** Recipient's display name */
+  toName: string
+  /** Name of the person who sent the invitation */
+  inviterName: string
+  /** Name of the project being shared */
+  projectName: string
+  /** Optional project description */
+  projectDescription?: string
+  /** Full URL to accept the invitation */
+  acceptUrl: string
+  /** Full URL to decline the invitation */
+  declineUrl: string
+  appUrl: string
+  /** Human-readable expiry label e.g. "7 days" */
+  expiresInLabel: string
+}
+
+/**
+ * Invitation email sent when a project owner invites a collaborator.
+ * SERVER-ONLY — never import from client components.
+ */
+export function buildProjectInvitationEmail(opts: ProjectInvitationEmailOptions): {
+  subject: string; html: string; text: string
+} {
+  const {
+    toName, inviterName, projectName, projectDescription,
+    acceptUrl, declineUrl, appUrl, expiresInLabel,
+  } = opts
+  const firstName = toName.split(' ')[0] ?? toName
+  const subject = `${escapeHtml(inviterName)} invited you to collaborate on "${escapeHtml(projectName)}"`
+
+  const descRow = projectDescription
+    ? `<p style="margin:0 0 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#475569;line-height:1.6;">${escapeHtml(projectDescription)}</p>`
+    : ''
+
+  const html = wrapHtml(`
+    <h2 style="margin:0 0 6px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+               font-size:20px;font-weight:700;color:#0f172a;">
+      You&rsquo;ve been invited to collaborate
+    </h2>
+    <p style="margin:0 0 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:14px;color:#64748b;">
+      Hi ${escapeHtml(firstName)}, <strong>${escapeHtml(inviterName)}</strong> has invited you to join
+      the project <strong>&ldquo;${escapeHtml(projectName)}&rdquo;</strong> on ${BRAND_NAME}.
+    </p>
+
+    ${descRow}
+
+    <table width="100%" cellpadding="0" cellspacing="0"
+           style="border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;margin:0 0 24px;">
+      <tr>
+        <td style="padding:18px 22px;">
+          <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;
+                    text-transform:uppercase;letter-spacing:0.7px;">Project</p>
+          <p style="margin:0;font-size:17px;font-weight:700;color:#0f172a;
+                    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+            ${escapeHtml(projectName)}
+          </p>
+          <p style="margin:6px 0 0;font-size:12px;color:#64748b;">
+            Invitation expires in ${escapeHtml(expiresInLabel)}
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    ${buildNotifCta(acceptUrl, 'Accept Invitation')}
+
+    <p style="margin:16px 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+              font-size:13px;color:#64748b;text-align:center;">
+      Not interested?
+      <a href="${escapeHtml(declineUrl)}" target="_blank" rel="noopener noreferrer"
+         style="color:#64748b;text-decoration:underline;">Decline this invitation</a>
+    </p>
+
+    ${notifFooter(appUrl)}
+  `)
+
+  const text =
+    `Hi ${firstName},\n\n` +
+    `${inviterName} has invited you to collaborate on "${projectName}" on ${BRAND_NAME}.\n\n` +
+    (projectDescription ? `Project description: ${projectDescription}\n\n` : '') +
+    `Accept invitation: ${acceptUrl}\n` +
+    `Decline invitation: ${declineUrl}\n\n` +
+    `This invitation expires in ${expiresInLabel}.\n\n— The LifeFlow Team`
+
+  return { subject, html, text }
+}

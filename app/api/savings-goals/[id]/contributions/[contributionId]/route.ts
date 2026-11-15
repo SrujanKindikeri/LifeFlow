@@ -34,7 +34,7 @@ export async function PATCH(
     const contribution = await SavingsContribution.findOneAndUpdate(
       { _id: contributionId, userId },
       { $set: update },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!contribution) {

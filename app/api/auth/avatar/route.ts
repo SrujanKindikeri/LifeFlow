@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
     const updated = await User.findByIdAndUpdate(
       userId,
       { $set: { avatar: dataUrl } },
-      { new: true },
+      { returnDocument: 'after' },
     ).select('avatar')
 
     if (!updated) {
@@ -142,7 +142,7 @@ export async function DELETE() {
     const updated = await User.findByIdAndUpdate(
       userId,
       { $unset: { avatar: '' } },
-      { new: true },
+      { returnDocument: 'after' },
     ).select('avatar')
 
     if (!updated) {

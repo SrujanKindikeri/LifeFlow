@@ -241,6 +241,19 @@ export interface IUser extends Document {
    */
   upiId: string | null
 
+  /**
+   * Daily Intelligence briefing preferences.
+   * All fields default to safe values — existing users are unaffected.
+   */
+  dailyIntelligence: {
+    enabled: boolean
+    morningTime: string        // HH:MM 24h, default '07:00'
+    eveningTime: string        // HH:MM 24h, default '19:00'
+    emailMorning: boolean      // send morning as email
+    emailEvening: boolean      // send evening as email
+    includeFinancial: boolean  // include budget/subscription/money alerts
+  }
+
   createdAt: Date
   updatedAt: Date
 }
@@ -489,6 +502,47 @@ const UserSchema = new Schema<IUser>(
       default:   null,
       maxlength: 100,
       trim:      true,
+    },
+
+    // ── Daily Intelligence preferences ───────────────────────────────────────
+    // Controls the Daily Intelligence briefing feature.
+    // All fields have safe defaults so existing users are unaffected:
+    //   enabled = false  (opt-in, not forced on existing users)
+    //   morningTime = '07:00', eveningTime = '19:00'
+    //   emailEnabled = false (in-app always; email requires explicit opt-in)
+    //   includeFinancial = true (financial alerts shown when enabled)
+    dailyIntelligence: {
+      /**
+       * Master switch for the Daily Intelligence feature.
+       * When false, no briefings are generated and no emails are sent.
+       * Default: false (opt-in feature, existing users unaffected).
+       */
+      enabled: { type: Boolean, default: false },
+      /**
+       * Local time (HH:MM, 24h) for the morning briefing.
+       * Default: '07:00'. Validated server-side as a valid HH:MM string.
+       */
+      morningTime: { type: String, default: '07:00', maxlength: 5 },
+      /**
+       * Local time (HH:MM, 24h) for the evening review.
+       * Default: '19:00'. Must be after morningTime.
+       */
+      eveningTime: { type: String, default: '19:00', maxlength: 5 },
+      /**
+       * Send morning briefing as email (in addition to in-app).
+       * Requires emailNotifications.enabled to also be true.
+       */
+      emailMorning: { type: Boolean, default: false },
+      /**
+       * Send evening review as email (in addition to in-app).
+       * Requires emailNotifications.enabled to also be true.
+       */
+      emailEvening: { type: Boolean, default: false },
+      /**
+       * Include financial alerts (budget, subscriptions, money) in briefings.
+       * Users can disable this if they prefer a pure task/habit briefing.
+       */
+      includeFinancial: { type: Boolean, default: true },
     },
   },
   { timestamps: true }

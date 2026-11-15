@@ -34,7 +34,7 @@ export async function PATCH(
     const person = await Person.findOneAndUpdate(
       { _id: id, userId },
       { $set: parsed.data },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!person) {

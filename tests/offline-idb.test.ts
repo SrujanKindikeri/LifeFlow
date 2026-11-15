@@ -87,7 +87,7 @@ describe('F2 PASS — outbox operation persists after DB close/reopen', () => {
 
     // Simulate reload by resetting the singleton
     const offlineModule = await import('@/lib/db/offline')
-    // @ts-expect-error
+    // @ts-expect-error — resetting private module cache to simulate a fresh import
     offlineModule['_db'] = null
 
     const ops = await getDueOperations(userId)

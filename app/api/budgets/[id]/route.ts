@@ -34,7 +34,7 @@ export async function PATCH(
     const budget = await Budget.findOneAndUpdate(
       { _id: id, userId },
       { $set: update },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!budget) {

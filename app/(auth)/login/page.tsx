@@ -163,12 +163,11 @@ function LoginPageContent() {
       }
 
       success('Welcome back!')
-      // Use a full browser navigation instead of router.push so the session
-      // cookie set by the login API is guaranteed to be in the browser cookie
-      // jar before the /app/dashboard request hits the proxy.  router.push +
-      // router.refresh() is a client-side RSC cycle that can race with the
-      // Set-Cookie header, causing the proxy to see no valid session and loop.
-      window.location.assign('/app/dashboard')
+      // Use a full browser navigation so the session cookie is guaranteed to
+      // be in the browser jar before the next request hits the proxy.
+      // The server returns redirectTo: '/admin/dashboard' for admins, or
+      // '/app/dashboard' for regular users.
+      window.location.assign(json.redirectTo ?? '/app/dashboard')
     } catch {
       error('Something went wrong. Please try again.')
     } finally {

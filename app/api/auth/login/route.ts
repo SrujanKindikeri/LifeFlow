@@ -9,12 +9,21 @@ import { generateEmailOtp, EMAIL_OTP_VALID_MINUTES, EMAIL_OTP_MAX_ATTEMPTS } fro
 import { getNotificationService } from '@/lib/notifications'
 import { buildTwoFaLoginOtpEmail, maskEmail } from '@/lib/auth/email-templates'
 import logger from '@/lib/logger'
+import { resolveClientIp, isValidIp } from '@/lib/ip'
+import { parseUserAgent } from '@/lib/useragent'
+import { recordSecurityEvent } from '@/models/SecurityEvent'
 
 // Max age for the 2FA pending window (5 minutes)
 const TWO_FA_PENDING_TTL_MS = 5 * 60 * 1000
 
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req)
+  // Resolve IP and device info once for security event recording (non-fatal)
+  const _ipResult = resolveClientIp(req)
+  const _securityIp = isValidIp(_ipResult.ip) ? _ipResult.ip : null
+  const _securityIpSource = _ipResult.source
+  const _rawUa = req.headers.get('user-agent')
+  const _parsedUa = parseUserAgent(_rawUa)
 
   try {
     const body = await req.json()
@@ -41,8 +50,70 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
+    // ── Admin check (runs before user lookup) ────────────────────────────────
+    // If the email belongs to an AdminUser, issue an admin session and redirect
+    // to /admin/dashboard. Admin credentials never produce a user session.
+    // We always hash-compare to avoid timing oracles even on unknown emails.
+    try {
+      const AdminUser = (await import('@/models/AdminUser')).default
+      const adminCandidate = await AdminUser.findOne({ email: normalizedEmail })
+        .select('+passwordHash')
+        .lean<{ _id: unknown; name: string; email: string; passwordHash: string; role: string; isActive: boolean } | null>()
+
+      if (adminCandidate) {
+        const adminValid = await bcrypt.compare(password, adminCandidate.passwordHash)
+        if (adminValid && adminCandidate.isActive) {
+          // Issue admin session using the admin-auth cookie
+          const { getAdminSession, writeAuditLog } = await import('@/lib/admin-auth')
+          const adminSession = await getAdminSession()
+          adminSession.adminId         = String(adminCandidate._id)
+          adminSession.adminName       = adminCandidate.name
+          adminSession.adminEmail      = adminCandidate.email
+          adminSession.adminRole       = adminCandidate.role as never
+          adminSession.isAdminLoggedIn = true
+          adminSession.loginAt         = Date.now()
+          adminSession.lastActiveAt    = Date.now()
+          await adminSession.save()
+
+          // Update last login timestamp — fire and forget
+          void AdminUser.findByIdAndUpdate(adminCandidate._id, { lastLoginAt: new Date() }).exec()
+
+          const actor = { adminId: String(adminCandidate._id), name: adminCandidate.name, email: adminCandidate.email, role: adminCandidate.role as never }
+          await writeAuditLog({ actor, action: 'admin_login', result: 'success', metadata: { ip, via: 'shared_login' } })
+
+          logger.info('[login] Admin login via shared login page', { adminId: String(adminCandidate._id) })
+
+          return NextResponse.json({
+            message:    'Logged in successfully',
+            redirectTo: '/admin/dashboard',
+            user:       { name: adminCandidate.name, email: adminCandidate.email },
+          })
+        }
+        // Wrong password for a known admin email — fall through to user lookup
+        // so the error message stays generic (no oracle on whether email is admin)
+      }
+    } catch (adminErr) {
+      // AdminUser model may not exist yet (pre-bootstrap) — non-fatal, continue
+      logger.warn('[login] Admin check skipped', {
+        errorMessage: adminErr instanceof Error ? adminErr.message : String(adminErr),
+      })
+    }
+    // ── End admin check ──────────────────────────────────────────────────────
+
     const user = await User.findOne({ email: normalizedEmail })
     if (!user) {
+      // Record login failure for unknown email (no userId, non-fatal)
+      void recordSecurityEvent({
+        userId:    null,
+        publicId:  null,
+        eventType:  'login_failure',
+        outcome:    'failure',
+        ip:         _securityIp,
+        ipSource:   _securityIpSource,
+        deviceCategory: _parsedUa.deviceCategory,
+        browser:    _parsedUa.browser,
+        metadata:   { reason: 'account_not_found' },
+      })
       return NextResponse.json(
         { error: 'No account found with that email.', code: 'ACCOUNT_NOT_FOUND' },
         { status: 404 }
@@ -52,6 +123,18 @@ export async function POST(req: NextRequest) {
     // ── Password verification ────────────────────────────────────────────────
     const isValid = await bcrypt.compare(password, user.passwordHash)
     if (!isValid) {
+      // Record login failure (non-fatal, fire-and-forget)
+      void recordSecurityEvent({
+        userId:    user._id.toString(),
+        publicId:  user.publicId,
+        eventType:  'login_failure',
+        outcome:    'failure',
+        ip:         _securityIp,
+        ipSource:   _securityIpSource,
+        deviceCategory: _parsedUa.deviceCategory,
+        browser:    _parsedUa.browser,
+        metadata:   { reason: 'bad_password' },
+      })
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }
@@ -217,8 +300,21 @@ export async function POST(req: NextRequest) {
 
     logger.info('[login] Successful login', { userId: user._id.toString() })
 
+    // Record login success (non-fatal, fire-and-forget)
+    void recordSecurityEvent({
+      userId:    user._id.toString(),
+      publicId:  user.publicId,
+      eventType:  'login_success',
+      outcome:    'success',
+      ip:         _securityIp,
+      ipSource:   _securityIpSource,
+      deviceCategory: _parsedUa.deviceCategory,
+      browser:    _parsedUa.browser,
+    })
+
     return NextResponse.json({
-      message: 'Logged in successfully',
+      message:    'Logged in successfully',
+      redirectTo: '/app/dashboard',
       user: { name: user.name, email: user.email },
     })
   } catch (error) {

@@ -60,7 +60,7 @@ export async function PUT(req: NextRequest) {
         $set: { sections },
         $setOnInsert: { lifeFlowId },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     ).lean()
 
     return NextResponse.json({ sections: pref!.sections })

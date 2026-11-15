@@ -7,7 +7,8 @@
  *
  * PROJECT 2 — "browser-idb"
  *   Browser-environment tests for IndexedDB / Dexie / sync engine.
- *   Environment: jsdom + fake-indexeddb globals injected via setupFiles.
+ *   Environment: node (fake-indexeddb globals are injected via setupFiles;
+ *   full jsdom is not required because DOM APIs are not needed here).
  *   Isolated from the node project so they never share state.
  */
 

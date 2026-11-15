@@ -31,6 +31,11 @@ export type ActivityType =
   | 'goal_updated'
   | 'project_created'
   | 'project_completed'
+  | 'project_member_joined'
+  | 'project_member_removed'
+  | 'project_invitation_sent'
+  | 'project_invitation_accepted'
+  | 'project_invitation_declined'
   | 'savings_contributed'
   | 'subscription_added'
 
@@ -66,6 +71,8 @@ const ActivitySchema = new Schema<IActivity>(
         'payment_received', 'payment_made',
         'goal_created', 'goal_completed', 'goal_updated',
         'project_created', 'project_completed',
+        'project_member_joined', 'project_member_removed',
+        'project_invitation_sent', 'project_invitation_accepted', 'project_invitation_declined',
         'savings_contributed',
         'subscription_added',
       ],

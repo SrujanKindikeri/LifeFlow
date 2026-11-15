@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { ToastProvider } from '@/components/ui/Toast'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
+import { InlineScript } from '@/components/ui/InlineScript'
 
 export const metadata: Metadata = {
   title: 'LifeFlow — Personal Daily Dashboard',
@@ -23,29 +24,21 @@ export const viewport: Viewport = {
   viewportFit: 'cover', // iOS safe-area support
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    // suppressHydrationWarning is intentional and scoped to <html> only.
-    // The inline script below runs synchronously before React hydration and
-    // writes data-theme / data-night-shift onto <html>. The server renders
-    // neither attribute (it has no access to the user's localStorage), so
-    // React would otherwise report a mismatch. suppressHydrationWarning tells
-    // React to accept the client-modified attributes on this single element
-    // without erroring — the documented pattern for pre-hydration theme scripts.
-    // It does NOT suppress warnings anywhere else in the component tree.
-    <html lang="en" suppressHydrationWarning>
-      {/*
-        Inline script — runs synchronously before any React hydration.
-        Reads the stored appearance preferences from localStorage and applies
-        data-theme / data-night-shift to <html> immediately, preventing any
-        flash of the wrong theme on page load or browser restart.
-        This script is intentionally tiny and has no external dependencies.
-      */}
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-(function(){
+/**
+ * Theme initialisation script — placed in <head> so it runs synchronously
+ * during HTML parsing, before the first paint.
+ *
+ * Uses InlineScript (components/ui/InlineScript.tsx) which sets
+ * type="text/javascript" on the server and type="text/plain" on the client,
+ * following the Next.js 16 "Preventing Flash Before Hydration" guide pattern.
+ * This prevents React 19's "Encountered a script tag while rendering" warning
+ * and avoids the module-resolution race that caused the
+ * "Element type is invalid. Received a promise" error from next/script.
+ *
+ * Reads lf_appearance from localStorage and sets data-theme / data-night-shift
+ * on <html> before any content is painted.
+ */
+const THEME_INIT_SCRIPT = `(function(){
   var LS_KEY = 'lf_appearance';
   var defaults = { theme: 'light', nightShiftEnabled: false, nightShiftStart: '22:00', nightShiftEnd: '07:00' };
   try {
@@ -86,10 +79,30 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     document.documentElement.setAttribute('data-theme', 'light');
     document.documentElement.setAttribute('data-night-shift', 'false');
   }
-})();
-            `.trim(),
-          }}
-        />
+})()`.trim()
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    // suppressHydrationWarning is intentional and scoped to <html> only.
+    // The InlineScript below runs synchronously before React hydration and
+    // writes data-theme / data-night-shift onto <html>. The server renders
+    // neither attribute (it has no access to the user's localStorage), so
+    // React would otherwise report a mismatch.
+    // suppressHydrationWarning tells React to accept the client-modified
+    // attributes on this single element without erroring — the documented
+    // pattern for pre-hydration theme scripts.
+    // It does NOT suppress warnings anywhere else in the component tree.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/*
+          InlineScript renders type="text/javascript" on the server (runs during
+          HTML parsing before first paint) and type="text/plain" on the client
+          (React ignores it, preventing the React 19 script-tag warning).
+          suppressHydrationWarning on the <script> element handles the type
+          attribute mismatch between SSR and CSR.
+          See: node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md
+        */}
+        <InlineScript html={THEME_INIT_SCRIPT} />
       </head>
       <body>
         <ThemeProvider>

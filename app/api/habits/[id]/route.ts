@@ -24,7 +24,7 @@ export async function PATCH(
     const habit = await Habit.findOneAndUpdate(
       { _id: id, userId },
       { $set: parsed.data },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!habit) {

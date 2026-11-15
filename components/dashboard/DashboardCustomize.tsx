@@ -22,6 +22,7 @@ const SECTION_LABELS: Record<DashboardSectionId, { label: string; emoji: string 
   notes:            { label: 'Recent Notes',           emoji: '📝' },
   continue:         { label: 'Continue',               emoji: '↩️' },
   weeklyReview:     { label: 'Weekly Review',          emoji: '📊' },
+  dailyIntelligence: { label: 'Daily Intelligence',   emoji: '🧠' },
 }
 
 interface Props {

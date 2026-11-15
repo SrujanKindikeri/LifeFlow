@@ -1,0 +1,21 @@
+﻿node.exe : [1m[43m DEPRECATED [49m[22m [33mThe workspace file is deprecated and will be removed 
+in the next major. Please, use the `test.projects` field in 
+C:/Users/kindi/OneDrive/Documents/LifeFlow/vitest.config.ts instead.[39m
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([1m[43m DEPRE...s instead.[39m:String) [], RemoteExcep 
+   tion
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mC:/Users/kindi/OneDrive/Documents/LifeFlow[39m
+
+ [32mΓ£ô[39m [30m[45m browser-idb [49m[39m tests/offline-idb.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 689[2mms[22m[39m
+   [33m[2mΓ£ô[22m[39m F6 PASS ΓÇö sync engine handles >30 outbox operations in multiple batches[2m > [22mall 65 enqueued mutations are acknowledged after two sync batches [33m 308[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m   Start at [22m 22:02:05
+[2m   Duration [22m 1.49s[2m (transform 220ms, setup 126ms, collect 80ms, tests 689ms, environment 0ms, prepare 195ms)[22m
+

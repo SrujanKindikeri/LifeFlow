@@ -270,6 +270,13 @@ const moneyPersonSchema = z.object({
 })
 
 export const moneyRecordSchema = z.object({
+  /**
+   * Optional reference to a People directory entry (_id as a 24-char hex string).
+   * When present the server validates ownership (the Person must belong to the
+   * authenticated user) and copies the current name/email/phone into the
+   * embedded person sub-document.  If absent the person fields are used directly.
+   */
+  personId:  z.string().regex(/^[0-9a-f]{24}$/i, 'Invalid personId').optional(),
   person:    moneyPersonSchema,
   direction: z.enum(['given', 'borrowed']),
   /** Amount in rupees (display unit). Converted to paise server-side. */

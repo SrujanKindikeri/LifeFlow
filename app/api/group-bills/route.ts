@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/session'
 import { groupBillSchema } from '@/lib/validations'
 import GroupBill from '@/models/GroupBill'
 import { calculateBill } from '@/lib/billCalculator'
+import logger from '@/lib/logger'
 
 // ─── Serialiser ───────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    console.error('[group-bills GET]', error)
+    logger.error('[group-bills GET]', { errorMessage: error instanceof Error ? error.message : String(error) })
     return NextResponse.json({ error: 'Failed to fetch group bills' }, { status: 500 })
   }
 }
@@ -75,16 +76,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     // ── Step 1: Authentication ────────────────────────────────────────────
-    console.log('[GROUP BILL] save started')
     const { userId, lifeFlowId } = await requireAuth()
-    console.log('[GROUP BILL] authenticated — user OK')
 
     // ── Step 2: Parse request body ────────────────────────────────────────
     let body: unknown
     try {
       body = await req.json()
     } catch {
-      console.error('[GROUP BILL] failed to parse request body as JSON')
+      logger.error('[group-bills POST] failed to parse request body as JSON', {})
       return NextResponse.json(
         { error: 'Invalid request body — expected JSON' },
         { status: 400 }
@@ -98,7 +97,7 @@ export async function POST(req: NextRequest) {
       const allIssues = parsed.error.issues.map(
         (i) => `${i.path.join('.')}: ${i.message}`
       )
-      console.error('[GROUP BILL] validation failed', allIssues)
+      logger.error('[group-bills POST] validation failed', { issues: allIssues })
       // Return only the first human-readable message to the client
       return NextResponse.json(
         { error: parsed.error.issues[0].message },
@@ -107,14 +106,6 @@ export async function POST(req: NextRequest) {
     }
 
     const data = parsed.data
-    console.log('[GROUP BILL] validation passed —', {
-      name: data.name,
-      date: data.date,
-      currency: data.currency,
-      peopleCount: data.people.length,
-      itemCount: data.items.length,
-      splitMode: data.splitMode,
-    })
 
     // ── Step 4: Server-side recalculation ─────────────────────────────────
     let result: ReturnType<typeof calculateBill>
@@ -136,17 +127,16 @@ export async function POST(req: NextRequest) {
         data.customSplits
       )
     } catch (calcError) {
-      console.error('[GROUP BILL] calculateBill threw', calcError)
+      logger.error('[group-bills POST] calculateBill threw', {
+        errorMessage: calcError instanceof Error ? calcError.message : String(calcError),
+      })
       return NextResponse.json(
         { error: 'Failed to calculate bill totals. Check item and people data.' },
         { status: 422 }
       )
     }
-    console.log('[GROUP BILL] calculation OK — grandTotal:', result.totals.grandTotal)
-
     // ── Step 5: Database save ─────────────────────────────────────────────
     await connectDB()
-    console.log('[GROUP BILL] DB connected')
 
     const bill = await GroupBill.create({
       ...data,
@@ -160,8 +150,6 @@ export async function POST(req: NextRequest) {
       total: result.totals.grandTotal,
       settlements: result.settlements.map((s) => ({ ...s, settled: false })),
     })
-
-    console.log('[GROUP BILL] saved successfully — id:', bill._id.toString())
 
     return NextResponse.json(
       { groupBill: serializeBill(bill.toObject()) },
@@ -182,7 +170,7 @@ export async function POST(req: NextRequest) {
           ([field, e]) => `${field}: ${e.message}`
         )
       : undefined
-    console.error('[GROUP BILL] save failed —', {
+    logger.error('[group-bills POST] save failed', {
       errorName: error instanceof Error ? error.name : typeof error,
       errorMessage: error instanceof Error ? error.message : String(error),
       // Mongoose validation errors carry an 'errors' object with per-field details

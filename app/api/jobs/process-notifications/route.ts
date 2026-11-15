@@ -114,10 +114,11 @@ async function handleRequest(req: NextRequest): Promise<NextResponse> {
     const durationMs = Date.now() - t0
 
     logger.info('[jobs/process-notifications] Run complete', {
-      usersProcessed: result.usersProcessed,
-      totalSent:      result.totalSent,
-      totalSkipped:   result.totalSkipped,
-      errorCount:     result.errors.length,
+      usersProcessed:    result.usersProcessed,
+      totalSent:         result.totalSent,
+      totalSkipped:      result.totalSkipped,
+      errorCount:        result.errors.length,
+      schedulerDisabled: result.schedulerDisabled ?? false,
       durationMs,
     })
 
@@ -125,12 +126,12 @@ async function handleRequest(req: NextRequest): Promise<NextResponse> {
       {
         ok: true,
         result: {
-          usersProcessed: result.usersProcessed,
-          totalSent:      result.totalSent,
-          totalSkipped:   result.totalSkipped,
-          errorCount:     result.errors.length,
-          // Include sanitised errors (no secrets, no tokens, no user PII beyond userId)
-          errors: result.errors.slice(0, 20), // cap at 20 to keep response size reasonable
+          usersProcessed:    result.usersProcessed,
+          totalSent:         result.totalSent,
+          totalSkipped:      result.totalSkipped,
+          errorCount:        result.errors.length,
+          errors:            result.errors.slice(0, 20),
+          schedulerDisabled: result.schedulerDisabled ?? false,
           durationMs,
         },
       },

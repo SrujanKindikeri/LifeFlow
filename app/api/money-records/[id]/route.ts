@@ -4,6 +4,12 @@
  * DELETE /api/money-records/[id]  — delete record + all its payments
  *
  * Security: ownership verified via userId from session on every operation.
+ *
+ * personId handling (PATCH):
+ *   If the client sends personId the server verifies ownership (same userId)
+ *   and refreshes the embedded person sub-document from the People record.
+ *   Sending personId: null explicitly unlinks the record (embedded person
+ *   fields remain as a snapshot).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -12,10 +18,14 @@ import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import MoneyRecord from '@/models/MoneyRecord'
 import MoneyPayment from '@/models/MoneyPayment'
+import Person from '@/models/Person'
 import { moneyRecordUpdateSchema } from '@/lib/validations'
 import { calcBalance, deriveStatus, rupeesToPaise } from '@/lib/moneyCalculator'
 import type { IMoneyRecord, IMoneyAdditionalAmount } from '@/models/MoneyRecord'
 import type { IMoneyPayment } from '@/models/MoneyPayment'
+import type { IPerson } from '@/models/Person'
+
+// ── Serialiser ────────────────────────────────────────────────────────────────
 
 function serializeRecord(record: IMoneyRecord, payments: IMoneyPayment[]) {
   const balance = calcBalance(
@@ -26,6 +36,7 @@ function serializeRecord(record: IMoneyRecord, payments: IMoneyPayment[]) {
   return {
     _id:                 record._id.toString(),
     userId:              record.userId.toString(),
+    personId:            record.personId ? record.personId.toString() : undefined,
     person:              record.person,
     direction:           record.direction,
     originalAmountMinor: record.originalAmountMinor,
@@ -60,6 +71,39 @@ function serializeRecord(record: IMoneyRecord, payments: IMoneyPayment[]) {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
+}
+
+// ── Shared helper: resolve + verify a personId ─────────────────────────────
+
+async function resolvePersonId(
+  personId: string | undefined,
+  userId: string
+): Promise<{ person: IPerson | null; errorResponse: NextResponse | null }> {
+  if (!personId) return { person: null, errorResponse: null }
+
+  if (!mongoose.Types.ObjectId.isValid(personId)) {
+    return {
+      person: null,
+      errorResponse: NextResponse.json({ error: 'Invalid personId' }, { status: 400 }),
+    }
+  }
+
+  // The userId filter is the ownership gate — cross-user access is impossible.
+  const found = await Person.findOne({ _id: personId, userId })
+    .select('_id name phone email linkedLifeFlowId')
+    .lean<IPerson>()
+
+  if (!found) {
+    return {
+      person: null,
+      errorResponse: NextResponse.json(
+        { error: 'Person not found or does not belong to you.' },
+        { status: 404 }
+      ),
+    }
+  }
+
+  return { person: found, errorResponse: null }
 }
 
 // ── GET ───────────────────────────────────────────────────────────────────────
@@ -119,11 +163,38 @@ export async function PATCH(
       )
     }
 
-    const { amount, ...rest } = parsed.data
+    const { amount, personId, person: submittedPerson, ...rest } = parsed.data
+
+    // ── personId ownership check ───────────────────────────────────────────
+    // personId present in body → validate + refresh embedded person fields
+    // personId explicitly absent (not in body at all) → leave existing link
+    if (personId !== undefined) {
+      const { person: linkedPerson, errorResponse } = await resolvePersonId(personId, userId)
+      if (errorResponse) return errorResponse
+
+      if (linkedPerson) {
+        // Refresh embedded sub-document from the live People record
+        record.personId = linkedPerson._id as mongoose.Types.ObjectId
+        record.person = {
+          name:             linkedPerson.name,
+          phone:            linkedPerson.phone,
+          email:            linkedPerson.email,
+          linkedLifeFlowId: linkedPerson.linkedLifeFlowId,
+        }
+      }
+    } else if (submittedPerson) {
+      // No personId in this PATCH — update embedded fields directly if provided
+      record.person = { ...record.person, ...submittedPerson }
+    }
+
+    // Apply remaining scalar fields
     const updateData: Record<string, unknown> = { ...rest }
     if (amount !== undefined) {
       updateData.originalAmountMinor = rupeesToPaise(amount)
     }
+    // Remove person/personId from rest since we handled them above
+    delete updateData.person
+    delete updateData.personId
 
     Object.assign(record, updateData)
 

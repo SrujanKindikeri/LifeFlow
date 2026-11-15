@@ -7,7 +7,7 @@ import {
   LayoutDashboard, CheckSquare, Flame, Wallet,
   MoreHorizontal, StickyNote, BarChart3, Bell, User, LogOut,
   FolderOpen, Calendar, Activity, PiggyBank,
-  Users, TrendingUp, CreditCard, BarChart2, BookOpen,
+  Users, TrendingUp, CreditCard, BarChart2, BookOpen, Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect, useRef } from 'react'
@@ -23,6 +23,7 @@ const mainNav = [
 const moreNav = [
   { href: '/app/notes',            icon: StickyNote,  label: 'Notes'            },
   { href: '/app/projects',         icon: FolderOpen,   label: 'Projects'         },
+  { href: '/app/invitations',      icon: Mail,         label: 'Invitations'      },
   { href: '/app/drafts',           icon: BookOpen,     label: 'Drafts'           },
   { href: '/app/subscriptions',    icon: CreditCard,   label: 'Subscriptions'    },
   { href: '/app/savings',          icon: PiggyBank,    label: 'Savings'          },

@@ -4,6 +4,7 @@ import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import { noteSchema } from '@/lib/validations'
 import Note from '@/models/Note'
+import { trackSuccess, trackFailure } from '@/lib/moduleEvents'
 
 export async function GET(req: NextRequest) {
   try {
@@ -46,18 +47,24 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
+  let userId = '', lifeFlowId = ''
   try {
-    const { userId, lifeFlowId } = await requireAuth()
+    ;({ userId, lifeFlowId } = await requireAuth())
     const body = await req.json()
 
     const parsed = noteSchema.safeParse(body)
     if (!parsed.success) {
+      trackFailure({ userId, publicId: lifeFlowId, module: 'notes', operation: 'validation_failed', httpStatus: 400 },
+        new Error(parsed.error.issues[0].message), 400)
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
     }
 
     await connectDB()
 
     const note = await Note.create({ ...parsed.data, userId, lifeFlowId })
+
+    trackSuccess({ userId, publicId: lifeFlowId, module: 'notes', operation: 'create', httpStatus: 201, durationMs: Date.now() - t0 })
 
     return NextResponse.json(
       {
@@ -79,6 +86,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    if (userId) trackFailure({ userId, publicId: lifeFlowId, module: 'notes', operation: 'save_failed', httpStatus: 500 }, error, 500)
     console.error('[notes POST]', error)
     return NextResponse.json({ error: 'Failed to create note' }, { status: 500 })
   }

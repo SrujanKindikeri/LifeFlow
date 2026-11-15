@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/db'
 import { requireAuth } from '@/lib/session'
 import { taskSchema } from '@/lib/validations'
 import Task from '@/models/Task'
+import { trackSuccess, trackFailure } from '@/lib/moduleEvents'
 
 export async function GET(req: NextRequest) {
   try {

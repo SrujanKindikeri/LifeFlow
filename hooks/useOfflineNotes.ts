@@ -55,7 +55,7 @@ export function useOfflineNotes({
     if (typeof window === 'undefined' || !clientUserId) return
     try {
       const db  = getOfflineDB()
-      let query = db.notes.where('clientUserId').equals(clientUserId)
+      const query = db.notes.where('clientUserId').equals(clientUserId)
 
       const all = await query.toArray()
 

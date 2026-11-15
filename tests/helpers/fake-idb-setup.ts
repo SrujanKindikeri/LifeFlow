@@ -175,7 +175,7 @@ afterEach(async () => {
       db.conflicts.clear(),
     ])
     // Reset singleton so the next test's beforeEach gets a fresh instance
-    // @ts-expect-error
+    // @ts-expect-error — resetting private module singleton between tests
     offlineModule['_db'] = null
   } catch { /* DB not yet opened or already nulled */ }
 })

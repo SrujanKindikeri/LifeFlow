@@ -101,6 +101,18 @@ export type ScheduledNotificationType =
    * Only sent for active subscriptions; skipped for paused/cancelled.
    */
   | 'SUBSCRIPTION_RENEWAL'
+  /**
+   * Morning Daily Intelligence briefing.
+   * Key format: "<userId>:MORNING_INTELLIGENCE:<YYYY-MM-DD>"
+   * Sent at the user's configured morning intelligence time.
+   */
+  | 'MORNING_INTELLIGENCE'
+  /**
+   * Evening Daily Intelligence briefing.
+   * Key format: "<userId>:EVENING_INTELLIGENCE:<YYYY-MM-DD>"
+   * Sent at the user's configured evening intelligence time.
+   */
+  | 'EVENING_INTELLIGENCE'
 
 export type NotificationDeliveryStatus =
   | 'pending'
@@ -182,7 +194,7 @@ export interface INotificationLog extends Document {
 
 const NotificationLogSchema = new Schema<INotificationLog>(
   {
-    key:    { type: String, required: true },
+    key:    { type: String, required: true, unique: true },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type:   {
       type: String,
@@ -201,6 +213,8 @@ const NotificationLogSchema = new Schema<INotificationLog>(
         'NOTE_REMINDER',
         'PROJECT_DEADLINE',
         'SUBSCRIPTION_RENEWAL',
+        'MORNING_INTELLIGENCE',
+        'EVENING_INTELLIGENCE',
       ],
       required: true,
     },

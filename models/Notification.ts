@@ -1,6 +1,6 @@
 import mongoose, { Document, Model, Schema } from 'mongoose'
 
-export type NotificationType = 'habit' | 'task' | 'expense' | 'general' | 'reminder'
+export type NotificationType = 'habit' | 'task' | 'expense' | 'general' | 'reminder' | 'support' | 'project'
 
 export interface INotification extends Document {
   _id: mongoose.Types.ObjectId
@@ -23,7 +23,7 @@ const NotificationSchema = new Schema<INotification>(
     message: { type: String, required: true, trim: true, maxlength: 500 },
     type: {
       type: String,
-      enum: ['habit', 'task', 'expense', 'general', 'reminder'],
+      enum: ['habit', 'task', 'expense', 'general', 'reminder', 'support', 'project'],
       default: 'general',
     },
     read: { type: Boolean, default: false },

@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
             data: data ?? existing.data,
           },
         },
-        { new: true }
+        { returnDocument: 'after' }
       ).lean()
       return NextResponse.json({ draft: serializeDraft(updated!) })
     }

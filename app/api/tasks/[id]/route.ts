@@ -25,7 +25,7 @@ export async function PATCH(
     const task = await Task.findOneAndUpdate(
       { _id: id, userId },
       { $set: update },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!task) {

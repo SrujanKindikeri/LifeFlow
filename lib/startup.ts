@@ -75,6 +75,23 @@ export async function runStartup(): Promise<void> {
       // Ensure all MongoDB indexes are present
       await ensureIndexes()
 
+      // Reconcile the registration counter with the actual User collection.
+      // This is a no-op when the counter is already accurate, and corrects
+      // any drift caused by direct DB edits, bulk imports, or old code paths
+      // that created/deleted users before this counter existed.
+      // Non-fatal — a sync failure must never block application startup.
+      try {
+        const { connectDB } = await import('@/lib/db')
+        await connectDB()
+        const { syncRegistrationCounter } = await import('@/models/RegistrationCounter')
+        const count = await syncRegistrationCounter()
+        logger.info('[startup] Registration counter synced', { activeUsers: count })
+      } catch (counterErr) {
+        logger.warn('[startup] Registration counter sync failed (non-fatal)', {
+          errorMessage: counterErr instanceof Error ? counterErr.message : String(counterErr),
+        })
+      }
+
       logger.info('[startup] Startup tasks complete')
     } catch (err) {
       logger.error('[startup] Startup task failed', {

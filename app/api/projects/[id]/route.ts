@@ -6,6 +6,7 @@ import Task from '@/models/Task'
 import Note from '@/models/Note'
 import Goal from '@/models/Goal'
 import Activity from '@/models/Activity'
+import { resolveProjectAccess, isMember, isOwner } from '@/lib/projectPermissions'
 import { z } from 'zod'
 
 const updateSchema = z.object({
@@ -25,28 +26,40 @@ export async function GET(
     const { id } = await params
     await connectDB()
 
-    const project = await Project.findOne({ _id: id, userId }).lean()
+    const { role, project: pAccess } = await resolveProjectAccess(id, userId)
+
+    if (!isMember(role) || !pAccess) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+
+    const project = await Project.findById(id).lean()
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
+    // Members only see tasks/notes/goals that belong to the project owner
+    // (personal records of other members are not exposed here)
+    const ownerUserId = project.userId
+
     const [tasks, notes, goals] = await Promise.all([
-      Task.find({ userId, projectId: id }).sort({ createdAt: -1 }).lean(),
-      Note.find({ userId, projectId: id }).sort({ updatedAt: -1 }).lean(),
-      Goal.find({ userId, projectId: id }).sort({ createdAt: -1 }).lean(),
+      Task.find({ userId: ownerUserId, projectId: id }).sort({ createdAt: -1 }).lean(),
+      Note.find({ userId: ownerUserId, projectId: id }).sort({ updatedAt: -1 }).lean(),
+      Goal.find({ userId: ownerUserId, projectId: id }).sort({ createdAt: -1 }).lean(),
     ])
 
     return NextResponse.json({
       project: {
-        _id:         project._id.toString(),
-        userId:      project.userId.toString(),
-        title:       project.title,
-        description: project.description,
-        status:      project.status,
-        dueDate:     project.dueDate,
-        color:       project.color,
-        createdAt:   project.createdAt.toISOString(),
-        updatedAt:   project.updatedAt.toISOString(),
+        _id:                  project._id.toString(),
+        userId:               project.userId.toString(),
+        title:                project.title,
+        description:          project.description,
+        status:               project.status,
+        dueDate:              project.dueDate,
+        color:                project.color,
+        collaborationEnabled: (project as { collaborationEnabled?: boolean }).collaborationEnabled ?? false,
+        role,
+        createdAt:            project.createdAt.toISOString(),
+        updatedAt:            project.updatedAt.toISOString(),
       },
       tasks: tasks.map((t) => ({
         _id:         t._id.toString(),
@@ -105,9 +118,9 @@ export async function PATCH(
     await connectDB()
 
     const project = await Project.findOneAndUpdate(
-      { _id: id, userId },
+      { _id: id, userId },   // only owner can edit project metadata
       { $set: parsed.data },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     if (!project) {

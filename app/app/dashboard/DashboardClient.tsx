@@ -25,6 +25,7 @@ import { DashboardCustomize } from '@/components/dashboard/DashboardCustomize'
 import { DailyBriefing } from '@/components/briefing/DailyBriefing'
 import { LifeFlowScore } from '@/components/score/LifeFlowScore'
 import { DraftsContinueSection } from '@/components/drafts/DraftsContinueSection'
+import { DailyIntelligenceCard } from '@/components/daily-intelligence/DailyIntelligenceCard'
 
 /* ── Animation variants ─────────────────────────────────────────────────── */
 const stagger: Variants = {
@@ -528,6 +529,13 @@ export function DashboardClient({ data }: Props) {
         return (
           <motion.div key="weeklyReview" variants={fadeUp}>
             <WeeklyReview data={data.weeklyReview} />
+          </motion.div>
+        )
+
+      case 'dailyIntelligence':
+        return (
+          <motion.div key="dailyIntelligence" variants={fadeUp}>
+            <DailyIntelligenceCard />
           </motion.div>
         )
 

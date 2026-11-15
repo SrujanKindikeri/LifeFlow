@@ -660,6 +660,17 @@ interface UserRecord {
    * Legacy documents default to false (safe: no emails until the user tests).
    */
   notificationsTested:     boolean
+  /**
+   * Daily Intelligence preferences — undefined for legacy users (safe default: disabled).
+   */
+  dailyIntelligence?: {
+    enabled:          boolean
+    morningTime:      string   // HH:MM
+    eveningTime:      string   // HH:MM
+    emailMorning:     boolean
+    emailEvening:     boolean
+    includeFinancial: boolean
+  }
 }
 
 /** Results for a single user's notification run. */
@@ -2757,6 +2768,323 @@ async function processSubscriptionRenewals(
   return { sent: sentCount }
 }
 
+// ─── Daily Intelligence morning briefing (user's morningTime, default 07:00) ──
+//
+// Generates a full Daily Intelligence briefing via briefingEngine and sends it
+// as an in-app notification. An email is also sent when:
+//   dailyIntelligence.enabled === true
+//   dailyIntelligence.emailMorning === true
+//   emailNotifications.enabled === true
+//   notificationsTested === true
+//   The generated briefing has hasContent === true
+//
+// The scheduled time is read from user.dailyIntelligence.morningTime (default '07:00').
+// Idempotency key: <userId>:MORNING_INTELLIGENCE:<YYYY-MM-DD>
+
+async function processDailyIntelligenceMorning(
+  user: UserRecord & {
+    dailyIntelligence?: {
+      enabled?: boolean
+      morningTime?: string
+      emailMorning?: boolean
+      includeFinancial?: boolean
+    }
+  },
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600
+): Promise<{ sent: boolean }> {
+  // Opt-in gate — off by default
+  if (!user.dailyIntelligence?.enabled) return { sent: false }
+
+  const tz          = user.timezone
+  const today       = dateInTimezone(now, tz)
+  const morningTime = user.dailyIntelligence?.morningTime ?? '07:00'
+
+  const targetUtc = localTimeToUtc(today, morningTime, tz)
+  if (!targetUtc) return { sent: false }
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  // Stale guard: never send a morning briefing more than 3 hours after its window
+  const staleCutoffMs = targetUtc.getTime() + 3 * 60 * 60 * 1000
+  if (now.getTime() > staleCutoffMs) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id,
+    'MORNING_INTELLIGENCE',
+    today,
+    '',
+    targetUtc,
+    'Daily Intelligence morning briefing'
+  )
+  if (alreadySent) return { sent: false }
+
+  // Generate (or retrieve cached) briefing
+  let briefing
+  try {
+    const { generateBriefing } = await import('@/lib/dailyIntelligence/briefingEngine')
+    const result = await generateBriefing({
+      userId:           user._id.toString(),
+      lifeFlowId:       user.publicId,
+      timezone:         tz,
+      type:             'morning',
+      includeFinancial: user.dailyIntelligence?.includeFinancial ?? true,
+      now,
+    })
+    briefing = result.briefing
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.warn('[notifScheduler] MORNING_INTELLIGENCE engine failed', {
+      userId: user._id.toString(),
+      errorMessage: msg,
+    })
+    await markNotificationFailed(user._id, 'MORNING_INTELLIGENCE', today, '', msg)
+    return { sent: false }
+  }
+
+  // Skip if nothing to report
+  if (!briefing.hasContent) {
+    await markNotificationSkipped(
+      user._id, 'MORNING_INTELLIGENCE', today, '', 'no content to report'
+    )
+    return { sent: false }
+  }
+
+  // Build summary for in-app
+  const taskCount  = briefing.content.todayTasks.length
+  const habitCount = briefing.content.todayHabits.filter((h) => !h.completedToday).length
+  const overdueCount = briefing.content.overdueTasks.length
+  const preview = [
+    taskCount    > 0 ? `${taskCount} task${taskCount > 1 ? 's' : ''} today` : null,
+    overdueCount > 0 ? `${overdueCount} overdue` : null,
+    habitCount   > 0 ? `${habitCount} habit${habitCount > 1 ? 's' : ''} to do` : null,
+  ].filter(Boolean).join(' · ')
+
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'MORNING_INTELLIGENCE', forDate: today },
+    { $set: { contentPreview: preview.slice(0, 200), status: 'processing' } }
+  ).catch(() => undefined)
+
+  // In-app notification (always)
+  await Notification.create({
+    userId:     user._id,
+    lifeFlowId: user.publicId,
+    title:      `Good morning! Your daily briefing is ready`,
+    message:    preview,
+    type:       'general',
+  }).catch((err: unknown) => {
+    logger.warn('[notifScheduler] MORNING_INTELLIGENCE in-app creation failed', {
+      userId: user._id.toString(),
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
+  })
+
+  // Email (when opted in)
+  const wantEmail =
+    (user.dailyIntelligence?.emailMorning ?? false) &&
+    user.notificationsTested &&
+    shouldSendEmail(user.emailNotifications, 'dailySummary', user.email)
+
+  let emailOk = false
+  if (wantEmail) {
+    try {
+      const { buildMorningIntelligenceEmail } = await import('@/lib/dailyIntelligence/emailTemplates')
+      const todayLabel = formatDateLabel(today, tz)
+      const emailContent = buildMorningIntelligenceEmail({
+        toName:     user.name,
+        todayLabel,
+        content:    briefing.content,
+        appUrl,
+      })
+
+      const notifier = await getNotificationService()
+      const result   = await notifier.send({
+        to:      user.email,
+        subject: emailContent.subject,
+        html:    emailContent.html,
+        text:    emailContent.text,
+      })
+
+      if (result.ok) {
+        emailOk = true
+        logger.info('[EMAIL] MORNING_INTELLIGENCE sent', { userId: user._id.toString(), messageId: result.messageId })
+      } else {
+        logger.warn('[EMAIL] MORNING_INTELLIGENCE failed', { userId: user._id.toString(), error: result.error })
+        await markNotificationFailed(user._id, 'MORNING_INTELLIGENCE', today, '', result.error ?? 'non-ok')
+        // In-app was created — partial success, fall through to markSent
+      }
+    } catch (err: unknown) {
+      const safe = err instanceof Error
+        ? err.message.replace(/pass(word)?[=:\s]+\S+/gi, '[REDACTED]')
+        : 'unexpected error'
+      logger.warn('[EMAIL] MORNING_INTELLIGENCE exception', { userId: user._id.toString(), error: safe })
+      await markNotificationFailed(user._id, 'MORNING_INTELLIGENCE', today, '', safe)
+    }
+  }
+
+  if (!wantEmail || emailOk) {
+    await markNotificationSent(user._id, 'MORNING_INTELLIGENCE', today)
+  }
+
+  logger.info('[notifScheduler] MORNING_INTELLIGENCE processed', {
+    userId:    user._id.toString(),
+    taskCount,
+    habitCount,
+    emailSent: emailOk,
+  })
+  return { sent: true }
+}
+
+// ─── Daily Intelligence evening review (user's eveningTime, default 19:00) ───
+//
+// Same pattern as morning but uses eveningTime and EVENING_INTELLIGENCE type.
+// Sent only when there are incomplete/overdue items remaining at send time.
+// Evening reviews are never stale beyond 4 hours after their window.
+
+async function processDailyIntelligenceEvening(
+  user: UserRecord & {
+    dailyIntelligence?: {
+      enabled?: boolean
+      eveningTime?: string
+      emailEvening?: boolean
+      includeFinancial?: boolean
+    }
+  },
+  now: Date,
+  appUrl: string,
+  graceSeconds = 3600
+): Promise<{ sent: boolean }> {
+  if (!user.dailyIntelligence?.enabled) return { sent: false }
+
+  const tz          = user.timezone
+  const today       = dateInTimezone(now, tz)
+  const eveningTime = user.dailyIntelligence?.eveningTime ?? '19:00'
+
+  const targetUtc = localTimeToUtc(today, eveningTime, tz)
+  if (!targetUtc) return { sent: false }
+  if (!isWithinGraceWindow(now, targetUtc, graceSeconds)) return { sent: false }
+
+  // Stale guard: 4 hours
+  const staleCutoffMs = targetUtc.getTime() + 4 * 60 * 60 * 1000
+  if (now.getTime() > staleCutoffMs) return { sent: false }
+
+  const alreadySent = await checkAndRecord(
+    user._id,
+    'EVENING_INTELLIGENCE',
+    today,
+    '',
+    targetUtc,
+    'Daily Intelligence evening review'
+  )
+  if (alreadySent) return { sent: false }
+
+  let briefing
+  try {
+    const { generateBriefing } = await import('@/lib/dailyIntelligence/briefingEngine')
+    const result = await generateBriefing({
+      userId:           user._id.toString(),
+      lifeFlowId:       user.publicId,
+      timezone:         tz,
+      type:             'evening',
+      includeFinancial: user.dailyIntelligence?.includeFinancial ?? true,
+      now,
+    })
+    briefing = result.briefing
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.warn('[notifScheduler] EVENING_INTELLIGENCE engine failed', {
+      userId: user._id.toString(), errorMessage: msg,
+    })
+    await markNotificationFailed(user._id, 'EVENING_INTELLIGENCE', today, '', msg)
+    return { sent: false }
+  }
+
+  if (!briefing.hasContent) {
+    await markNotificationSkipped(
+      user._id, 'EVENING_INTELLIGENCE', today, '', 'nothing incomplete to report'
+    )
+    return { sent: false }
+  }
+
+  const incompleteCount = briefing.content.todayTasks.length
+  const overdueCount    = briefing.content.overdueTasks.length
+  const preview = [
+    incompleteCount > 0 ? `${incompleteCount} incomplete task${incompleteCount > 1 ? 's' : ''}` : null,
+    overdueCount    > 0 ? `${overdueCount} overdue` : null,
+  ].filter(Boolean).join(' · ')
+
+  await NotificationLog.updateOne(
+    { userId: user._id, type: 'EVENING_INTELLIGENCE', forDate: today },
+    { $set: { contentPreview: preview.slice(0, 200), status: 'processing' } }
+  ).catch(() => undefined)
+
+  await Notification.create({
+    userId:     user._id,
+    lifeFlowId: user.publicId,
+    title:      `Evening check-in — items still open`,
+    message:    preview,
+    type:       'general',
+  }).catch((err: unknown) => {
+    logger.warn('[notifScheduler] EVENING_INTELLIGENCE in-app creation failed', {
+      userId: user._id.toString(),
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
+  })
+
+  const wantEmail =
+    (user.dailyIntelligence?.emailEvening ?? false) &&
+    user.notificationsTested &&
+    shouldSendEmail(user.emailNotifications, 'dailySummary', user.email)
+
+  let emailOk = false
+  if (wantEmail) {
+    try {
+      const { buildEveningIntelligenceEmail } = await import('@/lib/dailyIntelligence/emailTemplates')
+      const todayLabel  = formatDateLabel(today, tz)
+      const emailContent = buildEveningIntelligenceEmail({
+        toName:     user.name,
+        todayLabel,
+        content:    briefing.content,
+        appUrl,
+      })
+
+      const notifier = await getNotificationService()
+      const result   = await notifier.send({
+        to:      user.email,
+        subject: emailContent.subject,
+        html:    emailContent.html,
+        text:    emailContent.text,
+      })
+
+      if (result.ok) {
+        emailOk = true
+        logger.info('[EMAIL] EVENING_INTELLIGENCE sent', { userId: user._id.toString(), messageId: result.messageId })
+      } else {
+        logger.warn('[EMAIL] EVENING_INTELLIGENCE failed', { userId: user._id.toString(), error: result.error })
+        await markNotificationFailed(user._id, 'EVENING_INTELLIGENCE', today, '', result.error ?? 'non-ok')
+      }
+    } catch (err: unknown) {
+      const safe = err instanceof Error
+        ? err.message.replace(/pass(word)?[=:\s]+\S+/gi, '[REDACTED]')
+        : 'unexpected error'
+      logger.warn('[EMAIL] EVENING_INTELLIGENCE exception', { userId: user._id.toString(), error: safe })
+      await markNotificationFailed(user._id, 'EVENING_INTELLIGENCE', today, '', safe)
+    }
+  }
+
+  if (!wantEmail || emailOk) {
+    await markNotificationSent(user._id, 'EVENING_INTELLIGENCE', today)
+  }
+
+  logger.info('[notifScheduler] EVENING_INTELLIGENCE processed', {
+    userId:    user._id.toString(),
+    incompleteCount,
+    overdueCount,
+    emailSent: emailOk,
+  })
+  return { sent: true }
+}
+
 // ─── Legacy no-ops ────────────────────────────────────────────────────────────
 
 async function processTomorrowTasks(
@@ -2845,6 +3173,10 @@ async function processUser(
   await runMulti(processProjectDeadlines)
   await runMulti(processSubscriptionRenewals)
 
+  // Daily Intelligence briefings (opt-in, user.dailyIntelligence.enabled)
+  await run(processDailyIntelligenceMorning as typeof processMorningBrief)
+  await run(processDailyIntelligenceEvening as typeof processMorningBrief)
+
   // Legacy no-ops
   await run(processTomorrowTasks)
   await run(processTomorrowHabits)
@@ -2860,6 +3192,12 @@ export interface NotificationSchedulerResult {
   totalSkipped:   number
   errors:         string[]
   durationMs:     number
+  /**
+   * true when the run was skipped because notification_scheduler_enabled=false.
+   * Consumers (admin UI, monitoring) should distinguish "ran and sent nothing"
+   * from "explicitly disabled" using this flag.
+   */
+  schedulerDisabled?: boolean
 }
 
 /**
@@ -2886,6 +3224,42 @@ export async function runNotificationScheduler(
     durationMs:     0,
   }
 
+  // ── notification_scheduler_enabled gate ──────────────────────────────────
+  // Check the master scheduler switch before doing ANY work.
+  // This is the authoritative enforcement point — checked here so it applies
+  // regardless of which endpoint (hourly, precise, manual) calls this function.
+  //
+  // Failure policy: if the setting cannot be read (DB outage), default to
+  // false (disabled) — skip notifications rather than risk duplicate sends
+  // from stale state.  The SAFE_DEFAULT in lib/settings.ts documents this.
+  //
+  // Manual test emails (sent via /api/admin/notifications/test) bypass this
+  // function entirely and call the notification provider directly — they are
+  // NOT affected by this switch.  That is intentional and documented: the
+  // master switch controls scheduled/automated delivery only.
+  try {
+    const { isNotificationSchedulerEnabled } = await import('@/lib/settings')
+    const enabled = await isNotificationSchedulerEnabled()
+    if (!enabled) {
+      result.durationMs = Date.now() - t0
+      result.schedulerDisabled = true
+      logger.info('[notifScheduler] Skipped — notification_scheduler_enabled is false', {
+        durationMs: result.durationMs,
+        graceSeconds,
+      })
+      return result
+    }
+  } catch (settingsErr) {
+    // Settings read failed — fail safe (skip this run)
+    result.durationMs = Date.now() - t0
+    result.schedulerDisabled = true
+    logger.warn('[notifScheduler] Skipped — could not read notification_scheduler_enabled setting', {
+      errorMessage: settingsErr instanceof Error ? settingsErr.message : String(settingsErr),
+      durationMs:   result.durationMs,
+    })
+    return result
+  }
+
   await connectDB()
 
   const appUrl = getAppUrl()
@@ -2910,7 +3284,7 @@ export async function runNotificationScheduler(
       { 'emailNotifications.enabled': true },
     ],
   })
-    .select('publicId name email timezone notificationPreferences emailNotifications notificationsTested')
+    .select('publicId name email timezone notificationPreferences emailNotifications notificationsTested dailyIntelligence')
     .lean<UserRecord[]>()
 
   logger.info('[notifScheduler] Starting run', {
