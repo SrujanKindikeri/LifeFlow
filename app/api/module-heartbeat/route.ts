@@ -62,18 +62,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── Parse body ────────────────────────────────────────────────────────────
-  let module: string
+  let moduleName: string
   let sessionId: string
   try {
     const body = await req.json()
-    module    = typeof body?.module    === 'string' ? body.module.trim()    : ''
-    sessionId = typeof body?.sessionId === 'string' ? body.sessionId.trim() : ''
+    moduleName = typeof body?.module    === 'string' ? body.module.trim()    : ''
+    sessionId  = typeof body?.sessionId === 'string' ? body.sessionId.trim() : ''
   } catch {
     return new NextResponse(null, { status: 204 })
   }
 
   // ── Validate ──────────────────────────────────────────────────────────────
-  if (!MODULE_NAMES.includes(module as ModuleName)) {
+  if (!MODULE_NAMES.includes(moduleName as ModuleName)) {
     return new NextResponse(null, { status: 204 })
   }
   if (!UUID_RE.test(sessionId)) {
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { userId: new mongoose.Types.ObjectId(user.userId), sessionId },
       {
         $set: {
-          module,
+          module: moduleName,
           lastSeenAt: now,
         },
         $setOnInsert: {

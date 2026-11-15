@@ -1,22 +1,38 @@
+'use client'
+
 /**
  * InlineScript — renders a <script dangerouslySetInnerHTML> inline.
  *
  * WHY THIS EXISTS
  * ───────────────
  * React 19 throws "Encountered a script tag while rendering React component"
- * when a <script> element appears in the client-side virtual DOM. The fix
- * documented in the Next.js 16 App Router "Preventing Flash Before Hydration"
- * guide is to set:
+ * when a <script> element with type="text/javascript" appears in the
+ * client-side virtual DOM. The fix documented in the Next.js 16 App Router
+ * "Preventing Flash Before Hydration" guide is:
  *
  *   type="text/javascript"  on the server (script runs during HTML parsing)
  *   type="text/plain"       on the client (React ignores it; never executes)
  *
- * This component is a thin wrapper that performs that switch transparently.
- * The Server Component layout imports this and passes the inline script string
- * as the `html` prop. Because this file has no 'use client' directive, it is
- * treated as a shared (isomorphic) component — it renders on the server as
- * type="text/javascript" and React reconciles it on the client as
- * type="text/plain", suppressing the hydration mismatch on that one attribute.
+ * WHY 'use client' IS REQUIRED HERE
+ * ──────────────────────────────────
+ * The Next.js docs show InlineScript without 'use client' — but only because
+ * in that example it is used inside a Client Component (LocalDate), which
+ * re-evaluates the ternary at client render time.
+ *
+ * In this app, InlineScript is used directly from app/layout.tsx, which is a
+ * Server Component. Without 'use client', the RSC renderer evaluates
+ * `typeof window === 'undefined'` server-side → always true → serializes
+ * type="text/javascript" into the RSC payload. When React reconciles that
+ * payload on the client and creates the DOM node, it sees type="text/javascript"
+ * → isScriptDataBlock() returns false → warning fires.
+ *
+ * Adding 'use client' makes the component run on the client where
+ * `typeof window !== 'undefined'` → type="text/plain" → isScriptDataBlock()
+ * returns true → no warning. On hard navigation the server still renders
+ * type="text/javascript" in the HTML (the SSR pass evaluates the ternary
+ * server-side, same as before). On soft navigation React renders
+ * type="text/plain" and skips execution — ThemeProvider handles theme
+ * re-application via useLayoutEffect on those navigations.
  *
  * suppressHydrationWarning is required because the type attribute differs
  * between the server-rendered HTML and the client React element.

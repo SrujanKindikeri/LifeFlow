@@ -42,7 +42,7 @@ import { resolveProjectAccess } from '@/lib/projectPermissions'
 import { createNotificationForUser } from '@/lib/createNotification'
 import { generateVerificationToken } from '@/lib/auth/crypto'
 import { hashToken } from '@/lib/auth/crypto'
-import { checkRateLimit } from '@/lib/auth/rate-limit'
+import { checkRateLimit, checkInvitationSendLimit } from '@/lib/auth/rate-limit'
 import { buildProjectInvitationEmail } from '@/lib/auth/email-templates'
 
 // ─── Test lifecycle ───────────────────────────────────────────────────────────
@@ -657,7 +657,6 @@ describe('Project Collaboration', () => {
   // ── Rate limiter tests ────────────────────────────────────────────────────
 
   it('Rate limiter allows up to the limit then blocks', () => {
-    const { checkInvitationSendLimit } = require('@/lib/auth/rate-limit')
     const userId = 'test-rate-user-' + Date.now()
 
     // Allow first request (uses 1 of 1 in 5-second window)

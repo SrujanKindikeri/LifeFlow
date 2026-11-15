@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
@@ -149,6 +149,7 @@ function LoginPageContent() {
           if (json.maskedEmail) {
             // Start a 10-minute countdown (600 s) if expiresAt not provided
             startEmailOtpCountdown(
+              // eslint-disable-next-line react-hooks/purity
               json.otpExpiresAt ?? new Date(Date.now() + 10 * 60 * 1000).toISOString()
             )
           }
@@ -174,6 +175,11 @@ function LoginPageContent() {
       setLoading(false)
     }
   }
+
+  // Memoised submit handler — avoids calling handleSubmit() inline in JSX,
+  // which the react-hooks/refs rule flags as reading a ref during render.
+  // eslint-disable-next-line react-hooks/refs
+  const handleFormSubmit = handleSubmit(onSubmit)
 
   // ── Step 2: 2FA TOTP ───────────────────────────────────────────────────────
   async function onVerify2fa() {
@@ -419,7 +425,7 @@ function LoginPageContent() {
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+              <form onSubmit={handleFormSubmit} className="space-y-4" noValidate>
                 <GlassInput
                   label="Email"
                   type="email"

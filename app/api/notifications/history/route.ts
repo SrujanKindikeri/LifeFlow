@@ -125,11 +125,11 @@ export async function GET(req: NextRequest) {
     const skip     = (page - 1) * limit
 
     // ── Filters ──────────────────────────────────────────────────────────────
-    const type    = searchParams.get('type')
-    const status  = searchParams.get('status')
-    const since   = searchParams.get('since')
-    const channel = searchParams.get('channel')
-    const module  = searchParams.get('module')
+    const type       = searchParams.get('type')
+    const status     = searchParams.get('status')
+    const since      = searchParams.get('since')
+    const channel    = searchParams.get('channel')
+    const moduleName = searchParams.get('module')
 
     // Build query — always scoped to authenticated user
     const query: Record<string, unknown> = { userId }
@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
     }
     // module=notes|tasks|habits|projects|expenses|subscriptions|general
     // Translate module name to the set of type values it covers
-    if (module) {
+    if (moduleName) {
       const moduleTypeMap: Record<string, string[]> = {
         tasks:         ['TASK_DUE_SOON', 'TASK_INCOMPLETE_TODAY', 'TASK_TOMORROW'],
         habits:        ['HABIT_REMINDER', 'HABIT_TOMORROW'],
@@ -157,7 +157,7 @@ export async function GET(req: NextRequest) {
         subscriptions: ['SUBSCRIPTION_RENEWAL'],
         general:       ['MORNING_BRIEF', 'DAILY_SUMMARY', 'WEEKLY_SUMMARY'],
       }
-      const types = moduleTypeMap[module.toLowerCase()]
+      const types = moduleTypeMap[moduleName.toLowerCase()]
       if (types && types.length > 0) {
         query.type = { $in: types }
       }
