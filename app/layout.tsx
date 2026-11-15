@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { ToastProvider } from '@/components/ui/Toast'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
-import { InlineScript } from '@/components/ui/InlineScript'
 
 export const metadata: Metadata = {
   title: 'LifeFlow — Personal Daily Dashboard',
@@ -28,12 +27,15 @@ export const viewport: Viewport = {
  * Theme initialisation script — placed in <head> so it runs synchronously
  * during HTML parsing, before the first paint.
  *
- * Uses InlineScript (components/ui/InlineScript.tsx) which sets
- * type="text/javascript" on the server and type="text/plain" on the client,
- * following the Next.js 16 "Preventing Flash Before Hydration" guide pattern.
- * This prevents React 19's "Encountered a script tag while rendering" warning
- * and avoids the module-resolution race that caused the
- * "Element type is invalid. Received a promise" error from next/script.
+ * Rendered as a plain <script dangerouslySetInnerHTML> directly in the layout
+ * (no wrapper component). This follows the Next.js 16 "Preventing Flash Before
+ * Hydration" guide pattern for the themes section, which places the script
+ * directly in the layout rather than via a wrapper component, avoiding the
+ * React 19 "Encountered a script tag while rendering" warning that fires when
+ * React sees a <script> element rendered by a child component.
+ *
+ * suppressHydrationWarning on <html> covers the data-theme / data-night-shift
+ * attributes that the script writes before hydration.
  *
  * Reads lf_appearance from localStorage and sets data-theme / data-night-shift
  * on <html> before any content is painted.
@@ -84,7 +86,7 @@ const THEME_INIT_SCRIPT = `(function(){
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // suppressHydrationWarning is intentional and scoped to <html> only.
-    // The InlineScript below runs synchronously before React hydration and
+    // The inline script below runs synchronously before React hydration and
     // writes data-theme / data-night-shift onto <html>. The server renders
     // neither attribute (it has no access to the user's localStorage), so
     // React would otherwise report a mismatch.
@@ -95,14 +97,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <head>
         {/*
-          InlineScript renders type="text/javascript" on the server (runs during
-          HTML parsing before first paint) and type="text/plain" on the client
-          (React ignores it, preventing the React 19 script-tag warning).
-          suppressHydrationWarning on the <script> element handles the type
-          attribute mismatch between SSR and CSR.
+          Direct inline script: runs synchronously during HTML parsing before
+          first paint, setting data-theme / data-night-shift on <html>.
+          Placed directly in the layout (not via a wrapper component) so React
+          does not see a <script> element rendered by a child component, which
+          is what triggers React 19's "Encountered a script tag" warning.
+          suppressHydrationWarning on <html> handles the attribute mismatch.
           See: node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md
         */}
-        <InlineScript html={THEME_INIT_SCRIPT} />
+        <script
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+          suppressHydrationWarning
+        />
       </head>
       <body>
         <ThemeProvider>
