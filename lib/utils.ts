@@ -23,12 +23,18 @@ export function formatDate(dateStr: string): string {
 }
 
 export function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
+  if (!dateStr) return '—'
+  const trimmed = typeof dateStr === 'string' ? dateStr.trim() : String(dateStr).trim()
+  if (!trimmed || trimmed === '0' || trimmed === 'undefined' || trimmed === 'null' || trimmed === 'NaN' || trimmed === 'Invalid Date') {
+    return '—'
+  }
+  const date = new Date(trimmed)
   // Guard: new Date('') or new Date(undefined-coerced string) returns Invalid Date.
   // Return a safe fallback rather than crashing with NaN arithmetic downstream.
   if (isNaN(date.getTime())) return '—'
   const now = new Date()
   const diff = now.getTime() - date.getTime()
+  if (diff < 0) return 'just now'
 
   const mins = Math.floor(diff / 60000)
   const hours = Math.floor(diff / 3600000)
@@ -39,7 +45,7 @@ export function formatRelativeTime(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`
   if (days === 1) return 'yesterday'
   if (days < 7) return `${days}d ago`
-  return formatDate(dateStr)
+  return formatDate(trimmed)
 }
 
 export function getTodayString(): string {

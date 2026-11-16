@@ -16,7 +16,7 @@ export interface ITask extends Document {
   dueTime?: string
   recurring: TaskRecurring
   /** Optional project association */
-  projectId?: mongoose.Types.ObjectId
+  projectId?: mongoose.Types.ObjectId | string | null
   /** Monotonically-increasing revision counter — incremented on every sync write. */
   serverRevision: number
   /** MutationId of the last accepted sync mutation — used as an idempotency key. */

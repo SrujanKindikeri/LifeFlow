@@ -15,7 +15,7 @@ export async function PATCH(
     await connectDB()
 
     // Only allow updating fields that make sense for a PATCH
-    const allowedFields = ['completed', 'title', 'description', 'priority', 'dueDate', 'dueTime', 'recurring']
+    const allowedFields = ['completed', 'title', 'description', 'priority', 'dueDate', 'dueTime', 'recurring', 'projectId']
     const update: Record<string, unknown> = {}
     for (const key of allowedFields) {
       if (key in body) update[key] = body[key]
@@ -43,6 +43,7 @@ export async function PATCH(
         dueDate: task.dueDate,
         dueTime: task.dueTime,
         recurring: task.recurring,
+        projectId: task.projectId?.toString() ?? null,
         createdAt: task.createdAt.toISOString(),
         updatedAt: task.updatedAt.toISOString(),
       },

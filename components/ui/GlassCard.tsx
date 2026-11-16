@@ -1,6 +1,6 @@
 'use client'
 
-import { motion, HTMLMotionProps } from 'framer-motion'
+import { motion, type HTMLMotionProps } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
 type PaddingSize = 'none' | 'xs' | 'sm' | 'md' | 'lg'
@@ -69,3 +69,5 @@ export function GlassCard({
     </motion.div>
   )
 }
+
+export default GlassCard

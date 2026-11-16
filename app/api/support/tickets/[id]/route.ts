@@ -93,7 +93,7 @@ function serializeTicketFull(t: Record<string, unknown>) {
   }
 }
 
-export function serializeMessage(m: Record<string, unknown>) {
+function serializeMessage(m: Record<string, unknown>) {
   return {
     _id:        String(m._id),
     ticketId:   String(m.ticketId),

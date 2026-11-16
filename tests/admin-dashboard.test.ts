@@ -44,8 +44,8 @@ import { formatRelativeTime } from '@/lib/utils'
 function normaliseWorkerStatus(raw: unknown): 'RUNNING' | 'POSSIBLY_STOPPED' | 'NO_ACTIVITY_YET' {
   if (typeof raw !== 'string' || raw.trim() === '') return 'NO_ACTIVITY_YET'
   const upper = raw.trim().toUpperCase()
-  if (upper === 'RUNNING' || upper.startsWith('RUNNING'))                   return 'RUNNING'
-  if (upper === 'POSSIBLY_STOPPED' || upper.startsWith('POSSIBLY_STOPPED')) return 'POSSIBLY_STOPPED'
+  if (upper === 'RUNNING' || /^RUNNING[\s(]/.test(upper))                   return 'RUNNING'
+  if (upper === 'POSSIBLY_STOPPED' || /^POSSIBLY_STOPPED[\s(]/.test(upper)) return 'POSSIBLY_STOPPED'
   return 'NO_ACTIVITY_YET'
 }
 

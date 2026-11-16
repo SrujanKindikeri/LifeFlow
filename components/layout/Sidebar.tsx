@@ -115,7 +115,7 @@ export function Sidebar() {
         setUserAvatar(d.user.avatar ?? null)
       })
       .catch(() => {})
-  }, [pathname])
+  }, [])
 
   // Fetch draft count for the badge
   useEffect(() => {

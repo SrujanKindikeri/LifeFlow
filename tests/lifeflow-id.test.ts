@@ -394,7 +394,7 @@ describe('12. User A cannot update User B\'s records', () => {
     const result = await Note.findOneAndUpdate(
       { _id: bNote._id, userId: a._id },  // ownership check uses A's userId
       { $set: { title: 'Hacked' } },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     expect(result).toBeNull()
@@ -536,7 +536,7 @@ describe('15. Client cannot change lifeFlowId', () => {
     const updated = await Person.findOneAndUpdate(
       { _id: person._id, userId: user._id },
       { $set: { name: 'Alice Updated', linkedLifeFlowId: 'LF-EXTERNAL1' } },
-      { new: true }
+      { returnDocument: 'after' }
     )
 
     // Ownership lifeFlowId is preserved

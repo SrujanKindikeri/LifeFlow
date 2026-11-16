@@ -50,6 +50,9 @@ import { buildProjectInvitationEmail } from '@/lib/auth/email-templates'
 beforeAll(async () => {
   // Set required env vars so SmtpProvider constructor doesn't throw during import
   process.env.EMAIL_PROVIDER = 'none'
+  if (!process.env.SESSION_SECRET) {
+    process.env.SESSION_SECRET = 'test-session-secret-at-least-32-chars-long-for-tests!!'
+  }
   await startDb()
 })
 
@@ -255,7 +258,7 @@ describe('Project Collaboration', () => {
     const updated = await ProjectInvitation.findOneAndUpdate(
       { _id: found!._id, status: 'pending' },
       { $set: { status: 'accepted', tokenHash: null, respondedAt: new Date() } },
-      { new: true },
+      { returnDocument: 'after' },
     )
     expect(updated!.status).toBe('accepted')
     expect(updated!.tokenHash).toBeNull()
@@ -541,12 +544,12 @@ describe('Project Collaboration', () => {
       ProjectInvitation.findOneAndUpdate(
         { _id: invitation._id, status: 'pending' },
         { $set: { status: 'accepted', tokenHash: null, respondedAt: new Date() } },
-        { new: true },
+        { returnDocument: 'after' },
       ),
       ProjectInvitation.findOneAndUpdate(
         { _id: invitation._id, status: 'pending' },
         { $set: { status: 'accepted', tokenHash: null, respondedAt: new Date() } },
-        { new: true },
+        { returnDocument: 'after' },
       ),
     ])
 

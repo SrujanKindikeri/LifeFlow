@@ -194,7 +194,7 @@ export interface INotificationLog extends Document {
 
 const NotificationLogSchema = new Schema<INotificationLog>(
   {
-    key:    { type: String, required: true, unique: true },
+    key:    { type: String, required: true },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type:   {
       type: String,

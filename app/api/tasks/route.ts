@@ -13,10 +13,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const date = searchParams.get('date')
     const completed = searchParams.get('completed')
+    const projectId = searchParams.get('projectId')
 
     const query: Record<string, unknown> = { userId }
     if (date) query.dueDate = date
     if (completed !== null) query.completed = completed === 'true'
+    if (projectId) query.projectId = projectId
 
     const tasks = await Task.find(query).sort({ priority: -1, createdAt: -1 }).lean()
 
@@ -31,6 +33,7 @@ export async function GET(req: NextRequest) {
         dueDate: t.dueDate,
         dueTime: t.dueTime,
         recurring: t.recurring,
+        projectId: t.projectId?.toString() ?? null,
         createdAt: t.createdAt.toISOString(),
         updatedAt: t.updatedAt.toISOString(),
       })),
@@ -70,6 +73,7 @@ export async function POST(req: NextRequest) {
           dueDate: task.dueDate,
           dueTime: task.dueTime,
           recurring: task.recurring,
+          projectId: task.projectId?.toString() ?? null,
           createdAt: task.createdAt.toISOString(),
           updatedAt: task.updatedAt.toISOString(),
         },

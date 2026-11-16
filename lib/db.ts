@@ -200,8 +200,13 @@ const CONNECTION_OPTIONS: mongoose.ConnectOptions = {
  * @throws {Error} with a descriptive message if the connection fails.
  */
 export async function connectDB(): Promise<typeof mongoose> {
-  // Return cached connection if available
-  if (cached.conn) {
+  // Return cached connection if available and still connected
+  if (cached.conn && mongoose.connection.readyState === 1) {
+    return cached.conn
+  }
+  // If mongoose is already connected externally (e.g. in tests via startDb)
+  if (mongoose.connection.readyState === 1) {
+    cached.conn = mongoose
     return cached.conn
   }
 
@@ -260,7 +265,9 @@ export async function connectDB(): Promise<typeof mongoose> {
         })
 
         conn.on('disconnected', () => {
-          logger.warn('[MongoDB] Disconnected — will reconnect on next request')
+          if (process.env.NODE_ENV !== 'test') {
+            logger.warn('[MongoDB] Disconnected — will reconnect on next request')
+          }
           cached.conn    = null
           cached.promise = null
         })

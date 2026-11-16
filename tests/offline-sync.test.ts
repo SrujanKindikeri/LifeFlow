@@ -519,9 +519,23 @@ describe('GET /api/sync/pull', () => {
 
   // ── D3: Pagination (hasMore + cursor) ────────────────────────────────────────
   it('D3 PASS — pagination returns hasMore and a cursor when records exceed limit', async () => {
-    // Insert 5 tasks
+    const db = mongoose.connection.db!
+    await Task.deleteMany({ userId })
+    // Insert 5 tasks with distinct timestamps bypassing Mongoose timestamps
+    const baseTime = Date.now()
     for (let i = 0; i < 5; i++) {
-      await Task.create({ userId, lifeFlowId: lfId, title: `Task ${i}`, priority: 'low', recurring: 'none' })
+      await db.collection('tasks').insertOne({
+        _id: new mongoose.Types.ObjectId(),
+        userId: new mongoose.Types.ObjectId(userId),
+        lifeFlowId: lfId,
+        title: `Task ${i}`,
+        priority: 'low',
+        recurring: 'none',
+        completed: false,
+        serverRevision: 0,
+        createdAt: new Date(baseTime + i * 1000),
+        updatedAt: new Date(baseTime + i * 1000),
+      })
     }
 
     const { body } = await callPull({ entityType: 'task', limit: '3' })

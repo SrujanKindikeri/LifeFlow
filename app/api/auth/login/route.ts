@@ -327,6 +327,3 @@ export async function POST(req: NextRequest) {
     )
   }
 }
-
-// Export TTL so verify-2fa route can reuse the same constant
-export { TWO_FA_PENDING_TTL_MS }

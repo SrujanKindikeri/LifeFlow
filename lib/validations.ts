@@ -51,6 +51,8 @@ export const noteSchema = z.object({
   tags: z.array(z.string()).optional().default([]),
   pinned: z.boolean().optional().default(false),
   archived: z.boolean().optional().default(false),
+  projectId: z.string().nullable().optional(),
+  reminderAt: z.coerce.date().nullable().optional(),
 })
 
 export const taskSchema = z.object({
@@ -60,6 +62,7 @@ export const taskSchema = z.object({
   dueDate: z.string().optional(),
   dueTime: z.string().optional(),
   recurring: z.enum(['none', 'daily', 'weekly', 'monthly']).default('none'),
+  projectId: z.string().nullable().optional(),
 })
 
 export const habitSchema = z.object({

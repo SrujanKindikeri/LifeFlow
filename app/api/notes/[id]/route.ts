@@ -13,6 +13,9 @@ function serializeNote(n: {
   tags: string[]
   pinned: boolean
   archived: boolean
+  projectId?: { toString(): string } | null
+  reminderAt?: Date | string | null
+  reminderSent?: boolean
   createdAt: Date
   updatedAt: Date
 }) {
@@ -24,6 +27,9 @@ function serializeNote(n: {
     tags: n.tags,
     pinned: n.pinned,
     archived: n.archived,
+    projectId: n.projectId ? n.projectId.toString() : null,
+    reminderAt: n.reminderAt ? (n.reminderAt instanceof Date ? n.reminderAt.toISOString() : new Date(String(n.reminderAt)).toISOString()) : null,
+    reminderSent: n.reminderSent ?? false,
     createdAt: n.createdAt.toISOString(),
     updatedAt: n.updatedAt.toISOString(),
   }
@@ -73,9 +79,20 @@ export async function PATCH(
 
     await connectDB()
 
+    const updateData: Record<string, unknown> = { ...parsed.data }
+    if (parsed.data.reminderAt !== undefined) {
+      if (parsed.data.reminderAt) {
+        updateData.reminderAt = new Date(parsed.data.reminderAt)
+        updateData.reminderSent = false
+      } else {
+        updateData.reminderAt = null
+        updateData.reminderSent = false
+      }
+    }
+
     const note = await Note.findOneAndUpdate(
       { _id: id, userId },
-      { $set: parsed.data },
+      { $set: updateData },
       { returnDocument: 'after' }
     )
 

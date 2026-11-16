@@ -33,6 +33,9 @@ export async function GET(req: NextRequest) {
         tags: n.tags,
         pinned: n.pinned,
         archived: n.archived,
+        projectId: n.projectId ? n.projectId.toString() : null,
+        reminderAt: n.reminderAt ? (n.reminderAt instanceof Date ? n.reminderAt.toISOString() : new Date(String(n.reminderAt)).toISOString()) : null,
+        reminderSent: n.reminderSent ?? false,
         createdAt: n.createdAt.toISOString(),
         updatedAt: n.updatedAt.toISOString(),
       })),
@@ -62,7 +65,16 @@ export async function POST(req: NextRequest) {
 
     await connectDB()
 
-    const note = await Note.create({ ...parsed.data, userId, lifeFlowId })
+    const noteData: Record<string, unknown> = { ...parsed.data, userId, lifeFlowId }
+    if (parsed.data.reminderAt) {
+      noteData.reminderAt = new Date(parsed.data.reminderAt)
+      noteData.reminderSent = false
+    } else if (parsed.data.reminderAt === null) {
+      noteData.reminderAt = null
+      noteData.reminderSent = false
+    }
+
+    const note = await Note.create(noteData)
 
     trackSuccess({ userId, publicId: lifeFlowId, module: 'notes', operation: 'create', httpStatus: 201, durationMs: Date.now() - t0 })
 
@@ -76,6 +88,9 @@ export async function POST(req: NextRequest) {
           tags: note.tags,
           pinned: note.pinned,
           archived: note.archived,
+          projectId: note.projectId ? note.projectId.toString() : null,
+          reminderAt: note.reminderAt ? (note.reminderAt instanceof Date ? note.reminderAt.toISOString() : new Date(String(note.reminderAt)).toISOString()) : null,
+          reminderSent: note.reminderSent ?? false,
           createdAt: note.createdAt.toISOString(),
           updatedAt: note.updatedAt.toISOString(),
         },

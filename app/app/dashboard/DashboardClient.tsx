@@ -940,3 +940,5 @@ export function DashboardClient({ data }: Props) {
     </>
   )
 }
+
+export default DashboardClient

@@ -105,7 +105,10 @@ vi.mock('@/lib/pushSender', () => ({
 
 // ─── Setup / teardown ─────────────────────────────────────────────────────────
 
-beforeAll(async () => { await startDb() })
+beforeAll(async () => {
+  await startDb()
+  await NotificationLog.init()
+})
 afterAll(async ()  => { await stopDb()  })
 afterEach(async () => {
   await clearDb()

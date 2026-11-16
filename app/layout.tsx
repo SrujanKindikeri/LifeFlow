@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import Script from 'next/script'
 import './globals.css'
 import { ToastProvider } from '@/components/ui/Toast'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
@@ -97,17 +98,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <head>
         {/*
-          Direct inline script: runs synchronously during HTML parsing before
-          first paint, setting data-theme / data-night-shift on <html>.
-          Placed directly in the layout (not via a wrapper component) so React
-          does not see a <script> element rendered by a child component, which
-          is what triggers React 19's "Encountered a script tag" warning.
+          Inline theme initialisation script powered by next/script beforeInteractive:
+          Runs synchronously before React hydration, setting data-theme and data-night-shift
+          on <html>. Managed via Next.js <Script> with id="theme-init" to eliminate the
+          React 19 "Encountered a script tag while rendering React component" warning.
           suppressHydrationWarning on <html> handles the attribute mismatch.
-          See: node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md
         */}
-        <script
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
-          suppressHydrationWarning
         />
       </head>
       <body>

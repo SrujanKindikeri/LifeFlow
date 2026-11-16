@@ -374,7 +374,7 @@ describe('UserSession model — CRUD and multi-tab', () => {
           $set: { lastSeenAt: new Date(), status: 'active', ip: '10.0.0.1', ipSource: 'forwarded', browser: 'Chrome', browserVersion: '120', os: 'Windows', osVersion: '10/11', deviceCategory: 'desktop' },
           $setOnInsert: { publicId: user.publicId, sessionStartedAt: now },
         },
-        { upsert: true, new: true },
+        { upsert: true, returnDocument: 'after' },
       )
     }
 

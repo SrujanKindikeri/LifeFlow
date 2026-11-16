@@ -1,6 +1,6 @@
 'use client'
 
-import { motion, HTMLMotionProps } from 'framer-motion'
+import { motion, type HTMLMotionProps } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success'
@@ -132,3 +132,5 @@ export function GlassButton({
     </motion.button>
   )
 }
+
+export default GlassButton

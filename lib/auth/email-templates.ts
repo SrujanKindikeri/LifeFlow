@@ -3608,7 +3608,7 @@ export function buildNoteReminderEmail(opts: NoteReminderEmailOptions): {
   const subject   = `Note reminder: ${noteTitle}`
 
   const html = wrapHtml(`
-    ${buildNotificationIconHtml('🗒', 'AM' as const, '20px', { size: 72 })}
+    ${buildNotificationIconHtml('🗒', 'AM' as 'AM', '20px', { size: 72 })}
 
     <h2 style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
                font-size:20px;font-weight:700;color:#0f172a;">
@@ -3677,7 +3677,7 @@ export function buildProjectDeadlineEmail(opts: ProjectDeadlineEmailOptions): {
   const statusLabel = status === 'on_hold' ? 'On Hold' : 'Active'
 
   const html = wrapHtml(`
-    ${buildNotificationIconHtml('📋', 'AM' as const, '20px', { size: 72 })}
+    ${buildNotificationIconHtml('📋', 'AM' as 'AM', '20px', { size: 72 })}
 
     <h2 style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
                font-size:20px;font-weight:700;color:#0f172a;">
@@ -3760,7 +3760,7 @@ export function buildSubscriptionRenewalEmail(opts: SubscriptionRenewalEmailOpti
   const subject = `Subscription renews ${dayWord}: ${serviceName} — ${amountLabel}`
 
   const html = wrapHtml(`
-    ${buildNotificationIconHtml('🔄', 'AM' as const, '20px', { size: 72 })}
+    ${buildNotificationIconHtml('🔄', 'AM' as 'AM', '20px', { size: 72 })}
 
     <h2 style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
                font-size:20px;font-weight:700;color:#0f172a;">

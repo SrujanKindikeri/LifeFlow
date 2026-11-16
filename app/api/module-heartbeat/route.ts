@@ -44,6 +44,7 @@ import { connectDB }                 from '@/lib/db'
 import ActivityHeartbeat             from '@/models/ActivityHeartbeat'
 import type { ModuleName }           from '@/models/ModuleEvent'
 import { MODULE_NAMES }              from '@/models/ModuleEvent'
+import { upsertSessionFromHeartbeat } from '@/lib/session-tracking'
 import mongoose                      from 'mongoose'
 
 export const dynamic = 'force-dynamic'
@@ -62,25 +63,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── Parse body ────────────────────────────────────────────────────────────
-  let moduleName: string
+  let module: string
   let sessionId: string
   try {
     const body = await req.json()
-    moduleName = typeof body?.module    === 'string' ? body.module.trim()    : ''
-    sessionId  = typeof body?.sessionId === 'string' ? body.sessionId.trim() : ''
+    module    = typeof body?.module    === 'string' ? body.module.trim()    : ''
+    sessionId = typeof body?.sessionId === 'string' ? body.sessionId.trim() : ''
   } catch {
     return new NextResponse(null, { status: 204 })
   }
 
   // ── Validate ──────────────────────────────────────────────────────────────
-  if (!MODULE_NAMES.includes(moduleName as ModuleName)) {
+  if (!MODULE_NAMES.includes(module as ModuleName)) {
     return new NextResponse(null, { status: 204 })
   }
   if (!UUID_RE.test(sessionId)) {
     return new NextResponse(null, { status: 204 })
   }
 
-  // ── Upsert heartbeat ──────────────────────────────────────────────────────
+  // ── Upsert heartbeat & session telemetry ──────────────────────────────────
   try {
     await connectDB()
 
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { userId: new mongoose.Types.ObjectId(user.userId), sessionId },
       {
         $set: {
-          module: moduleName,
+          module,
           lastSeenAt: now,
         },
         $setOnInsert: {
@@ -100,6 +101,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       { upsert: true, returnDocument: 'after' },
     )
+
+    const sessionResult = await upsertSessionFromHeartbeat({
+      userId:   user.userId,
+      publicId: user.lifeFlowId,
+      sessionId,
+      module:   module as ModuleName,
+      req,
+    })
+
+    if (sessionResult.revoked) {
+      return new NextResponse(null, { status: 410 })
+    }
   } catch (err) {
     // Non-fatal — heartbeat failures must never surface to the user
     const { default: logger } = await import('@/lib/logger')

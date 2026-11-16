@@ -635,10 +635,25 @@ describe('12. Email verification is not broken by notification changes', () => {
   })
 
   it('getNotificationService works for verification emails (no crash)', async () => {
-    const { getNotificationService } = await import('@/lib/notifications')
-    const notifier = await getNotificationService()
-    // Just check it's callable
-    expect(typeof notifier.send).toBe('function')
+    const prevHost = process.env.SMTP_HOST
+    const prevUser = process.env.SMTP_USER
+    const prevPass = process.env.SMTP_PASSWORD
+    process.env.SMTP_HOST     = 'smtp.example.com'
+    process.env.SMTP_USER     = 'user@example.com'
+    process.env.SMTP_PASSWORD = 'password'
+    try {
+      const { getNotificationService, resetNotificationService } = await import('@/lib/notifications')
+      resetNotificationService()
+      const notifier = await getNotificationService()
+      // Just check it's callable
+      expect(typeof notifier.send).toBe('function')
+    } finally {
+      if (prevHost !== undefined) process.env.SMTP_HOST = prevHost; else delete process.env.SMTP_HOST
+      if (prevUser !== undefined) process.env.SMTP_USER = prevUser; else delete process.env.SMTP_USER
+      if (prevPass !== undefined) process.env.SMTP_PASSWORD = prevPass; else delete process.env.SMTP_PASSWORD
+      const { resetNotificationService } = await import('@/lib/notifications')
+      resetNotificationService()
+    }
   })
 })
 

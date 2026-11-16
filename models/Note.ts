@@ -11,7 +11,7 @@ export interface INote extends Document {
   pinned: boolean
   archived: boolean
   /** Optional project association */
-  projectId?: mongoose.Types.ObjectId
+  projectId?: mongoose.Types.ObjectId | string | null
   /**
    * Optional reminder datetime (UTC). When set, the notification scheduler
    * sends a reminder at this exact UTC instant (within the grace window).
