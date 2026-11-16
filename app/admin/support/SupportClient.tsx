@@ -20,12 +20,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Search, RefreshCw, Send, ArrowLeft, CheckCircle2,
-  XCircle, Clock, MessageCircle, AlertTriangle, User,
-  Wifi, WifiOff, Loader2, UserCheck, ChevronDown,
+  XCircle, MessageCircle,
+  Wifi, WifiOff, Loader2, UserCheck,
 } from 'lucide-react'
 import {
   AdminCard, SectionHeader, ErrorState, LoadingSpinner,
-  StatusBadge, EmptyState, Pagination,
+  EmptyState, Pagination,
 } from '@/components/admin/AdminCard'
 import { formatRelativeTime } from '@/lib/utils'
 import { HEARTBEAT_INTERVAL_MS } from '@/lib/support/presence'

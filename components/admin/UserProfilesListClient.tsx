@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, RefreshCw, User, ChevronRight, Activity } from 'lucide-react'
+import { Search, RefreshCw, ChevronRight, Activity } from 'lucide-react'
 import {
   AdminCard, SectionHeader, ErrorState, LoadingSpinner,
   EmptyState, Pagination, StatusBadge,

@@ -52,8 +52,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const limit = Math.min(200, Math.max(1, parseInt(sp.get('limit') ?? '100', 10)))
 
     const now = new Date()
-    const activeMs = HEARTBEAT_ACTIVE_MINUTES * 60 * 1000
-    const recentMs = HEARTBEAT_RECENT_MINUTES * 60 * 1000
 
     // Query sessions within the TTL window (lastSeenAt > 24h ago)
     // Exclude terminal states (revoked, logged_out) when filtering for active

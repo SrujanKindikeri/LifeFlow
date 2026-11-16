@@ -19,7 +19,7 @@ import { connectDB } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import User from '@/models/User'
 import { decryptTotpSecret, hashRecoveryCode } from '@/lib/auth/crypto'
-import { checkTotpAttemptLimit, checkRecoveryCodeLimit, getClientIp } from '@/lib/auth/rate-limit'
+import { checkTotpAttemptLimit, checkRecoveryCodeLimit } from '@/lib/auth/rate-limit'
 import logger from '@/lib/logger'
 import { resolveClientIp, isValidIp } from '@/lib/ip'
 import { parseUserAgent } from '@/lib/useragent'
@@ -34,8 +34,6 @@ const verify2faSchema = z.object({
 })
 
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req)
-
   try {
     // ── Validate the pending session ────────────────────────────────────────
     const session = await getSession()

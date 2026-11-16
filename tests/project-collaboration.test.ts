@@ -22,27 +22,25 @@
  * 15.  Existing private projects and personal notes/tasks remain private.
  */
 
-import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
+import { beforeAll, afterAll, beforeEach, describe, it, expect } from 'vitest'
 import mongoose from 'mongoose'
 import { startDb, stopDb, clearDb } from './helpers/db'
 import { createUser } from './helpers/factories'
 
 // ── Models ──────────────────────────────────────────────────────────────────
 import Project from '@/models/Project'
-import Task from '@/models/Task'
 import Note from '@/models/Note'
-import ProjectInvitation, { VALID_TRANSITIONS } from '@/models/ProjectInvitation'
+import ProjectInvitation from '@/models/ProjectInvitation'
 import ProjectMembership from '@/models/ProjectMembership'
 import ProjectMessage from '@/models/ProjectMessage'
 import Notification from '@/models/Notification'
-import Activity from '@/models/Activity'
 
 // ── Lib ────────────────────────────────────────────────────────────────────
 import { resolveProjectAccess } from '@/lib/projectPermissions'
 import { createNotificationForUser } from '@/lib/createNotification'
 import { generateVerificationToken } from '@/lib/auth/crypto'
 import { hashToken } from '@/lib/auth/crypto'
-import { checkRateLimit, checkInvitationSendLimit } from '@/lib/auth/rate-limit'
+import { checkInvitationSendLimit } from '@/lib/auth/rate-limit'
 import { buildProjectInvitationEmail } from '@/lib/auth/email-templates'
 
 // ─── Test lifecycle ───────────────────────────────────────────────────────────
@@ -79,7 +77,7 @@ async function createProject(userId: string, lifeFlowId: string, overrides: Part
   })
 }
 
-async function createOwnerMembership(projectId: mongoose.Types.ObjectId, userId: string, lifeFlowId: string) {
+async function _createOwnerMembership(projectId: mongoose.Types.ObjectId, userId: string, lifeFlowId: string) {
   return ProjectMembership.create({
     projectId,
     userId,
@@ -203,7 +201,7 @@ describe('Project Collaboration', () => {
   // ── 5. In-app notification created ───────────────────────────────────────
 
   it('5. Sending an invitation creates an in-app notification for the invitee', async () => {
-    const userA = await createUser({ name: 'User A', email: 'a@test.com' })
+    const _userA = await createUser({ name: 'User A', email: 'a@test.com' })
     const userB = await createUser({ name: 'User B', email: 'b@test.com' })
 
     const ok = await createNotificationForUser({
@@ -246,7 +244,7 @@ describe('Project Collaboration', () => {
     const userB = await createUser({ name: 'User B', email: 'b@test.com' })
     const project = await createProject(userA._id.toString(), userA.publicId, { collaborationEnabled: true })
 
-    const { invitation, token } = await sendInvitation(project._id, userA._id.toString(), userB._id.toString())
+    const { invitation: _invitation, token } = await sendInvitation(project._id, userA._id.toString(), userB._id.toString())
 
     // Simulate acceptance via token
     const tokenHash = hashToken(token)
@@ -360,7 +358,7 @@ describe('Project Collaboration', () => {
     })
 
     // User A sends a message
-    const msgA = await ProjectMessage.create({
+    const _msgA = await ProjectMessage.create({
       projectId:        project._id,
       senderId:         userA._id,
       senderName:       userA.name,
@@ -370,7 +368,7 @@ describe('Project Collaboration', () => {
     })
 
     // User B sends a message
-    const msgB = await ProjectMessage.create({
+    const _msgB = await ProjectMessage.create({
       projectId:        project._id,
       senderId:         userB._id,
       senderName:       userB.name,
@@ -414,7 +412,7 @@ describe('Project Collaboration', () => {
 
     // Attempting to read messages without membership would be denied at API level
     // Here we verify the membership check directly
-    const msgs = await ProjectMessage.find({ projectId: project._id }).lean()
+    const _msgs = await ProjectMessage.find({ projectId: project._id }).lean()
     // Messages exist but C must not access them — the API gate would block it
     // We verify C has no membership
     expect(membership).toBeNull()

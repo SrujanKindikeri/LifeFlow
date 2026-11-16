@@ -23,13 +23,13 @@
  *     pre-fills bill name and tax from the receipt.
  */
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Plus, Trash2, Users, ShoppingCart, SlidersHorizontal,
-  ChevronDown, ChevronUp, Check, X, Percent, Tag,
+  Plus, Trash2, Users, ShoppingCart,
+  Check, X, Percent, Tag,
   ReceiptText, ArrowLeft, Search, UserPlus, Scan,
-  PenLine, ArrowRight, Split,
+  ArrowRight,
 } from 'lucide-react'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { GlassButton } from '@/components/ui/GlassButton'
@@ -42,7 +42,7 @@ import { calculateBill } from '@/lib/billCalculator'
 import {
   type BillPerson, type BillItem, type CustomSplit,
   type GroupBillData, type SplitMode, type ChargeValueType,
-  CURRENCIES, currencySymbol, formatMoney, newItemId, newPersonId,
+  CURRENCIES, currencySymbol, newItemId, newPersonId,
 } from './types'
 import { getTodayString } from '@/lib/utils'
 import { BillScannerModal, type ScanResult } from './BillScannerModal'
@@ -98,7 +98,7 @@ interface GroupBillSplitterProps {
 export function GroupBillSplitter({
   initialData, onSave, onCancel, saving = false, startWithScan = false,
 }: GroupBillSplitterProps) {
-  const { error: toastError, success: toastSuccess, warning: toastWarning } = useToast()
+  const { error: toastError, success: toastSuccess } = useToast()
 
   // ── Bill state ─────────────────────────────────────────────────────────────
   const [name,     setName]     = useState(initialData?.name ?? '')
@@ -110,7 +110,7 @@ export function GroupBillSplitter({
   )
   const [items,       setItems]       = useState<BillItem[]>(initialData?.items ?? [])
   const [splitMode,   setSplitMode]   = useState<SplitMode>(initialData?.splitMode ?? 'item')
-  const [customSplits, setCustomSplits] = useState<CustomSplit[]>(initialData?.customSplits ?? [])
+  const [customSplits] = useState<CustomSplit[]>(initialData?.customSplits ?? [])
 
   // Per-item splits (assignment + split method)
   const [itemSplits, setItemSplits] = useState<Record<string, ItemSplit>>({})
@@ -455,7 +455,7 @@ export function GroupBillSplitter({
               {/* Items list */}
               <div className="flex flex-col gap-2 mb-3">
                 <AnimatePresence>
-                  {items.map((item, idx) => (
+                  {items.map((item) => (
                     <motion.div
                       key={item.id}
                       initial={{ opacity: 0, height: 0 }}
@@ -600,7 +600,7 @@ export function GroupBillSplitter({
 function StepBar({ steps, current, onGo }: { steps: typeof STEPS; current: Step; onGo: (s: Step) => void }) {
   return (
     <div className="flex items-center gap-0 overflow-x-auto pb-1">
-      {steps.map((s, idx) => {
+      {steps.map((s) => {
         const curIdx = STEP_ORDER.indexOf(current)
         const isActive = s.key === current
         const isDone   = STEP_ORDER.indexOf(s.key) < curIdx
@@ -980,7 +980,7 @@ function SplitDetail({ item, people, sym, split, onSplitChange }: {
 // SUMMARY STEP
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function SummaryStep({ name, date, currency, sym, people, items, calcResult, saving, onSave }: {
+function SummaryStep({ name, date, currency, sym, people: _people, items, calcResult, saving, onSave }: {
   name: string; date: string; currency: string; sym: string
   people: BillPerson[]; items: BillItem[]
   calcResult: ReturnType<typeof calculateBill> | null

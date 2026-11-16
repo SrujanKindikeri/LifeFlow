@@ -34,7 +34,7 @@
  * sync path — this is only a progressive enhancement, not a dependency.
  */
 
-/* global self, clients, caches */
+/* global self, caches */
 
 // ─── Cache versioning ─────────────────────────────────────────────────────────
 

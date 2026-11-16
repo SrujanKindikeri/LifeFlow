@@ -277,7 +277,7 @@ describe('4. Admin can find and assign the ticket', () => {
     const user  = await createUser()
     const admin = await createAdmin()
     const t1 = await createTicket(user._id, user.publicId)
-    const t2 = await createTicket(user._id, user.publicId)
+    const _t2 = await createTicket(user._id, user.publicId)
 
     await SupportTicket.updateOne({ _id: t1._id }, { $set: { assignedTo: admin._id.toString() } })
 
@@ -388,8 +388,8 @@ describe('7. Reconnection: missed messages loaded without duplicates', () => {
     const ticket = await createTicket(user._id, user.publicId)
 
     const m1 = await sendMessage(ticket._id, user._id.toString(), user.name, 'user', 'Before reconnect')
-    const m2 = await sendMessage(ticket._id, user._id.toString(), user.name, 'user', 'Sent while offline')
-    const m3 = await sendMessage(ticket._id, user._id.toString(), user.name, 'user', 'Also sent while offline')
+    const _m2 = await sendMessage(ticket._id, user._id.toString(), user.name, 'user', 'Sent while offline')
+    const _m3 = await sendMessage(ticket._id, user._id.toString(), user.name, 'user', 'Also sent while offline')
 
     // Client has m1, reconnects with after=m1._id
     const missed = await SupportMessage.find({
@@ -688,7 +688,7 @@ describe('12. Closed tickets are read-only for users', () => {
 
   it('PASS — messages can still be READ on a closed ticket (history preserved)', async () => {
     const user   = await createUser()
-    const admin  = await createAdmin()
+    const _admin = await createAdmin()
     const ticket = await createTicket(user._id, user.publicId)
 
     await sendMessage(ticket._id, user._id.toString(), user.name, 'user', 'Pre-close message')

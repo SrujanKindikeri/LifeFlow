@@ -11,10 +11,6 @@ interface AdminRow {
   isActive: boolean; lastLoginAt: string | null; createdAt: string
 }
 
-const ROLE_LABELS: Record<AdminRole, string> = {
-  super_admin: 'Super Admin', admin: 'Admin', support: 'Support', auditor: 'Auditor'
-}
-
 export function AdminManagementClient({ currentAdminId, adminRole }: { currentAdminId: string; adminRole: AdminRole }) {
   const [admins, setAdmins]   = useState<AdminRow[]>([])
   const [loading, setLoading] = useState(true)

@@ -69,7 +69,6 @@ export function DailyIntelligenceCard() {
 
     try {
       const url = force ? '/api/daily-intelligence' : '/api/daily-intelligence?type=morning'
-      const method = force ? 'POST' : 'GET'
       const opts: RequestInit = force
         ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'morning' }) }
         : { method: 'GET' }

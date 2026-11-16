@@ -117,7 +117,7 @@ afterEach(async () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const APP_URL = 'http://localhost:3000'
+const _APP_URL = 'http://localhost:3000'
 
 /** Create a fully-enabled user in a given timezone. */
 async function mkUser(opts: {
@@ -230,7 +230,7 @@ describe('Tasks', () => {
         status:      'pending',
         contentPreview: 'duplicate',
       })
-    } catch (e) {
+    } catch (_e) {
       threw = true
     }
     expect(threw).toBe(true) // duplicate blocked

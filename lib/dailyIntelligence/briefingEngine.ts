@@ -41,9 +41,6 @@ import {
   detectOverdue,
   getLocalDateAndHour,
   type OverdueTask,
-  type OverdueProject,
-  type OverdueGoal,
-  type OverdueMoneyRecord,
 } from './overdueDetector'
 import { detectConflicts, type ConflictTask } from './conflictDetector'
 import { buildFinancialAlerts } from './financialIntelligence'
@@ -172,7 +169,6 @@ export async function generateBriefing(
   await connectDB()
 
   const { today, localHour, localTime } = getLocalDateAndHour(now, timezone)
-  const tomorrow = addDays(today, 1)
   const in7Days  = addDays(today, 7)
   const month    = currentMonth(today)
 

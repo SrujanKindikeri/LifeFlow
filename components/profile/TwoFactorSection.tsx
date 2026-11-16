@@ -110,7 +110,7 @@ export function TwoFactorSection({ emailOtpEnabled, onStatusChange }: TwoFactorS
   const [otpError,     setOtpError]     = useState<string | null>(null)
   const [maskedEmail,  setMaskedEmail]  = useState<string>('')
   const [otpExpiresAt, setOtpExpiresAt] = useState<string | null>(null)
-  const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null)
+  const [_attemptsLeft, setAttemptsLeft] = useState<number | null>(null)
 
   // Resend cooldown (60 s, tracked client-side for UX — server enforces independently)
   const [resending,       setResending]       = useState(false)

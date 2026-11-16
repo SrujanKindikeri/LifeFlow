@@ -33,9 +33,9 @@ import {
 } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Camera, Upload, X, Check, AlertTriangle,
+  Camera, Upload, Check, AlertTriangle,
   Loader2, RefreshCw, Trash2, Plus, Info,
-  ShieldCheck, Store, Receipt, Clock,
+  ShieldCheck, Store, Receipt,
 } from 'lucide-react'
 import { Modal }       from '@/components/ui/Modal'
 import { GlassButton } from '@/components/ui/GlassButton'

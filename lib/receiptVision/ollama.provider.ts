@@ -407,7 +407,7 @@ export class OllamaReceiptProvider implements ReceiptVisionProvider {
 
   async extractReceipt(
     imageBase64: string,
-    mimeType:    string,
+    _mimeType:   string,
   ): Promise<ReceiptExtraction> {
     const baseUrl = getOllamaBaseUrl()
     const model   = getOllamaModel()
@@ -420,9 +420,6 @@ export class OllamaReceiptProvider implements ReceiptVisionProvider {
         '(e.g. http://localhost:11434 for native, http://host.docker.internal:11434 inside Docker).',
       )
     }
-
-    // Normalize MIME for Ollama (it prefers image/jpeg over image/jpg)
-    const normalizedMime = mimeType === 'image/jpg' ? 'image/jpeg' : mimeType
 
     const controller = new AbortController()
     const timer      = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS)

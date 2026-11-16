@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, CheckCircle2, Circle, StickyNote, Clock,
-  Target, Users, MessageSquare, Activity as ActivityIcon,
+  Target, Users, MessageSquare,
 } from 'lucide-react'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { GlassButton } from '@/components/ui/GlassButton'

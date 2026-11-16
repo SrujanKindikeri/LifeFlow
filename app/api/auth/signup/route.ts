@@ -58,7 +58,7 @@ import User, { generatePublicId } from '@/models/User'
 import { generateVerificationToken } from '@/lib/auth/crypto'
 import { buildVerificationEmail } from '@/lib/auth/email-templates'
 import { getNotificationService } from '@/lib/notifications'
-import RegistrationCounter, {
+import {
   incrementCounter,
   decrementCounter,
 } from '@/models/RegistrationCounter'

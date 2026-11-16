@@ -177,7 +177,7 @@ async function createDailyHabit(
 }
 
 /** Return a fake email notifier that captures sent messages and optionally fails. */
-function fakeEmailProvider(fail = false) {
+function _fakeEmailProvider(fail = false) {
   const sent: Array<{ to: string; subject: string }> = []
   const provider = {
     send: vi.fn(async (msg: { to: string; subject: string }) => {

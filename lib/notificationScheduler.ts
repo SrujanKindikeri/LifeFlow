@@ -2386,7 +2386,6 @@ async function processNoteReminders(
 
   if (notes.length === 0) return { sent: 0 }
 
-  const today = dateInTimezone(now, tz)
   let sentCount = 0
 
   for (const note of notes) {

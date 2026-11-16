@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Mail, Check, X, Clock, FolderOpen, User,
+  Mail, Check, X, Clock, FolderOpen,
   ChevronRight, RefreshCw, AlertCircle,
 } from 'lucide-react'
 import { GlassCard } from '@/components/ui/GlassCard'

@@ -24,7 +24,7 @@
  *   ✓ formatRelativeTime NaN guard
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { startDb, stopDb, clearDb } from './helpers/db'
 import mongoose from 'mongoose'
 

@@ -23,7 +23,6 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin, handleAdminAuthError } from '@/lib/admin-auth'
-import { connectDB } from '@/lib/db'
 import UserSession from '@/models/UserSession'
 import { resolveSessionStatus } from '@/lib/session-tracking'
 import User from '@/models/User'

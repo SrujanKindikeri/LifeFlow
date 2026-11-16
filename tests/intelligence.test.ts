@@ -565,7 +565,7 @@ describe('SecurityEvent — login and security recording', () => {
 
   it('recordSecurityEvent is non-fatal — errors are swallowed, not propagated', async () => {
     // Temporarily disconnect DB to simulate outage
-    const origFindOne = SecurityEvent.create.bind(SecurityEvent)
+    const _origFindOne = SecurityEvent.create.bind(SecurityEvent)
     vi.spyOn(SecurityEvent, 'create').mockRejectedValueOnce(new Error('DB outage simulated'))
 
     // Should NOT throw even though DB call fails
@@ -670,7 +670,7 @@ describe('ModuleEvent — section visits and action events', () => {
   })
 
   it('error message sanitization removes secrets from error messages', async () => {
-    const user = await makeUser()
+    const _user = await makeUser()
 
     // Import sanitizeErrorMessage indirectly by directly creating a ModuleEvent
     // with a raw string that contains a secret — the schema's maxlength of 200
@@ -681,7 +681,7 @@ describe('ModuleEvent — section visits and action events', () => {
 
     // The SCRUB_PATTERNS in lib/moduleEvents.ts redact connection strings.
     // We verify this by calling the sanitizer result directly:
-    const { categoriseError } = await import('@/lib/moduleEvents')
+    const { categoriseError: _categoriseError } = await import('@/lib/moduleEvents')
 
     // Manually apply the same scrubbing the module uses
     const SCRUB_PATTERNS = [

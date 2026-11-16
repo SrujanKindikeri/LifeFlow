@@ -10,7 +10,6 @@ import { requireRole, handleAdminAuthError,
          writeAuditLog }                               from '@/lib/admin-auth'
 import { connectDB }                                   from '@/lib/db'
 import AdminUser                                       from '@/models/AdminUser'
-import type { AdminRole }                              from '@/models/AdminUser'
 import { z }                                           from 'zod'
 
 export const dynamic = 'force-dynamic'

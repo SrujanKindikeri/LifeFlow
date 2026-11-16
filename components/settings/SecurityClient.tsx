@@ -29,7 +29,7 @@ type TwoFaPanel =
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function SecurityClient() {
-  const { success, error, info, warning } = useToast()
+  const { success, error, warning } = useToast()
 
   const [userData, setUserData]           = useState<UserSecurity | null>(null)
   const [loadingUser, setLoadingUser]     = useState(true)

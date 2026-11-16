@@ -17,11 +17,10 @@ import ProjectInvitation from '@/models/ProjectInvitation'
 import ProjectMembership from '@/models/ProjectMembership'
 import Project from '@/models/Project'
 import Activity from '@/models/Activity'
-import User from '@/models/User'
 import { hashToken } from '@/lib/auth/crypto'
 import { createNotificationForUser } from '@/lib/createNotification'
 import {
-  unauthorized, forbidden, notFound, badRequest, conflict,
+  unauthorized, forbidden, notFound, badRequest,
   apiSuccess, handleRouteError,
 } from '@/lib/api-response'
 import { z } from 'zod'
@@ -175,9 +174,6 @@ export async function POST(req: NextRequest) {
       if (code !== 11000) throw createErr
       logger.info('[invitations-respond] Duplicate membership on accept (race)', { userId, projectId: invitation.projectId.toString() })
     }
-
-    // Fetch invitee details for notifications
-    const inviteeUser = await User.findById(userId).select('name avatar').lean<{ name: string; avatar?: string } | null>()
 
     // Notify project owner
     await createNotificationForUser({

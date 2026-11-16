@@ -19,7 +19,6 @@ export const dynamic = 'force-dynamic'
 
 const VALID_STATUSES  = new Set(['open','waiting_for_admin','waiting_for_user','resolved','closed'])
 const VALID_SORTS     = new Set(['lastMessage','created','priority'])
-const PRIORITY_ORDER  = { urgent: 0, high: 1, normal: 2, low: 3 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {

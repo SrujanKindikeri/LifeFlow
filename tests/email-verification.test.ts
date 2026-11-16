@@ -1120,7 +1120,7 @@ describe('22. Verify-email API route contract', () => {
 
   it('route clears emailVerificationTokenHash on success (prevents reuse)', () => {
     // The field must be set to null after successful verification
-    const afterVerify = routeSrc.slice(routeSrc.indexOf('Mark as verified'))
+    const _afterVerify = routeSrc.slice(routeSrc.indexOf('Mark as verified'))
     expect(routeSrc).toContain('emailVerificationTokenHash     = null')
   })
 

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  User, Mail, Shield, Calendar, Clock, Key,
+  Mail, Key,
   LogOut, Save, Eye, EyeOff, CheckCircle, AlertCircle,
   Edit3, X,
 } from 'lucide-react'

@@ -8,9 +8,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  User, Monitor, Smartphone, Tablet, Globe, Clock, CheckCircle, XCircle,
-  RefreshCw, ArrowLeft, Layers, Shield, AlertTriangle, Activity,
-  TrendingUp, Search, HelpCircle,
+  Monitor, Smartphone, Tablet, Globe, CheckCircle, XCircle,
+  RefreshCw, Layers, Shield,
+  HelpCircle,
 } from 'lucide-react'
 import {
   AdminCard, SectionHeader, StatCard, ErrorState, LoadingSpinner,

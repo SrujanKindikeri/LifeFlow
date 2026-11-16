@@ -95,7 +95,7 @@ async function checkMaintenanceMode(): Promise<boolean> {
 
 // ── Admin session helper ──────────────────────────────────────────────────────
 
-function getAdminSessionOptions(req: NextRequest, response: NextResponse) {
+function getAdminSessionOptions(_req: NextRequest, _response: NextResponse) {
   return {
     password:   process.env.ADMIN_SESSION_SECRET || process.env.SESSION_SECRET || '',
     cookieName: 'lifeflow_admin_session',

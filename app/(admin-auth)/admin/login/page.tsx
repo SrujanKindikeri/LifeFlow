@@ -29,8 +29,7 @@ export default function AdminLoginPage() {
         setError(json.error?.message ?? 'Authentication failed.')
         return
       }
-      // Hard-navigate so the new admin session cookie is picked up immediately
-      window.location.assign('/admin/dashboard')
+      router.push('/admin/dashboard')
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {

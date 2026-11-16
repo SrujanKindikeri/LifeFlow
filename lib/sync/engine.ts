@@ -38,12 +38,11 @@ import {
   unlockOperations,
 } from '@/lib/sync/outbox'
 import { checkAccountScope } from '@/lib/sync/account-guard'
-import { autoResolve, recordConflict } from '@/lib/sync/conflict'
+import { autoResolve } from '@/lib/sync/conflict'
 import { isLocalId, nowIso } from '@/lib/sync/ids'
 import type {
   SyncEntityType,
   SyncState,
-  SyncPhase,
   SyncMutation,
   SyncMutationResult,
   SyncPushResponse,

@@ -25,7 +25,7 @@ import User from '@/models/User'
 import UserSession, { HEARTBEAT_ACTIVE_MINUTES, HEARTBEAT_RECENT_MINUTES } from '@/models/UserSession'
 import { resolveSessionStatus } from '@/lib/session-tracking'
 import SecurityEvent from '@/models/SecurityEvent'
-import ModuleEvent, { MODULE_NAMES } from '@/models/ModuleEvent'
+import ModuleEvent from '@/models/ModuleEvent'
 import AnalyticsEvent from '@/models/AnalyticsEvent'
 import mongoose from 'mongoose'
 

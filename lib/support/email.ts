@@ -26,7 +26,7 @@
 
 import { getNotificationService } from '@/lib/notifications/index'
 import logger from '@/lib/logger'
-import type { ISupportTicket, TicketStatus } from '@/models/SupportTicket'
+import type { TicketStatus } from '@/models/SupportTicket'
 
 /** The support team's inbox — configurable per environment. */
 function getSupportEmail(): string {

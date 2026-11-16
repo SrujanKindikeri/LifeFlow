@@ -698,7 +698,6 @@ function extractItemTextOnly(row: ZonedRow): RawItem | null {
 
   const lineTotal  = priceTokens[priceTokens.length - 1].value
   const totalConf: FieldConfidence = priceTokens[priceTokens.length - 1].isDecimal ? 'high' : 'medium'
-  const totalEnd   = priceTokens[priceTokens.length - 1].end
 
   let unitPrice: number | null = null
   let priceConf: FieldConfidence = 'low'
@@ -712,7 +711,6 @@ function extractItemTextOnly(row: ZonedRow): RawItem | null {
   const qtyCandidate    = smallInts.filter((t) => t.end <= firstPriceStart).pop()
   const qty    = qtyCandidate?.value ?? 1
   const qtyConf: FieldConfidence = qtyCandidate ? 'high' : 'low'
-  const qtyEnd = qtyCandidate?.end ?? 0
 
   // Name = everything between the end of qty token and the start of first price token,
   // with all remaining number tokens stripped.

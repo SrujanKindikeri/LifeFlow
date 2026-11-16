@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { AdminCard, SectionHeader, ErrorState, LoadingSpinner, StatCard } from '@/components/admin/AdminCard'
-import { Users, Bell, StickyNote, CheckSquare, Flame, FolderOpen, Wallet, CreditCard } from 'lucide-react'
+import { Users, StickyNote, CheckSquare, Flame, FolderOpen, Wallet, CreditCard } from 'lucide-react'
 
 interface AllFeatures {
   notes: { total: number; pinned: number; archived: number }

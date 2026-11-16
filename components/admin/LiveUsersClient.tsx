@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import {
   AdminCard, SectionHeader, StatCard, ErrorState, LoadingSpinner,
-  StatusBadge, EmptyState,
+  EmptyState,
 } from '@/components/admin/AdminCard'
 import { formatRelativeTime } from '@/lib/utils'
 

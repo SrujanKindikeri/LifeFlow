@@ -93,7 +93,6 @@ export function TimeNotificationIcon({
   // In SVG: East=0°, CW positive
   const startDeg = 120
   const endDeg   =  60
-  const sweepDeg = 300
 
   function polar(deg: number, r: number) {
     const rad = (deg * Math.PI) / 180

@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSearchParams } from 'next/navigation'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { motion } from 'framer-motion'
 import { KeyRound, Eye, EyeOff, ArrowLeft, AlertTriangle } from 'lucide-react'
@@ -77,13 +77,13 @@ function ResetPasswordContent() {
     register,
     handleSubmit,
     formState: { errors },
-    watch,
+    control,
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
   })
 
   // Keep live value for the requirements checklist
-  const watchedPassword = watch('password', '')
+  const watchedPassword = useWatch({ control, name: 'password', defaultValue: '' })
 
   async function onSubmit(data: FormValues) {
     if (loading || !rawToken) return

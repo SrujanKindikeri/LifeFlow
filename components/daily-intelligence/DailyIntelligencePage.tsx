@@ -133,7 +133,6 @@ export function DailyIntelligencePage({ userName }: Props) {
     )
   }
 
-  const todayStr = briefing?.forDate ?? new Date().toISOString().split('T')[0]
   const overdueCount  = content?.overdueTasks.length ?? 0
   const conflictCount = content?.conflicts.length ?? 0
   const finAlertCount = content?.financialAlerts.length ?? 0

@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Users, Monitor, Activity, TrendingUp, Shield, RefreshCw,
-  Smartphone, Globe, Tablet, Info, AlertTriangle, HelpCircle,
+  Users, Monitor, Activity, TrendingUp, RefreshCw,
+  Info, AlertTriangle,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,

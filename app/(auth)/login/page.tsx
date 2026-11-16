@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
@@ -54,13 +54,20 @@ function LoginPageContent() {
   const [emailOtpLoading, setEmailOtpLoading] = useState(false)
   const [emailOtpError,   setEmailOtpError]   = useState<string | null>(null)
   const [emailMasked,     setEmailMasked]     = useState('')
-  const [emailOtpExpiresAt, setEmailOtpExpiresAt] = useState<string | null>(null)
   const [emailResending,  setEmailResending]  = useState(false)
   const [emailResendCooldown, setEmailResendCooldown] = useState(0)
   const emailResendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const emailOtpTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Countdown for email OTP
   const [emailOtpCountdown, setEmailOtpCountdown] = useState(0)
+
+  useEffect(() => {
+    return () => {
+      if (emailResendTimerRef.current) clearInterval(emailResendTimerRef.current)
+      if (emailOtpTimerRef.current)    clearInterval(emailOtpTimerRef.current)
+    }
+  }, [])
 
   function startEmailResendCooldown() {
     setEmailResendCooldown(60)
@@ -74,15 +81,16 @@ function LoginPageContent() {
   }
 
   function startEmailOtpCountdown(expiresAt: string) {
-    setEmailOtpExpiresAt(expiresAt)
+    if (emailOtpTimerRef.current) clearInterval(emailOtpTimerRef.current)
     function tick() {
       const diff = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
       setEmailOtpCountdown(diff)
+      if (diff <= 0 && emailOtpTimerRef.current) {
+        clearInterval(emailOtpTimerRef.current)
+      }
     }
     tick()
-    const id = setInterval(tick, 1000)
-    // store for cleanup — attach to ref re-used below
-    emailResendTimerRef.current = id
+    emailOtpTimerRef.current = setInterval(tick, 1000)
   }
 
   function formatCountdown(secs: number) {
@@ -92,7 +100,7 @@ function LoginPageContent() {
   // Resend state (for email verification resend)
   const [resending, setResending]         = useState(false)
 
-  const { register, handleSubmit, formState: { errors }, getValues } = useForm<LoginInput>({
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
   })
 
@@ -148,9 +156,8 @@ function LoginPageContent() {
           setEmailOtpError(null)
           if (json.maskedEmail) {
             // Start a 10-minute countdown (600 s) if expiresAt not provided
-            startEmailOtpCountdown(
-              json.otpExpiresAt ?? new Date(Date.now() + 10 * 60 * 1000).toISOString()
-            )
+            const fallbackExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+            startEmailOtpCountdown(json.otpExpiresAt ?? fallbackExpiresAt)
           }
           startEmailResendCooldown()
           setStep('2fa-email')
@@ -173,6 +180,10 @@ function LoginPageContent() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    void handleSubmit(onSubmit)(e)
   }
 
   // ── Step 2: 2FA TOTP ───────────────────────────────────────────────────────
@@ -209,10 +220,7 @@ function LoginPageContent() {
       }
 
       success('Welcome back!')
-      // Full browser navigation for the same reason as the credentials step:
-      // guarantees the session cookie is flushed to the browser before the
-      // /app/dashboard request is made.
-      window.location.assign('/app/dashboard')
+      router.push('/app/dashboard')
     } catch {
       error('Something went wrong. Please try again.')
     } finally {
@@ -294,7 +302,7 @@ function LoginPageContent() {
       }
 
       success('Welcome back!')
-      window.location.assign('/app/dashboard')
+      router.push('/app/dashboard')
     } catch {
       setEmailOtpError('Something went wrong. Please try again.')
     } finally {
@@ -325,8 +333,10 @@ function LoginPageContent() {
 
       setEmailOtpCode('')
       if (json.otpExpiresAt) {
-        if (emailResendTimerRef.current) clearInterval(emailResendTimerRef.current)
         startEmailOtpCountdown(json.otpExpiresAt)
+      } else {
+        const fallbackExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        startEmailOtpCountdown(fallbackExpiresAt)
       }
       startEmailResendCooldown()
     } catch {
@@ -362,7 +372,7 @@ function LoginPageContent() {
       }
 
       success('Your account has been restored. Welcome back!')
-      window.location.assign('/app/dashboard')
+      router.push('/app/dashboard')
     } catch {
       error('Something went wrong. Please try again.')
     } finally {
@@ -419,7 +429,7 @@ function LoginPageContent() {
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+              <form onSubmit={handleFormSubmit} className="space-y-4" noValidate>
                 <GlassInput
                   label="Email"
                   type="email"

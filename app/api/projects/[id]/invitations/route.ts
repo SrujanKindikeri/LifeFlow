@@ -6,7 +6,6 @@ import { NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { connectDB } from '@/lib/db'
 import mongoose from 'mongoose'
-import Project from '@/models/Project'
 import ProjectInvitation from '@/models/ProjectInvitation'
 import ProjectMembership from '@/models/ProjectMembership'
 import Activity from '@/models/Activity'
@@ -103,7 +102,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { userId, lifeFlowId, name: inviterName, email: inviterEmail } = await requireAuth()
+    const { userId, lifeFlowId, name: inviterName } = await requireAuth()
     const { id } = await params
     const ip = getClientIp(req)
 

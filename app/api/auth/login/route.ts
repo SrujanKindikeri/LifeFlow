@@ -13,9 +13,6 @@ import { resolveClientIp, isValidIp } from '@/lib/ip'
 import { parseUserAgent } from '@/lib/useragent'
 import { recordSecurityEvent } from '@/models/SecurityEvent'
 
-// Max age for the 2FA pending window (5 minutes)
-const TWO_FA_PENDING_TTL_MS = 5 * 60 * 1000
-
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req)
   // Resolve IP and device info once for security event recording (non-fatal)

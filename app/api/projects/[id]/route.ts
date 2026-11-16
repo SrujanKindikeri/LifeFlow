@@ -6,7 +6,7 @@ import Task from '@/models/Task'
 import Note from '@/models/Note'
 import Goal from '@/models/Goal'
 import Activity from '@/models/Activity'
-import { resolveProjectAccess, isMember, isOwner } from '@/lib/projectPermissions'
+import { resolveProjectAccess, isMember } from '@/lib/projectPermissions'
 import { z } from 'zod'
 
 const updateSchema = z.object({

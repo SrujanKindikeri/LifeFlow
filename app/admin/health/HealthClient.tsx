@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Database, Server, Cpu, HardDrive, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { RefreshCw, Database, Cpu, HardDrive, Clock, CheckCircle, XCircle } from 'lucide-react'
 import { AdminCard, SectionHeader, ErrorState, LoadingSpinner, StatCard, StatusBadge } from '@/components/admin/AdminCard'
 import { formatRelativeTime } from '@/lib/utils'
 

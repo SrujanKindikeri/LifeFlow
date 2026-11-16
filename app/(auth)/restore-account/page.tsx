@@ -483,7 +483,7 @@ function useCountdown(targetIso: string | null) {
 function RestoreAccountContent() {
   const router        = useRouter()
   const searchParams  = useSearchParams()
-  const { error: toastError, success: toastSuccess } = useToast()
+  const { success: toastSuccess } = useToast()
 
   const rawToken = searchParams.get('token') ?? ''
 
@@ -714,7 +714,7 @@ function RestoreAccountContent() {
       setState({ phase: 'success' })
       toastSuccess('Your LifeFlow account has been restored successfully.')
       setTimeout(() => {
-        window.location.assign('/app/dashboard')
+        router.push('/app/dashboard')
       }, 2500)
     } catch {
       setOtpError('Something went wrong. Please try again.')

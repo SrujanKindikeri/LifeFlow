@@ -39,7 +39,6 @@ import User from '@/models/User'
 import Note from '@/models/Note'
 import Task from '@/models/Task'
 import Expense from '@/models/Expense'
-import GroupBill from '@/models/GroupBill'
 import Subscription from '@/models/Subscription'
 import SavingsGoal from '@/models/SavingsGoal'
 import MoneyRecord from '@/models/MoneyRecord'
@@ -334,7 +333,7 @@ describe('10. Migration is idempotent', () => {
 
     // Simulate migration running again
     const db = mongoose.connection.db!
-    const lfMap = new Map([[user._id.toString(), user.publicId]])
+    const _lfMap = new Map([[user._id.toString(), user.publicId]])
     const col = db.collection('notes')
     const docs = await col.find({ $or: [{ lifeFlowId: { $exists: false } }, { lifeFlowId: null }] }).toArray()
     // Already has lifeFlowId, so docs should be empty

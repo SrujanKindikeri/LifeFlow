@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectDB }                 from '@/lib/db'
 import { requireAuth }               from '@/lib/session'
 import {
-  handleRouteError, apiSuccess, badRequest, apiError,
+  handleRouteError, apiSuccess, badRequest,
 } from '@/lib/api-response'
 import { checkTicketCreateLimit, getClientIp } from '@/lib/auth/rate-limit'
 import { sendNewTicketEmailToSupport }          from '@/lib/support/email'

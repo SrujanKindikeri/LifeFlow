@@ -5,14 +5,14 @@
  * Fetches from GET /api/admin/sessions with full pagination and filter support.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Monitor, Smartphone, Tablet, HelpCircle, Search, RefreshCw,
-  Globe, Clock, ShieldOff, Layers, Filter, AlertTriangle,
+  Globe, ShieldOff, Layers, AlertTriangle,
 } from 'lucide-react'
 import {
   AdminCard, SectionHeader, ErrorState, LoadingSpinner,
-  EmptyState, Pagination, ConfirmDialog, StatusBadge,
+  EmptyState, Pagination,
 } from '@/components/admin/AdminCard'
 import { formatRelativeTime } from '@/lib/utils'
 
@@ -150,7 +150,6 @@ export function SessionsClient() {
   const [revokeTarget, setRevokeTarget] = useState<Session | null>(null)
   const [revoking, setRevoking] = useState(false)
   const [revokeReason, setRevokeReason] = useState('')
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const buildUrl = useCallback(() => {
     const p = new URLSearchParams()

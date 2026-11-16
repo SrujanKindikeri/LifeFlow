@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Globe, RefreshCw, Search, AlertTriangle, Shield } from 'lucide-react'
+import { Globe, RefreshCw, AlertTriangle, Shield } from 'lucide-react'
 import {
   AdminCard, SectionHeader, ErrorState, LoadingSpinner, EmptyState, Pagination,
 } from '@/components/admin/AdminCard'

@@ -85,7 +85,7 @@ async function seedSetting(key: string, value: string) {
   )
 }
 
-async function getSettingValue(key: string): Promise<string | null> {
+async function _getSettingValue(key: string): Promise<string | null> {
   const AppSetting = (await import('@/models/AppSetting')).default
   const doc = await AppSetting.findOne({ key }).lean<{ value: string }>()
   return doc?.value ?? null
